@@ -48,24 +48,24 @@ CF‑LIBS is intended as a *foundation* for serious research and engineering wor
 CF‑LIBS (Computational Framework for Laser‑Induced Breakdown Spectroscopy) is a **plasma‑physics‑grounded** toolkit for:
 
 - **Forward modeling**: Given plasma parameters  
-  \[
+  $$
   \Theta = \{T_e,\, T_g,\, n_e,\, \mathbf{n}_\text{species},\, p,\, t,\, \text{geometry},\, \text{instrument}\},
-  \]  
+  $$  
   compute the emergent spectrum
-  \[
+  $$
   I_\lambda(\lambda;\Theta)
-  \]
+  $$
   over a specified wavelength grid.
 
-- **Inverse modeling (calibration‑free LIBS)**: Given measured spectra \( I_\lambda^\text{meas}(\lambda) \), infer:
-  - Plasma temperature(s): \( T_e,\, T_g \)
-  - Electron density: \( n_e \)
-  - Species number densities or concentrations: \( \mathbf{n}_\text{species} \)
+- **Inverse modeling (calibration‑free LIBS)**: Given measured spectra $I_\lambda^\text{meas}(\lambda)$, infer:
+  - Plasma temperature(s): $T_e,\, T_g$
+  - Electron density: $n_e$
+  - Species number densities or concentrations: $\mathbf{n}_\text{species}$
   - Uncertainties on the inferred parameters.
 
 - **Diagnostics and feature extraction**:
-  - Stark broadening analysis for \( n_e \)
-  - Boltzmann plots for \( T_e \)
+  - Stark broadening analysis for $n_e$
+  - Boltzmann plots for $T_e$
   - Line ratio diagnostics
   - Synthetic spectrum generation for experimental design
 
@@ -82,109 +82,109 @@ Baseline assumptions for the *core* CF‑LIBS model:
 1. **Optically thin plasma** for initial implementation, with extension to partially optically thick conditions.
 2. **Local Thermodynamic Equilibrium (LTE)** or partial LTE for electron and excitation distributions.
 3. **Quasi‑neutrality**:
-   \[
+   $$
    n_e \approx \sum_j Z_j n_j^Z,
-   \]
-   where \( n_j^Z \) is the density of ion \( Z \) of species \( j \).
+   $$
+   where $n_j^Z$ is the density of ion $Z$ of species $j$.
 
-4. **Single‑temperature electron population** characterized by \( T_e \) (with possibility for separate heavy‑particle temperature \( T_g \) in later phases).
+4. **Single‑temperature electron population** characterized by $T_e$ (with possibility for separate heavy‑particle temperature $T_g$ in later phases).
 
 The plasma state vector for a single homogeneous zone is:
 
-\[
+$$
 \mathbf{X} = \left( T_e,\ T_g,\ n_e,\ \{n_{j,z}\},\ p,\ \mathbf{u},\ t \right).
-\]
+$$
 
 where:
-- \( n_{j,z} \) – number density of ionization stage \(z\) of element \( j \)
-- \( \mathbf{u} \) – flow velocity (for Doppler shifts in advanced modes)
-- \( t \) – time after laser pulse.
+- $n_{j,z}$ – number density of ionization stage $z$ of element $j$
+- $\mathbf{u}$ – flow velocity (for Doppler shifts in advanced modes)
+- $t$ – time after laser pulse.
 
 CF‑LIBS will be built to support **multi‑zone** models, i.e.,
 
-\[
+$$
 I_\lambda(\lambda) = \int_{\text{LOS}} \epsilon_\lambda(\lambda, \mathbf{r}) \, \mathrm{d}\ell,
-\]
+$$
 
-with discretization into zones \( k = 1, \dots, N_z \).
+with discretization into zones $k = 1, \dots, N_z$.
 
 ---
 
 ### Level Populations: Boltzmann & Saha
 
-For a given species \( j \), ionization stage \( z \), and level \( i \), the population density in LTE is:
+For a given species $j$, ionization stage $z$, and level $i$, the population density in LTE is:
 
 1. **Boltzmann distribution** for excitation within an ionization stage:
 
-\[
+$$
 \frac{n_{i,j,z}}{n_{j,z}} = \frac{g_{i,j,z}}{U_{j,z}(T_e)} 
 \exp\left( -\frac{E_{i,j,z}}{k_B T_e} \right),
-\]
+$$
 
 where:
-- \( n_{i,j,z} \) – population of level \( i \) of species \( j \), ionization stage \( z \)
-- \( g_{i,j,z} \) – statistical weight
-- \( E_{i,j,z} \) – excitation energy above the ground state
-- \( U_{j,z}(T_e) \) – partition function
-- \( k_B \) – Boltzmann constant.
+- $n_{i,j,z}$ – population of level $i$ of species $j$, ionization stage $z$
+- $g_{i,j,z}$ – statistical weight
+- $E_{i,j,z}$ – excitation energy above the ground state
+- $U_{j,z}(T_e)$ – partition function
+- $k_B$ – Boltzmann constant.
 
 2. **Saha equation** for ionization balance:
 
-\[
+$$
 \frac{n_{j,z+1}\, n_e}{n_{j,z}} 
 = \left( \frac{2 \pi m_e k_B T_e}{h^2} \right)^{3/2}
 \frac{2 U_{j,z+1}(T_e)}{U_{j,z}(T_e)}
 \exp \left( -\frac{\chi_{j,z}}{k_B T_e} \right),
-\]
+$$
 
 where:
-- \( \chi_{j,z} \) – ionization energy from stage \( z \to z+1 \)
-- \( m_e \) – electron mass
-- \( h \) – Planck constant.
+- $\chi_{j,z}$ – ionization energy from stage $z \to z+1$
+- $m_e$ – electron mass
+- $h$ – Planck constant.
 
-For a given total elemental abundance \( n_j = \sum_z n_{j,z} \), CF‑LIBS will solve the coupled **Saha–Boltzmann system** under constraints:
+For a given total elemental abundance $n_j = \sum_z n_{j,z}$, CF‑LIBS will solve the coupled **Saha–Boltzmann system** under constraints:
 
-\[
+$$
 \sum_z n_{j,z} = n_j,\quad 
 n_e = \sum_j \sum_z z\, n_{j,z}.
-\]
+$$
 
-This yields level populations \( n_{i,j,z} \) used for line emissivity.
+This yields level populations $n_{i,j,z}$ used for line emissivity.
 
 ---
 
 ### Line Emission and Radiative Power
 
-For a transition \( u \to l \) (upper \( u \), lower \( l \)), assuming spontaneous emission dominates:
+For a transition $u \to l$ (upper $u$, lower $l$), assuming spontaneous emission dominates:
 
-\[
+$$
 \epsilon_{\lambda}^{(u \to l)}(\lambda) 
 = \frac{h c}{4\pi \lambda_{ul}} A_{ul} n_{u,j,z} \, \phi_{ul}(\lambda),
-\]
+$$
 
 where:
 
-- \( \epsilon_{\lambda} \) – spectral emissivity [W m\(^{-3}\) nm\(^{-1}\)]
-- \( \lambda_{ul} \) – transition wavelength
-- \( A_{ul} \) – Einstein A coefficient
-- \( n_{u,j,z} \) – population of the upper level
-- \( \phi_{ul}(\lambda) \) – normalized line profile:
-  \[
+- $\epsilon_{\lambda}$ – spectral emissivity [W m$^{-3}$ nm$^{-1}$]
+- $\lambda_{ul}$ – transition wavelength
+- $A_{ul}$ – Einstein A coefficient
+- $n_{u,j,z}$ – population of the upper level
+- $\phi_{ul}(\lambda)$ – normalized line profile:
+  $$
   \int_{-\infty}^{\infty} \phi_{ul}(\lambda)\, \mathrm{d}\lambda = 1.
-  \]
+  $$
 
 Total emissivity is the sum over all lines:
 
-\[
+$$
 \epsilon_{\lambda}(\lambda) = \sum_{j,z,u,l} \epsilon_{\lambda}^{(u \to l)}(\lambda).
-\]
+$$
 
-For an optically thin, homogeneous plasma with length \( L \) along the line of sight:
+For an optically thin, homogeneous plasma with length $L$ along the line of sight:
 
-\[
+$$
 I_\lambda(\lambda) = \int_0^L \epsilon_{\lambda}(\lambda) \,\mathrm{d}\ell 
 \approx \epsilon_{\lambda}(\lambda) L.
-\]
+$$
 
 ---
 
@@ -193,35 +193,35 @@ I_\lambda(\lambda) = \int_0^L \epsilon_{\lambda}(\lambda) \,\mathrm{d}\ell
 CF‑LIBS will support **composite line profiles** built from:
 
 - **Doppler (thermal) broadening**:
-  \[
+  $$
   \Delta\lambda_D = \lambda_0 \sqrt{\frac{2 k_B T_g}{m c^2}},
-  \]
+  $$
   with Gaussian profile:
-  \[
+  $$
   \phi_D(\lambda) = 
   \frac{1}{\Delta\lambda_D \sqrt{\pi}}
   \exp\left[
     -\left( \frac{\lambda - \lambda_0}{\Delta\lambda_D} \right)^2
   \right].
-  \]
+  $$
 
 - **Lorentzian broadening** from:
   - Natural radiative decay
   - Collisions (van der Waals, resonance, electron impact / Stark)
   
-  With total Lorentzian FWHM \( \Gamma_L \), the profile:
-  \[
+  With total Lorentzian FWHM $\Gamma_L$, the profile:
+  $$
   \phi_L(\lambda) = 
   \frac{1}{\pi} \frac{(\Gamma_L/2)}{(\lambda - \lambda_0)^2 + (\Gamma_L/2)^2 }.
-  \]
+  $$
 
 - **Voigt profile** as a convolution of Gaussian and Lorentzian:
-  \[
+  $$
   \phi_V(\lambda) = 
   \int_{-\infty}^\infty
   \phi_D(\lambda') \phi_L(\lambda - \lambda')
   \, \mathrm{d}\lambda'.
-  \]
+  $$
 
 CF‑LIBS will implement efficient Voigt calculations (rational approximations / Faddeeva function) for production use.
 
@@ -229,33 +229,33 @@ CF‑LIBS will implement efficient Voigt calculations (rational approximations /
 
 ### Opacity & Radiative Transfer
 
-Moving beyond strictly optically thin conditions, the absorption coefficient for a transition \( l \to u \) is:
+Moving beyond strictly optically thin conditions, the absorption coefficient for a transition $l \to u$ is:
 
-\[
+$$
 \kappa_{\lambda}^{(l \to u)}(\lambda) =
 \frac{h c}{4\pi \lambda_{ul}} B_{lu}
 \left( n_{l,j,z} - \frac{g_l}{g_u} n_{u,j,z} \right) \phi_{ul}(\lambda),
-\]
+$$
 
-where \( B_{lu} \) is the Einstein B coefficient.
+where $B_{lu}$ is the Einstein B coefficient.
 
-Total opacity \( \kappa_\lambda(\lambda) \) is the sum over all transitions and continua. For a homogeneous slab with **source function** \( S_\lambda = \epsilon_\lambda / \kappa_\lambda \):
+Total opacity $\kappa_\lambda(\lambda)$ is the sum over all transitions and continua. For a homogeneous slab with **source function** $S_\lambda = \epsilon_\lambda / \kappa_\lambda$:
 
-\[
+$$
 I_\lambda(\lambda) = S_\lambda(\lambda) \left[ 1 - e^{-\kappa_\lambda(\lambda) L} \right].
-\]
+$$
 
-In the optically thin limit \( \kappa_\lambda L \ll 1 \):
+In the optically thin limit $\kappa_\lambda L \ll 1$:
 
-\[
+$$
 I_\lambda(\lambda) \approx \epsilon_\lambda(\lambda) L.
-\]
+$$
 
 Future versions of CF‑LIBS will support multi‑zone radiative transfer:
 
-\[
+$$
 \frac{\mathrm{d} I_\lambda}{\mathrm{d} s} = -\kappa_\lambda I_\lambda + \epsilon_\lambda.
-\]
+$$
 
 ---
 
@@ -263,23 +263,23 @@ Future versions of CF‑LIBS will support multi‑zone radiative transfer:
 
 For many LIBS lines (especially hydrogen and certain metals), the **Stark FWHM** can be approximated as:
 
-\[
+$$
 \Gamma_S = w \left( \frac{n_e}{10^{16}\ \text{cm}^{-3}} \right)^\alpha,
-\]
+$$
 
 where:
-- \( w \) – Stark width parameter at a reference density
-- \( \alpha \) – scaling exponent (often close to 1).
+- $w$ – Stark width parameter at a reference density
+- $\alpha$ – scaling exponent (often close to 1).
 
 Total Lorentzian FWHM:
 
-\[
+$$
 \Gamma_L = \Gamma_S + \Gamma_{\text{other}},
-\]
+$$
 
-with \( \Gamma_{\text{other}} \) including van der Waals, natural, and instrumental contributions.
+with $\Gamma_{\text{other}}$ including van der Waals, natural, and instrumental contributions.
 
-CF‑LIBS will implement inversion routines that, given a measured line profile \( I_\lambda(\lambda) \), fit \( \Gamma_S \) and thereby infer \( n_e \).
+CF‑LIBS will implement inversion routines that, given a measured line profile $I_\lambda(\lambda)$, fit $\Gamma_S$ and thereby infer $n_e$.
 
 ---
 
@@ -287,34 +287,34 @@ CF‑LIBS will implement inversion routines that, given a measured line profile 
 
 To bridge **theoretical spectra** and **measured counts**, CF‑LIBS will include:
 
-1. **Spectral response** \( R(\lambda) \) for optics + detector:
-   \[
+1. **Spectral response** $R(\lambda)$ for optics + detector:
+   $$
    I_\lambda^\text{det}(\lambda) = R(\lambda) \cdot I_\lambda^\text{plasma}(\lambda).
-   \]
+   $$
 
 2. **Instrument function / spectral resolution**, modeled as a convolution:
-   \[
+   $$
    I_\lambda^\text{obs}(\lambda) =
    (I_\lambda^\text{det} * G_\text{instr})(\lambda),
-   \]
-   where \( G_\text{instr} \) is typically Gaussian with FWHM \( \Delta\lambda_\text{instr} \).
+   $$
+   where $G_\text{instr}$ is typically Gaussian with FWHM $\Delta\lambda_\text{instr}$.
 
 3. **Detector sampling and noise**:
-   - Pixel integration over wavelength bins \(\Delta\lambda_\text{pix}\)
+   - Pixel integration over wavelength bins $\Delta\lambda_\text{pix}$
    - Shot noise (Poisson), read noise (Gaussian), background offset.
 
-The final synthetic data model for pixel \( k \) centered at \( \lambda_k \) is:
+The final synthetic data model for pixel $k$ centered at $\lambda_k$ is:
 
-\[
+$$
 C_k \sim \text{Poisson}\big( 
     t_\text{exp} \cdot A_\text{eff}
     \int_{\lambda_k - \Delta\lambda_k/2}^{\lambda_k + \Delta\lambda_k/2}
       I_\lambda^\text{obs}(\lambda)\,\mathrm{d}\lambda
   \big)
   + \mathcal{N}(\mu_\text{read}, \sigma_\text{read}^2),
-\]
+$$
 
-where \( t_\text{exp} \) is exposure time and \( A_\text{eff} \) an effective collection area.
+where $t_\text{exp}$ is exposure time and $A_\text{eff}$ an effective collection area.
 
 ---
 
@@ -522,9 +522,9 @@ This section details the **stepwise path** from the current empty scaffold to a 
 - [ ] Saha–Boltzmann solver (single element, multiple ion stages)
 - [ ] Line emissivity with Gaussian broadening only
 - [ ] Homogeneous, optically thin slab intensity
-  \[
+  $$
   I_\lambda(\lambda) = \epsilon_\lambda(\lambda) L
-  \]
+  $$
 - [ ] Simple instrument convolution (Gaussian kernel)
 - [ ] Basic forward‑model API & one CLI command
 
@@ -537,7 +537,7 @@ This section details the **stepwise path** from the current empty scaffold to a 
 **Goal:** Evolve the core into a **reliable, extensible physics engine**.
 
 - [ ] Multi‑species, multi‑ion Saha–Boltzmann equilibrium
-- [ ] Partition functions with interpolation tables over \(T_e\)
+- [ ] Partition functions with interpolation tables over $T_e$
 - [ ] Full line profile model:
   - [ ] Voigt profile (Doppler + Lorentzian)
   - [ ] Line‑by‑line Stark parameters and density scaling
@@ -556,7 +556,7 @@ This section details the **stepwise path** from the current empty scaffold to a 
 **Goal:** Implement **calibration‑free LIBS inversion** and robust diagnostics.
 
 - [ ] Boltzmann plot generation and fitting
-- [ ] Stark line fitting for \( n_e \)
+- [ ] Stark line fitting for $n_e$
 - [ ] Multi‑parameter nonlinear least‑squares inversion (e.g., Levenberg–Marquardt)
 - [ ] Support for multi‑zone parametric models (e.g., two‑temperature zones)
 - [ ] Bayesian inversion layer:
