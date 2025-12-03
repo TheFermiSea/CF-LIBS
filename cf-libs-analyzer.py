@@ -161,6 +161,24 @@ class CFLIBS_Analyzer:
         for el, c in results.items():
             print(f"  {el}: {c*100:.2f}%")
 
+    def run_robust_identification(self, wavelengths, intensities, elements):
+        # Initialize the production-grade identifier
+        identifier = LineIdentifier(self.conn, instrument_resolution_nm=0.05)
+        
+        # This replaces:
+        # 1. Baseline estimation
+        # 2. Peak finding
+        # 3. Database matching
+        self.line_data = identifier.identify_composition(wavelengths, intensities, elements)
+        
+        # Check elements found
+        if not self.line_data.empty:
+            self.elements = self.line_data['element'].unique().tolist()
+            # Map column names for compatibility with solver
+            self.line_data.rename(columns={'fitted_intensity': 'experimental_intensity'}, inplace=True)
+        else:
+            self.elements = []
+
 if __name__ == "__main__":
     analyzer = CFLIBS_Analyzer("libs_production.db")
     
