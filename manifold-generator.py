@@ -267,17 +267,19 @@ def main():
     # Fixed Ti base, varying Al (0-10%) and V (0-10%)
     al_range = np.linspace(0, 0.12, CONC_STEPS)
     v_range = np.linspace(0, 0.12, CONC_STEPS)
+    fe_range = np.linspace(0.000, 0.005, 5) # Trace amount 0 - 0.5%
     
     params_list = []
     for T in T_grid:
         for ne in ne_grid:
             for al in al_range:
                 for v in v_range:
-                    # Normalize: Ti is remainder
-                    ti = 1.0 - (al + v)
-                    if ti < 0: continue
-                    # [T, ne, Ti, Al, V, Fe] (Fe fixed trace for now)
-                    params_list.append([T, ne, ti, al, v, 0.002])
+                    for fe in fe_range:
+                        # Normalize: Ti is remainder
+                        ti = 1.0 - (al + v + fe)
+                        if ti < 0: continue
+                        # [T, ne, Ti, Al, V, Fe]
+                        params_list.append([T, ne, ti, al, v, fe])
     
     params_arr = np.array(params_list, dtype=np.float32)
     n_samples = len(params_arr)
