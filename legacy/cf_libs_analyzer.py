@@ -5,6 +5,7 @@ import pandas as pd
 from scipy.sparse import csc_matrix, eye, diags
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
+from scipy.interpolate import interp1d
 
 # --- PHYSICS CONSTANTS ---
 KB = 8.617e-5 
@@ -13,6 +14,7 @@ class CFLIBS_Analyzer:
     def __init__(self, db_path):
         self.conn = sqlite3.connect(db_path)
         self.elements = []
+        self._partition_cache = {}
         
     def airPLS(self, x, lambda_=100, porder=1, itermax=15):
         """
@@ -102,11 +104,39 @@ class CFLIBS_Analyzer:
 
     def calculate_partition_function(self, element, sp_num, T_eV):
         # Optimized for speed: In production, replace with interpolation table
+        cache_key = (element, sp_num)
+
+        # Check cache first
+        if cache_key in self._partition_cache:
+            return float(self._partition_cache[cache_key](T_eV))
+
+        # Check DB to build interpolation table
         query = "SELECT g_level, energy_ev FROM energy_levels WHERE element=? AND sp_num=?"
         levels = pd.read_sql_query(query, self.conn, params=(element, sp_num))
-        if levels.empty: return 1.0 
-        Z = np.sum(levels['g_level'] * np.exp(-levels['energy_ev'] / T_eV))
-        return Z
+
+        if levels.empty:
+            # Create a dummy interpolator that always returns 1.0
+            self._partition_cache[cache_key] = lambda t: 1.0
+            return 1.0
+
+        # Create interpolation table
+        # Range of T_eV: 0.1 to 10.0 eV covers typical LIBS plasma temperatures (0.5 - 2.0 eV)
+        t_range = np.linspace(0.1, 10.0, 100)
+        z_values = []
+
+        g_levels = levels['g_level'].values
+        energy_evs = levels['energy_ev'].values
+
+        for t in t_range:
+            z = np.sum(g_levels * np.exp(-energy_evs / t))
+            z_values.append(z)
+
+        # Create cubic spline interpolator
+        # fill_value="extrapolate" allows handling T outside range (though risky far out)
+        interpolator = interp1d(t_range, z_values, kind='cubic', fill_value="extrapolate")
+        self._partition_cache[cache_key] = interpolator
+
+        return float(interpolator(T_eV))
 
     def solve_one_point_calibration(self, known_ref_element, known_ref_conc):
         """
