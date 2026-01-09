@@ -291,6 +291,103 @@ class MCMCResult:
         lines.append("=" * 70)
         return "\n".join(lines)
 
+    def correlation_matrix(self, include_concentrations: bool = True) -> Dict[str, Any]:
+        """
+        Compute correlation matrix between posterior parameters.
+
+        Correlation analysis helps identify parameter degeneracies and
+        understand how uncertainties are coupled (e.g., T-n_e correlation).
+
+        Parameters
+        ----------
+        include_concentrations : bool
+            Include concentration parameters in correlation (default: True)
+
+        Returns
+        -------
+        dict
+            Contains:
+            - 'matrix': np.ndarray correlation matrix
+            - 'labels': list of parameter names
+            - 'T_log_ne_corr': float, specific T vs log_ne correlation
+        """
+        # Extract flattened samples
+        T_samples = np.array(self.samples["T_eV"]).flatten()
+        log_ne_samples = np.array(self.samples["log_ne"]).flatten()
+
+        # Build parameter matrix
+        param_names = ["T_eV", "log_ne"]
+        param_data = [T_samples, log_ne_samples]
+
+        if include_concentrations and "concentrations" in self.samples:
+            conc_samples = np.array(self.samples["concentrations"])
+            # Handle different shapes (chains vs no chains)
+            if conc_samples.ndim == 3:
+                # (n_chains, n_samples, n_elements) -> (n_samples_total, n_elements)
+                conc_samples = conc_samples.reshape(-1, conc_samples.shape[-1])
+            elif conc_samples.ndim == 2:
+                # (n_samples, n_elements) - already correct
+                pass
+
+            # Add each concentration
+            for i, el in enumerate(self.concentrations_mean.keys()):
+                param_names.append(f"C_{el}")
+                param_data.append(conc_samples[:, i])
+
+        # Stack and compute correlation
+        data_matrix = np.vstack(param_data).T  # (n_samples, n_params)
+        corr_matrix = np.corrcoef(data_matrix.T)
+
+        # Key correlation: T vs log_ne
+        T_log_ne_corr = corr_matrix[0, 1]
+
+        return {
+            "matrix": corr_matrix,
+            "labels": param_names,
+            "T_log_ne_corr": float(T_log_ne_corr),
+        }
+
+    def correlation_table(self) -> str:
+        """
+        Generate a formatted correlation table.
+
+        Returns
+        -------
+        str
+            Formatted correlation matrix table
+        """
+        corr_data = self.correlation_matrix()
+        matrix = corr_data["matrix"]
+        labels = corr_data["labels"]
+
+        lines = [
+            "=" * 70,
+            "Parameter Correlations",
+            "=" * 70,
+        ]
+
+        # Header row
+        header = f"{'':>12}" + "".join(f"{l:>10}" for l in labels)
+        lines.append(header)
+        lines.append("-" * len(header))
+
+        # Data rows
+        for i, label in enumerate(labels):
+            row = f"{label:>12}"
+            for j in range(len(labels)):
+                val = matrix[i, j]
+                if i == j:
+                    row += f"{'1.000':>10}"
+                else:
+                    row += f"{val:>10.3f}"
+            lines.append(row)
+
+        lines.append("-" * 70)
+        lines.append(f"T - log_ne correlation: {corr_data['T_log_ne_corr']:.3f}")
+        lines.append("=" * 70)
+
+        return "\n".join(lines)
+
 
 class BayesianForwardModel:
     """
@@ -1084,6 +1181,98 @@ class MCMCSampler:
             )
         except Exception as e:
             logger.warning(f"Posterior plot failed: {e}")
+            return None
+
+    def plot_corner(
+        self,
+        result: MCMCResult,
+        var_names: Optional[List[str]] = None,
+        figsize: Tuple[int, int] = (10, 10),
+        show_titles: bool = True,
+    ) -> Any:
+        """
+        Generate corner/pair plot showing parameter correlations.
+
+        Corner plots show 2D marginal distributions and correlations between
+        all pairs of parameters, essential for understanding degeneracies.
+
+        Parameters
+        ----------
+        result : MCMCResult
+            MCMC result from run()
+        var_names : list, optional
+            Parameters to include (default: ["T_eV", "log_ne"])
+        figsize : tuple
+            Figure size
+        show_titles : bool
+            Show parameter summaries in titles
+
+        Returns
+        -------
+        matplotlib axes or None
+        """
+        if not HAS_ARVIZ:
+            logger.warning("ArviZ required for corner plots")
+            return None
+
+        if result.inference_data is None:
+            logger.warning("No InferenceData available for plotting")
+            return None
+
+        if var_names is None:
+            var_names = ["T_eV", "log_ne"]
+
+        try:
+            return az.plot_pair(
+                result.inference_data,
+                var_names=var_names,
+                kind="kde",
+                marginals=True,
+                figsize=figsize,
+                textsize=10,
+            )
+        except Exception as e:
+            logger.warning(f"Corner plot failed: {e}")
+            return None
+
+    def plot_forest(
+        self, result: MCMCResult, figsize: Tuple[int, int] = (10, 6)
+    ) -> Any:
+        """
+        Generate forest plot comparing parameter estimates with credible intervals.
+
+        Forest plots are useful for comparing multiple parameters or results
+        from different runs.
+
+        Parameters
+        ----------
+        result : MCMCResult
+            MCMC result from run()
+        figsize : tuple
+            Figure size
+
+        Returns
+        -------
+        matplotlib axes or None
+        """
+        if not HAS_ARVIZ:
+            logger.warning("ArviZ required for forest plots")
+            return None
+
+        if result.inference_data is None:
+            logger.warning("No InferenceData available for plotting")
+            return None
+
+        try:
+            return az.plot_forest(
+                result.inference_data,
+                var_names=["T_eV", "log_ne"],
+                combined=True,
+                figsize=figsize,
+                hdi_prob=0.95,
+            )
+        except Exception as e:
+            logger.warning(f"Forest plot failed: {e}")
             return None
 
 

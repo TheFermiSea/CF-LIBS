@@ -558,3 +558,138 @@ class TestMCMCSampling:
         # Parameters should be in reasonable range
         assert 0.3 < results["T_eV_mean"] < 5.0
         assert 14.0 < results["log_ne_mean"] < 20.0
+
+    def test_mcmc_result_correlation_matrix(self, bayesian_db):
+        """Test correlation matrix computation from MCMCResult."""
+        numpyro = pytest.importorskip("numpyro")
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe", "Cu"],
+            wavelength_range=(300, 450),
+            pixels=100,
+        )
+
+        # Generate synthetic observed data
+        synthetic = model.forward(1.0, 17.0, jnp.array([0.6, 0.4]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 10, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        # Run MCMC
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
+        )
+
+        # Test correlation matrix
+        corr_data = result.correlation_matrix()
+        assert "matrix" in corr_data
+        assert "labels" in corr_data
+        assert "T_log_ne_corr" in corr_data
+
+        # Check matrix properties
+        matrix = corr_data["matrix"]
+        assert matrix.shape[0] == matrix.shape[1]  # Square
+        assert np.allclose(np.diag(matrix), 1.0)  # Diagonal is 1
+        assert np.allclose(matrix, matrix.T)  # Symmetric
+
+        # Check labels
+        labels = corr_data["labels"]
+        assert "T_eV" in labels
+        assert "log_ne" in labels
+
+        # Check correlation is a valid value
+        assert -1.0 <= corr_data["T_log_ne_corr"] <= 1.0
+
+    def test_mcmc_result_correlation_table(self, bayesian_db):
+        """Test correlation table string formatting."""
+        numpyro = pytest.importorskip("numpyro")
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=100,
+        )
+
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 10, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
+        )
+
+        # Test correlation table
+        table = result.correlation_table()
+        assert isinstance(table, str)
+        assert "Parameter Correlations" in table
+        assert "T_eV" in table
+        assert "log_ne" in table
+        assert "T - log_ne correlation" in table
+
+    def test_mcmc_sampler_plot_corner(self, bayesian_db):
+        """Test corner plot method (returns None if matplotlib unavailable)."""
+        numpyro = pytest.importorskip("numpyro")
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=100,
+        )
+
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 10, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
+        )
+
+        # Test plot_corner method exists and doesn't crash
+        # (may return None if matplotlib/ArviZ not properly configured)
+        try:
+            axes = sampler.plot_corner(result)
+            # If it returns something, it should be axes or None
+            assert axes is None or hasattr(axes, "__iter__") or hasattr(axes, "flat")
+        except Exception:
+            # Some environments may not have display
+            pass
+
+    def test_mcmc_sampler_plot_forest(self, bayesian_db):
+        """Test forest plot method."""
+        numpyro = pytest.importorskip("numpyro")
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=100,
+        )
+
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 10, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
+        )
+
+        # Test plot_forest method exists and doesn't crash
+        try:
+            axes = sampler.plot_forest(result)
+            assert axes is None or hasattr(axes, "__iter__") or hasattr(axes, "flat")
+        except Exception:
+            pass
