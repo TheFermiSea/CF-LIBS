@@ -233,16 +233,15 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [x] Concentration prior: Dirichlet (enforces simplex constraint)
 - [x] `create_temperature_prior()`, `create_density_prior()`, `create_concentration_prior()` functions
 
-#### MCMC Sampling ⚠️
-`CF-LIBS-0oq` | Partial
+#### MCMC Sampling ✅
+`CF-LIBS-0oq` | Complete
 
 - [x] `MCMCSampler` class wrapping NumPyro NUTS
 - [x] `MCMCResult` dataclass with samples, summary statistics, and credible intervals
 - [x] Convergence diagnostics: R-hat (Gelman-Rubin) and ESS via ArviZ
 - [x] `summary_table()` for publication-ready output
 - [x] ArviZ integration (`plot_trace()`, `plot_posterior()`)
-- [ ] **Issue**: Voigt profile gradients fail at certain parameter combinations (multi-line case)
-- [ ] Fix requires rewriting Voigt profile for JAX gradient stability
+- [x] **Fixed**: Voigt profile gradients now stable via Weideman rational approximation (CF-LIBS-452)
 
 ### Remaining Tasks
 
@@ -254,7 +253,7 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [ ] Compare: single-T vs multi-T plasma models
 
 #### Uncertainty Reporting
-`CF-LIBS-k7g` | P2 (blocked by MCMC)
+`CF-LIBS-k7g` | P2
 
 - [x] MCMCResult with credible intervals: T±σ, n_e±σ, C±σ
 - [ ] Correlation analysis between parameters

@@ -167,8 +167,8 @@ class TestPriorConfig:
         """Test default prior configuration."""
         config = PriorConfig()
         assert config.T_eV_range == (0.5, 3.0)
-        # Note: log_ne range limited to 17.0 due to Voigt profile gradient stability
-        assert config.log_ne_range == (15.0, 17.0)
+        # Full density range now supported with Weideman Faddeeva approximation
+        assert config.log_ne_range == (15.0, 19.0)
         assert config.concentration_alpha == 1.0
 
     def test_custom_values(self):
@@ -518,11 +518,6 @@ class TestBayesianForwardModelEdgeCases:
 class TestMCMCSampling:
     """Integration tests for MCMC sampling (require NumPyro)."""
 
-    @pytest.mark.skip(
-        reason="MCMC initialization fails due to Voigt profile gradient issues at "
-        "certain parameter combinations. The MCMCSampler class is functional "
-        "when gradients are valid. See CF-LIBS-0oq for details."
-    )
     def test_run_mcmc_smoke(self, bayesian_db):
         """Smoke test for MCMC sampling."""
         numpyro = pytest.importorskip("numpyro")

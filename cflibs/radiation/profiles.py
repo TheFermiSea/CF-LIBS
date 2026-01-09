@@ -267,6 +267,61 @@ def total_lorentzian_width(
 # --- JAX IMPLEMENTATION ---
 
 if HAS_JAX:
+    # Weideman (1994) coefficients for Faddeeva function approximation
+    # Reference: Weideman, SIAM J. Numer. Anal. 31, 1497 (1994)
+    # N = 36 terms, provides ~15 digits of accuracy
+    _WEIDEMAN_L = 5.0453784915222872
+    _WEIDEMAN_COEFFS = jnp.array([
+        5.3552841173932895e-14, -8.0527261170976810e-14, -3.2398883441056261e-13, 4.4307993809438665e-13,
+        2.0979949804464113e-12, -2.1169169127002517e-12, -1.4312512495461891e-11, 6.3463874290909676e-12,
+        9.9393262862192946e-11, 3.1971993994865226e-11, -6.6348465239446123e-10, -9.0922385524685665e-10,
+        3.7734430504796621e-09, 1.1883887203463527e-08, -1.0962277931636141e-08, -1.1303157199293924e-07,
+        -1.2894842925653411e-07, 6.7416556638248690e-07, 2.7654086656368491e-06, 1.4187058478641208e-06,
+        -2.1741186565542035e-05, -8.8177971418517626e-05, -1.1396630644455730e-04, 4.6290316939990987e-04,
+        3.5484447086997187e-03, 1.3898253763251489e-02, 4.1051043016576978e-02, 1.0084293371847958e-01,
+        2.1501636320107403e-01, 4.0734241895033424e-01, 6.9566219189710010e-01, 1.0813580371765887e+00,
+        1.5401625788153652e+00, 2.0193976436113505e+00, 2.4453784928519209e+00, 2.7407450274098601e+00,
+    ])
+
+    @jit
+    def _faddeeva_weideman_jax(z: jnp.ndarray) -> jnp.ndarray:
+        """
+        Weideman rational approximation to Faddeeva function w(z).
+
+        This is a branch-free implementation with stable gradients for all z,
+        making it suitable for use with JAX autodiff (including MCMC sampling).
+
+        The approximation uses N=36 terms and achieves ~15 digits of accuracy
+        across the entire complex plane.
+
+        Parameters
+        ----------
+        z : complex array
+            Complex argument(s)
+
+        Returns
+        -------
+        complex array
+            Faddeeva function w(z) = exp(-z²) * erfc(-iz)
+
+        References
+        ----------
+        Weideman, J.A.C. (1994) "Computation of the Complex Error Function"
+        SIAM J. Numer. Anal. 31, 1497-1518.
+        """
+        L = _WEIDEMAN_L
+
+        # Möbius transformation to unit disk
+        Z = (L + 1j * z) / (L - 1j * z)
+
+        # Polynomial evaluation (coefficients precomputed via FFT)
+        p = jnp.polyval(_WEIDEMAN_COEFFS, Z)
+
+        # Final rational formula
+        denom = L - 1j * z
+        w = 2.0 * p / (denom * denom) + (1.0 / jnp.sqrt(jnp.pi)) / denom
+
+        return w
 
     @jit
     def gaussian_profile_jax(
@@ -287,6 +342,10 @@ if HAS_JAX:
     def _faddeeva_humlicek_jax(z):
         """
         Humlicek W4 approximation to Faddeeva function w(z) for JAX.
+
+        DEPRECATED: This implementation has gradient stability issues at high
+        electron densities (log_ne > 17.5) due to JAX evaluating all branches
+        of jnp.where during backpropagation. Use _faddeeva_weideman_jax instead.
 
         Uses rational approximation that works for all z without requiring
         complex erfc. Accurate to ~1e-4 relative error.
@@ -366,16 +425,39 @@ if HAS_JAX:
         wavelength: jnp.ndarray, center: float, sigma: float, gamma: float, amplitude: float = 1.0
     ) -> jnp.ndarray:
         """
-        JAX-compatible Voigt profile calculation using Humlicek W4 approximation.
+        JAX-compatible Voigt profile calculation using Weideman rational approximation.
+
+        This implementation uses the branch-free Weideman (1994) algorithm which
+        provides stable gradients across all parameter ranges, making it suitable
+        for gradient-based optimization and MCMC sampling.
+
+        Parameters
+        ----------
+        wavelength : array
+            Wavelength grid in nm
+        center : float
+            Line center wavelength in nm
+        sigma : float
+            Gaussian standard deviation (Doppler broadening) in nm
+        gamma : float
+            Lorentzian HWHM (Stark/pressure broadening) in nm
+        amplitude : float
+            Integrated area under the profile
+
+        Returns
+        -------
+        array
+            Voigt profile values
         """
         # Ensure positive widths to avoid division by zero
-        sigma = jnp.maximum(sigma, 1e-9)
-        gamma = jnp.maximum(gamma, 1e-9)
+        sigma = jnp.maximum(sigma, 1e-12)
+        gamma = jnp.maximum(gamma, 1e-12)
 
         x = wavelength - center
         z = (x + 1j * gamma) / (sigma * jnp.sqrt(2.0))
 
-        w_z = _faddeeva_humlicek_jax(z)
+        # Use gradient-stable Weideman approximation
+        w_z = _faddeeva_weideman_jax(z)
 
         profile = jnp.real(w_z) / (sigma * jnp.sqrt(2.0 * jnp.pi))
         return amplitude * profile

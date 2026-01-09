@@ -36,10 +36,13 @@ try:
     from jax import jit
 
     HAS_JAX = True
+    # Import gradient-stable Faddeeva from profiles
+    from cflibs.radiation.profiles import _faddeeva_weideman_jax
 except ImportError:
     HAS_JAX = False
     jnp = None
     jit = lambda f: f
+    _faddeeva_weideman_jax = None
 
 try:
     import numpyro
@@ -140,9 +143,9 @@ class PriorConfig:
     """
 
     T_eV_range: Tuple[float, float] = (0.5, 3.0)
-    # Note: log_ne range limited to 17.0 due to numerical stability in Voigt profile
-    # Higher densities cause gradient overflow in the complex Faddeeva approximation
-    log_ne_range: Tuple[float, float] = (15.0, 17.0)
+    # Full LIBS density range now supported thanks to Weideman Faddeeva approximation
+    # (branch-free implementation with stable gradients)
+    log_ne_range: Tuple[float, float] = (15.0, 19.0)
     concentration_alpha: float = 1.0
 
 
@@ -297,7 +300,7 @@ class BayesianForwardModel:
     parameters (T, n_e, concentrations) to synthetic spectra. The physics
     includes:
     - Saha-Boltzmann population distribution
-    - Voigt line profiles (Humlicek W4 Faddeeva approximation)
+    - Voigt line profiles (Weideman rational Faddeeva approximation)
     - Stark broadening with temperature scaling
     - Proper Doppler broadening with mass dependence
 
@@ -575,52 +578,13 @@ class BayesianForwardModel:
         factor_T = jnp.power(jnp.maximum(T_eV, 0.1) / REF_T_EV, -data.stark_alpha)
         gamma_stark = w_ref * factor_ne * factor_T
 
-        # --- Voigt Profile (Humlicek W4 approximation) ---
+        # --- Voigt Profile (Weideman rational approximation) ---
+        # Uses branch-free implementation for gradient stability during MCMC
         diff = self.wavelength[:, None] - data.wavelength_nm[None, :]
         z = (diff + 1j * gamma_stark) / (sigma_total * jnp.sqrt(2.0))
 
-        x_h = jnp.real(z)
-        y_h = jnp.abs(jnp.imag(z))
-        s = jnp.abs(x_h) + y_h
-        t = y_h - 1j * x_h
-
-        # Region 1: s >= 15
-        w_r1 = t * 0.5641896 / (0.5 + t * t)
-
-        # Region 2: 5.5 <= s < 15
-        u = t * t
-        w_r2 = t * (1.410474 + u * 0.5641896) / (0.75 + u * (3.0 + u))
-
-        # Region 3: s < 5.5 and y >= 0.195*|x| - 0.176
-        w_r3 = (
-            16.4955 + t * (20.20933 + t * (11.96482 + t * (3.778987 + t * 0.5642236)))
-        ) / (
-            16.4955 + t * (38.82363 + t * (39.27121 + t * (21.69274 + t * (6.699398 + t))))
-        )
-
-        # Region 4: s < 5.5 and y < 0.195*|x| - 0.176
-        # Clip u to prevent overflow in exp() - this branch is only valid for small |z|
-        # but JAX evaluates all branches during backprop, so we need to ensure finite gradients
-        u_clipped = jnp.clip(jnp.real(u), -50.0, 50.0) + 1j * jnp.imag(u)
-        w_r4 = jnp.exp(u_clipped) - t * (
-            36183.31 - u * (3321.9905 - u * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419)))))
-        ) / (
-            32066.6 - u * (24322.84 - u * (9022.228 - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u))))))
-        )
-
-        w_z = jnp.where(
-            s >= 15.0,
-            w_r1,
-            jnp.where(
-                s >= 5.5,
-                w_r2,
-                jnp.where(
-                    y_h >= 0.195 * jnp.abs(x_h) - 0.176,
-                    w_r3,
-                    w_r4,
-                ),
-            ),
-        )
+        # Gradient-stable Weideman approximation (no branching)
+        w_z = _faddeeva_weideman_jax(z)
 
         profile = jnp.real(w_z) / (sigma_total * jnp.sqrt(2.0 * jnp.pi))
 

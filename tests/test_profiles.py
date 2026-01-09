@@ -95,3 +95,127 @@ def test_jax_import():
     if not HAS_JAX:
         with pytest.raises(ImportError):
             voigt_profile_jax(0.0, 0.0, 1.0, 1.0)
+
+
+# --- JAX Gradient Stability Tests ---
+
+
+@pytest.mark.requires_jax
+@pytest.mark.skipif(not HAS_JAX, reason="JAX not available")
+class TestWidemanFaddeeva:
+    """Tests for the Weideman Faddeeva function implementation."""
+
+    def test_weideman_accuracy_vs_scipy(self):
+        """Test Weideman approximation accuracy against scipy.wofz."""
+        import jax.numpy as jnp
+        from cflibs.radiation.profiles import _faddeeva_weideman_jax
+
+        try:
+            from scipy.special import wofz
+        except ImportError:
+            pytest.skip("scipy not available")
+
+        # Test points across complex plane
+        test_points = [
+            0.5 + 0.5j,
+            1.0 + 0.1j,
+            2.0 + 2.0j,
+            0.1 + 0.01j,
+            5.0 + 0.5j,
+            0.0 + 1.0j,
+            3.0 + 0.001j,
+        ]
+
+        for z in test_points:
+            z_jax = jnp.array(z)
+            w_scipy = wofz(z)
+            w_weideman = complex(_faddeeva_weideman_jax(z_jax))
+            rel_err = abs(w_weideman - w_scipy) / abs(w_scipy)
+            # Weideman N=36 gives ~1e-8 accuracy, which is excellent for spectroscopy
+            assert rel_err < 1e-6, f"At z={z}: rel_err={rel_err:.2e}"
+
+    def test_weideman_gradient_stability(self):
+        """Test that Weideman Faddeeva has stable gradients across all regions."""
+        import jax
+        import jax.numpy as jnp
+        from cflibs.radiation.profiles import voigt_profile_jax
+
+        wavelength = jnp.linspace(400.0, 410.0, 100)
+        center = 405.0
+        sigma = 0.01  # Doppler width
+
+        def loss(params):
+            """Loss function for gradient testing."""
+            sigma_p, gamma_p = params
+            profile = voigt_profile_jax(wavelength, center, sigma_p, gamma_p, 1.0)
+            return jnp.sum(profile**2)
+
+        grad_fn = jax.grad(loss)
+
+        # Test across range of electron densities (log_ne from 15 to 19)
+        # gamma scales with n_e via Stark broadening
+        for log_ne in [15.0, 16.0, 17.0, 17.5, 18.0, 18.5, 19.0]:
+            n_e = 10**log_ne
+            gamma = 0.001 * (n_e / 1e16)  # Simplified Stark scaling
+
+            params = jnp.array([sigma, gamma])
+            grad = grad_fn(params)
+
+            assert jnp.isfinite(grad).all(), (
+                f"NaN/Inf gradient at log_ne={log_ne}: grad={grad}"
+            )
+
+    def test_voigt_jax_gradient_finite(self):
+        """Test Voigt profile has finite gradients for typical LIBS parameters."""
+        import jax
+        import jax.numpy as jnp
+        from cflibs.radiation.profiles import voigt_profile_jax
+
+        wavelength = jnp.linspace(390.0, 400.0, 200)
+        center = 396.15  # Ca II
+
+        def integrated_intensity(params):
+            T_eV, log_ne = params
+            # Doppler width (simplified)
+            sigma = 0.001 * jnp.sqrt(T_eV)
+            # Stark width
+            n_e = 10**log_ne
+            gamma = 0.001 * (n_e / 1e16) ** 0.5
+
+            profile = voigt_profile_jax(wavelength, center, sigma, gamma, 1.0)
+            return jnp.sum(profile)
+
+        grad_fn = jax.grad(integrated_intensity)
+
+        # Test at various plasma conditions
+        test_params = [
+            (0.5, 16.0),  # Cool, moderate density
+            (1.0, 17.0),  # Typical LIBS
+            (2.0, 18.0),  # Hot, high density
+            (1.5, 19.0),  # Very high density
+        ]
+
+        for T_eV, log_ne in test_params:
+            params = jnp.array([T_eV, log_ne])
+            grad = grad_fn(params)
+            assert jnp.isfinite(grad).all(), (
+                f"NaN/Inf gradient at T={T_eV}eV, log_ne={log_ne}: grad={grad}"
+            )
+
+    def test_voigt_jax_matches_numpy(self):
+        """Test JAX Voigt profile matches NumPy version."""
+        import jax.numpy as jnp
+        from cflibs.radiation.profiles import voigt_profile_jax
+
+        wavelength = np.linspace(400.0, 410.0, 100)
+        center = 405.0
+        sigma = 0.05
+        gamma = 0.02
+        amplitude = 1.0
+
+        v_numpy = voigt_profile(wavelength, center, sigma, gamma, amplitude)
+        v_jax = np.array(voigt_profile_jax(jnp.array(wavelength), center, sigma, gamma, amplitude))
+
+        assert np.allclose(v_numpy, v_jax, rtol=1e-4), (
+            f"Max diff: {np.max(np.abs(v_numpy - v_jax))}"
+        )
