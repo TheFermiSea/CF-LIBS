@@ -66,6 +66,12 @@ class ManifoldConfig:
     time_steps: int = 20
     batch_size: int = 1000
 
+    # Phase 2 physics options
+    use_voigt_profile: bool = True
+    use_stark_broadening: bool = True
+    instrument_fwhm_nm: float = 0.05
+    physics_version: int = 2
+
     @classmethod
     def from_file(cls, config_path: Path) -> "ManifoldConfig":
         """
@@ -105,6 +111,10 @@ class ManifoldConfig:
             gate_width_s=manifold_config.get("gate_width_s", 5e-6),
             time_steps=manifold_config.get("time_steps", 20),
             batch_size=manifold_config.get("batch_size", 1000),
+            use_voigt_profile=manifold_config.get("use_voigt_profile", True),
+            use_stark_broadening=manifold_config.get("use_stark_broadening", True),
+            instrument_fwhm_nm=manifold_config.get("instrument_fwhm_nm", 0.05),
+            physics_version=manifold_config.get("physics_version", 2),
         )
 
     def validate(self) -> bool:

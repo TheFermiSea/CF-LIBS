@@ -238,7 +238,51 @@ if HAS_JAX:
 
         return w_ref * factor_ne * factor_T
 
+    @jit
+    def estimate_stark_parameter_jax(
+        wavelength_nm: float,
+        upper_energy_ev: float,
+        ionization_potential_ev: float,
+        ionization_stage: int,
+    ) -> float:
+        """
+        JAX-compatible Stark parameter estimation.
+
+        Used as fallback when database lacks Stark data.
+
+        Parameters
+        ----------
+        wavelength_nm : float
+            Line wavelength in nm
+        upper_energy_ev : float
+            Upper level energy in eV
+        ionization_potential_ev : float
+            Ionization potential in eV
+        ionization_stage : int
+            Ionization stage (1=neutral, 2=singly ionized)
+
+        Returns
+        -------
+        float
+            Estimated Stark w_ref (HWHM at 1e16 cm^-3) in nm
+        """
+        # Binding energy with safety floor
+        binding_energy = jnp.maximum(ionization_potential_ev - upper_energy_ev, 0.1)
+
+        # Effective principal quantum number
+        n_eff = ionization_stage * jnp.sqrt(13.605 / binding_energy)
+
+        # Semi-empirical scaling
+        # w_ref ~ C * lambda^2 * n_eff^4
+        w_est = 2.0e-5 * (wavelength_nm / 500.0) ** 2 * (n_eff**4)
+
+        # Clamp to reasonable range
+        return jnp.clip(w_est, 0.0001, 0.5)
+
 else:
 
     def stark_hwhm_jax(*args, **kwargs):
+        raise ImportError("JAX is not installed. Install with: pip install jax jaxlib")
+
+    def estimate_stark_parameter_jax(*args, **kwargs):
         raise ImportError("JAX is not installed. Install with: pip install jax jaxlib")

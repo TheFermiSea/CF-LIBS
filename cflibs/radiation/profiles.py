@@ -284,41 +284,89 @@ if HAS_JAX:
         return (amplitude / jnp.pi) * (gamma / ((wavelength - center) ** 2 + gamma**2))
 
     @jit
-    def _faddeeva_stable_jax(z):
+    def _faddeeva_humlicek_jax(z):
         """
-        Approximate Faddeeva function w(z) for JAX.
-        Uses exp(-z^2)*erfc(-iz) for small Im(z), asymptotic for large Im(z).
-        """
-        # Note: jax.scipy.special.erfc supports complex args but exp(-z^2) can overflow
-        # if Im(z) is large.
-        # Im(z) = y. -z^2 = y^2 - x^2 - 2ixy.
-        # Real part of exponent is y^2 - x^2.
-        # If y^2 - x^2 > 88 (approx), exp overflows float32.
-        # Safe limit for y is ~9.
+        Humlicek W4 approximation to Faddeeva function w(z) for JAX.
 
+        Uses rational approximation that works for all z without requiring
+        complex erfc. Accurate to ~1e-4 relative error.
+
+        Reference: Humlicek, JQSRT 27 (1982) 437
+        """
+        x = jnp.real(z)
         y = jnp.imag(z)
 
-        # Asymptotic expansion for large y (Region I)
-        # w(z) ~ i / (sqrt(pi) * z) * (1 + 1/(2z^2))
-        def asymptotic_w(z):
-            val = 1j / (jnp.sqrt(jnp.pi) * z)
-            val *= 1.0 + 0.5 / z**2
-            return val
+        # Work in upper half plane (y >= 0 for Voigt with gamma > 0)
+        y = jnp.abs(y)
 
-        # Direct calculation for small y (Region II)
-        # Uses jax.scipy.special.erfc which must be available
-        def direct_w(z):
-            return jnp.exp(-(z**2)) * jax.scipy.special.erfc(-1j * z)
+        # Humlicek W4 algorithm regions
+        s = jnp.abs(x) + y
+        t = y - 1j * x
 
-        # Switch at y=8.0
-        return jnp.where(y > 8.0, asymptotic_w(z), direct_w(z))
+        # Region 1: s >= 15 (asymptotic)
+        def region1(x, y, t):
+            w = t * 0.5641896 / (0.5 + t * t)
+            return w
+
+        # Region 2: 5.5 <= s < 15
+        def region2(x, y, t):
+            u = t * t
+            w = t * (1.410474 + u * 0.5641896) / (0.75 + u * (3.0 + u))
+            return w
+
+        # Region 3: s < 5.5 and y >= 0.195 * |x| - 0.176
+        def region3(x, y, t):
+            w = (
+                16.4955 + t * (20.20933 + t * (11.96482 + t * (3.778987 + t * 0.5642236)))
+            ) / (
+                16.4955
+                + t * (38.82363 + t * (39.27121 + t * (21.69274 + t * (6.699398 + t))))
+            )
+            return w
+
+        # Region 4: s < 5.5 and y < 0.195 * |x| - 0.176
+        def region4(x, y, t):
+            u = t * t
+            w = jnp.exp(u) - t * (
+                36183.31
+                - u
+                * (
+                    3321.9905
+                    - u * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419))))
+                )
+            ) / (
+                32066.6
+                - u
+                * (
+                    24322.84
+                    - u * (9022.228 - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u)))))
+                )
+            )
+            return w
+
+        # Select region based on conditions
+        w = jnp.where(
+            s >= 15.0,
+            region1(x, y, t),
+            jnp.where(
+                s >= 5.5,
+                region2(x, y, t),
+                jnp.where(
+                    y >= 0.195 * jnp.abs(x) - 0.176,
+                    region3(x, y, t),
+                    region4(x, y, t),
+                ),
+            ),
+        )
+
+        return w
 
     @jit
     def voigt_profile_jax(
         wavelength: jnp.ndarray, center: float, sigma: float, gamma: float, amplitude: float = 1.0
     ) -> jnp.ndarray:
         """
-        JAX-compatible Voigt profile calculation.
+        JAX-compatible Voigt profile calculation using Humlicek W4 approximation.
         """
         # Ensure positive widths to avoid division by zero
         sigma = jnp.maximum(sigma, 1e-9)
@@ -327,10 +375,37 @@ if HAS_JAX:
         x = wavelength - center
         z = (x + 1j * gamma) / (sigma * jnp.sqrt(2.0))
 
-        w_z = _faddeeva_stable_jax(z)
+        w_z = _faddeeva_humlicek_jax(z)
 
         profile = jnp.real(w_z) / (sigma * jnp.sqrt(2.0 * jnp.pi))
         return amplitude * profile
+
+    @jit
+    def doppler_sigma_jax(wavelength_nm: float, T_eV: float, mass_amu: float) -> float:
+        """
+        JAX-compatible Doppler width calculation (sigma, not FWHM).
+
+        Parameters
+        ----------
+        wavelength_nm : float
+            Wavelength in nm
+        T_eV : float
+            Temperature in eV
+        mass_amu : float
+            Atomic mass in amu
+
+        Returns
+        -------
+        float
+            Doppler sigma (standard deviation) in nm
+        """
+        M_PROTON = 1.6726219e-27  # kg
+        mass_kg = mass_amu * M_PROTON
+
+        # sigma = lambda/c * sqrt(2 * kT / m)
+        # T_eV * EV_TO_J gives energy in Joules
+        sigma = wavelength_nm * jnp.sqrt(2.0 * T_eV * EV_TO_J / (mass_kg * C_LIGHT**2))
+        return sigma
 
     def _vmap_profile(
         profile_fn: Callable[..., jnp.ndarray],
@@ -396,6 +471,9 @@ else:
         _raise_jax_missing()
 
     def lorentzian_profile_jax(*args, **kwargs):
+        _raise_jax_missing()
+
+    def doppler_sigma_jax(*args, **kwargs):
         _raise_jax_missing()
 
     def apply_gaussian_broadening_jax(*args, **kwargs):
