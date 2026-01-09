@@ -3,6 +3,62 @@ Self-absorption correction for CF-LIBS analysis.
 
 Self-absorption occurs when strong emission lines are partially reabsorbed
 by cooler atoms in the outer plasma regions, leading to intensity underestimation.
+This module implements correction algorithms based on curve-of-growth methods.
+
+Theory
+------
+For an optically thick plasma, the observed line intensity is reduced by a
+factor f(τ) that depends on the optical depth at line center (τ₀):
+
+    I_observed = I_true × f(τ₀)
+
+For a Gaussian line profile:
+    f(τ) = (1 - exp(-τ)) / τ
+
+Limiting behaviors:
+    - Optically thin (τ << 1): f(τ) ≈ 1 - τ/2 → 1
+    - Moderate (τ = 1): f(τ) ≈ 0.632
+    - Optically thick (τ >> 1): f(τ) ≈ 1/τ
+
+Correction Process
+------------------
+1. Estimate τ₀ from plasma parameters (T, n_e, concentrations) or intensity ratios
+2. Calculate correction factor: C = 1/f(τ₀)
+3. Apply: I_true = I_observed × C
+
+Literature References
+---------------------
+- El Sherbini et al. (2020): Curve-of-growth self-absorption correction
+- Sun & Yu (2021): Automatic self-absorption correction algorithm
+- Bredice et al. (2006): Self-absorption evaluation methods
+- Aragon & Aguilera (2008): Review of plasma characterization methods
+
+Algorithm Limitations
+---------------------
+1. **Homogeneous plasma assumption**: Algorithm assumes uniform temperature and
+   density along the line of sight. Real LIBS plasmas have gradients.
+
+2. **LTE assumption**: Optical depth calculation assumes LTE populations.
+   Non-LTE effects may cause errors for early-time or low-density plasmas.
+
+3. **Gaussian profile assumption**: The f(τ) formula assumes Gaussian lineshapes.
+   Stark-dominated profiles (Lorentzian) have different saturation behavior.
+
+4. **Single-zone model**: Does not account for inhomogeneous absorption where
+   cooler outer regions absorb emission from hotter inner regions.
+
+5. **Estimation uncertainty**: Optical depth estimation requires accurate
+   partition functions, oscillator strengths, and plasma parameters.
+
+6. **High optical depth limit**: For τ > 3, corrections become very large
+   (>3x) and increasingly uncertain. Masking is recommended.
+
+Recommended Usage
+-----------------
+1. Use primarily for resonance lines and strong transitions
+2. Validate with doublet/multiplet intensity ratio methods when possible
+3. Set mask_threshold appropriately (default 3.0) to exclude highly absorbed lines
+4. Compare results with and without correction to assess impact
 """
 
 from dataclasses import dataclass, field
