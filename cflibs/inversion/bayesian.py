@@ -63,6 +63,16 @@ except ImportError:
     HAS_ARVIZ = False
     az = None
 
+try:
+    import dynesty
+    from dynesty import NestedSampler as DynestyNestedSampler
+    from dynesty import DynamicNestedSampler as DynestyDynamicSampler
+
+    HAS_DYNESTY = True
+except ImportError:
+    HAS_DYNESTY = False
+    dynesty = None
+
 
 # Physical constants
 H_PLANCK = 6.626e-34  # Planck constant [J·s]
@@ -389,6 +399,185 @@ class MCMCResult:
         return "\n".join(lines)
 
 
+@dataclass
+class NestedSamplingResult:
+    """
+    Result container for nested sampling with model evidence.
+
+    Nested sampling provides both posterior samples AND marginal likelihood
+    (evidence) for model comparison. The evidence Z = P(data | model) is
+    crucial for comparing different plasma models (e.g., single-T vs multi-T).
+
+    Attributes
+    ----------
+    samples : dict
+        Posterior samples for each parameter {name: array}
+    weights : np.ndarray
+        Sample weights (normalized to sum to 1)
+    log_evidence : float
+        Log marginal likelihood ln(Z)
+    log_evidence_err : float
+        Uncertainty in log evidence
+    information : float
+        Kullback-Leibler divergence (bits of information gained)
+    T_eV_mean : float
+        Mean temperature [eV]
+    T_eV_std : float
+        Standard deviation of temperature
+    log_ne_mean : float
+        Mean log10(electron density)
+    log_ne_std : float
+        Standard deviation of log10(n_e)
+    concentrations_mean : dict
+        Mean concentrations by element
+    concentrations_std : dict
+        Standard deviations by element
+    n_live : int
+        Number of live points used
+    n_iterations : int
+        Number of nested sampling iterations
+    n_calls : int
+        Total likelihood evaluations
+    """
+
+    # Posterior samples and weights
+    samples: Dict[str, np.ndarray]
+    weights: np.ndarray
+
+    # Evidence (model comparison)
+    log_evidence: float
+    log_evidence_err: float
+    information: float  # KL divergence H
+
+    # Summary statistics (weighted)
+    T_eV_mean: float
+    T_eV_std: float
+    log_ne_mean: float
+    log_ne_std: float
+    concentrations_mean: Dict[str, float]
+    concentrations_std: Dict[str, float]
+
+    # Sampling metadata
+    n_live: int = 100
+    n_iterations: int = 0
+    n_calls: int = 0
+
+    @property
+    def n_e_mean(self) -> float:
+        """Mean electron density [cm^-3]."""
+        return 10.0 ** self.log_ne_mean
+
+    @property
+    def T_K_mean(self) -> float:
+        """Mean temperature [K]."""
+        return self.T_eV_mean * EV_TO_K
+
+    @property
+    def evidence(self) -> float:
+        """Marginal likelihood Z = exp(log_evidence)."""
+        return np.exp(self.log_evidence)
+
+    @property
+    def bayes_factor_vs(self) -> str:
+        """
+        Interpretation helper for Bayes factors.
+
+        Returns interpretation guidance for log evidence differences.
+        """
+        return (
+            "Bayes factor interpretation (Kass & Raftery 1995):\n"
+            "  |Δln(Z)| < 1:    Not worth more than a bare mention\n"
+            "  1 < |Δln(Z)| < 3:  Positive evidence\n"
+            "  3 < |Δln(Z)| < 5:  Strong evidence\n"
+            "  |Δln(Z)| > 5:      Very strong evidence"
+        )
+
+    def summary_table(self) -> str:
+        """Generate a publication-ready summary table."""
+        lines = [
+            "=" * 70,
+            "CF-LIBS Nested Sampling Results",
+            "=" * 70,
+            f"Live points: {self.n_live} | Iterations: {self.n_iterations} | "
+            f"Likelihood calls: {self.n_calls}",
+            "-" * 70,
+            "MODEL EVIDENCE:",
+            f"  ln(Z) = {self.log_evidence:.2f} ± {self.log_evidence_err:.2f}",
+            f"  Information (H) = {self.information:.2f} nats",
+            "-" * 70,
+            f"{'Parameter':<20} {'Mean':>12} {'Std':>12}",
+            "-" * 70,
+            f"{'T [eV]':<20} {self.T_eV_mean:>12.4f} {self.T_eV_std:>12.4f}",
+            f"{'T [K]':<20} {self.T_K_mean:>12.0f} {self.T_eV_std * EV_TO_K:>12.0f}",
+            f"{'log10(n_e)':<20} {self.log_ne_mean:>12.4f} {self.log_ne_std:>12.4f}",
+            f"{'n_e [cm^-3]':<20} {self.n_e_mean:>12.2e}",
+        ]
+
+        lines.append("-" * 70)
+        lines.append(f"{'Element':<20} {'Conc.':<12} {'Std':>12}")
+        lines.append("-" * 70)
+
+        for el in self.concentrations_mean:
+            mean = self.concentrations_mean[el]
+            std = self.concentrations_std[el]
+            lines.append(f"{el:<20} {mean:>12.4f} {std:>12.4f}")
+
+        lines.append("=" * 70)
+        return "\n".join(lines)
+
+    @staticmethod
+    def compare_models(
+        result_a: "NestedSamplingResult",
+        result_b: "NestedSamplingResult",
+        name_a: str = "Model A",
+        name_b: str = "Model B",
+    ) -> str:
+        """
+        Compare two models using Bayes factor.
+
+        Parameters
+        ----------
+        result_a, result_b : NestedSamplingResult
+            Results from two different models
+        name_a, name_b : str
+            Model names for display
+
+        Returns
+        -------
+        str
+            Formatted comparison with interpretation
+        """
+        delta_ln_z = result_a.log_evidence - result_b.log_evidence
+        err = np.sqrt(result_a.log_evidence_err**2 + result_b.log_evidence_err**2)
+
+        if abs(delta_ln_z) < 1:
+            interpretation = "No significant preference"
+        elif abs(delta_ln_z) < 3:
+            preferred = name_a if delta_ln_z > 0 else name_b
+            interpretation = f"Weak evidence for {preferred}"
+        elif abs(delta_ln_z) < 5:
+            preferred = name_a if delta_ln_z > 0 else name_b
+            interpretation = f"Strong evidence for {preferred}"
+        else:
+            preferred = name_a if delta_ln_z > 0 else name_b
+            interpretation = f"Very strong evidence for {preferred}"
+
+        lines = [
+            "=" * 60,
+            "Bayesian Model Comparison",
+            "=" * 60,
+            f"{name_a}: ln(Z) = {result_a.log_evidence:.2f} ± {result_a.log_evidence_err:.2f}",
+            f"{name_b}: ln(Z) = {result_b.log_evidence:.2f} ± {result_b.log_evidence_err:.2f}",
+            "-" * 60,
+            f"Δln(Z) = {delta_ln_z:.2f} ± {err:.2f}",
+            f"Bayes factor K = {np.exp(delta_ln_z):.2e}",
+            "-" * 60,
+            f"Interpretation: {interpretation}",
+            "=" * 60,
+        ]
+        return "\n".join(lines)
+
+
 class BayesianForwardModel:
     """
     Bayesian forward model for CF-LIBS spectra.
@@ -587,6 +776,35 @@ class BayesianForwardModel:
         """
         n_e = 10.0 ** log_ne
         return self._compute_spectrum(T_eV, n_e, concentrations)
+
+    def forward_numpy(
+        self,
+        T_eV: float,
+        log_ne: float,
+        concentrations: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute synthetic spectrum using NumPy arrays (for dynesty compatibility).
+
+        This is a wrapper around forward() that handles NumPy <-> JAX conversion.
+
+        Parameters
+        ----------
+        T_eV : float
+            Temperature in eV
+        log_ne : float
+            Log10 of electron density [cm^-3]
+        concentrations : np.ndarray
+            Element concentrations (must sum to 1)
+
+        Returns
+        -------
+        np.ndarray
+            Synthetic spectrum intensity
+        """
+        conc_jax = jnp.array(concentrations)
+        result = self.forward(T_eV, log_ne, conc_jax)
+        return np.array(result)
 
     @staticmethod
     def _partition_function(T_K: float, coeffs: jnp.ndarray) -> jnp.ndarray:
@@ -1274,6 +1492,304 @@ class MCMCSampler:
         except Exception as e:
             logger.warning(f"Forest plot failed: {e}")
             return None
+
+
+class NestedSampler:
+    """
+    Nested sampler for Bayesian CF-LIBS inference with model comparison.
+
+    Nested sampling provides two key advantages over MCMC:
+    1. Direct evidence (marginal likelihood) calculation for model comparison
+    2. Better handling of multimodal posteriors
+
+    Uses dynesty for efficient nested sampling with dynamic allocation.
+
+    Parameters
+    ----------
+    forward_model : BayesianForwardModel
+        Forward model instance
+    prior_config : PriorConfig
+        Prior configuration (default: PriorConfig())
+    noise_params : NoiseParameters
+        Noise model parameters (default: NoiseParameters())
+
+    Example
+    -------
+    >>> sampler = NestedSampler(forward_model)
+    >>> result = sampler.run(observed_spectrum, nlive=100)
+    >>> print(f"Evidence: ln(Z) = {result.log_evidence:.2f}")
+    >>> print(result.summary_table())
+
+    Notes
+    -----
+    For model comparison, run nested sampling on both models and compare:
+    >>> result_single_T = sampler_single.run(spectrum)
+    >>> result_multi_T = sampler_multi.run(spectrum)
+    >>> print(NestedSamplingResult.compare_models(result_single_T, result_multi_T))
+    """
+
+    def __init__(
+        self,
+        forward_model: BayesianForwardModel,
+        prior_config: PriorConfig = PriorConfig(),
+        noise_params: NoiseParameters = NoiseParameters(),
+    ):
+        if not HAS_DYNESTY:
+            raise ImportError("dynesty required. Install with: pip install dynesty")
+
+        self.forward_model = forward_model
+        self.prior_config = prior_config
+        self.noise_params = noise_params
+        self.elements = forward_model.elements
+        self.n_elements = len(self.elements)
+
+        # Parameter dimension: T_eV + log_ne + (n_elements - 1) concentrations
+        # Use n_elements - 1 because concentrations sum to 1 (simplex)
+        self.ndim = 2 + (self.n_elements - 1)
+
+        logger.info(
+            f"NestedSampler initialized: {self.n_elements} elements, "
+            f"{self.ndim} dimensions, T range={prior_config.T_eV_range} eV"
+        )
+
+    def _prior_transform(self, u: np.ndarray) -> np.ndarray:
+        """
+        Transform unit cube [0,1]^n to physical parameter space.
+
+        dynesty samples from unit cube; we transform to physical priors.
+
+        Parameters
+        ----------
+        u : array
+            Samples from unit cube [0, 1]^ndim
+
+        Returns
+        -------
+        array
+            Physical parameters [T_eV, log_ne, c_1, ..., c_{n-1}]
+        """
+        x = np.zeros_like(u)
+
+        # T_eV: uniform prior
+        T_min, T_max = self.prior_config.T_eV_range
+        x[0] = T_min + u[0] * (T_max - T_min)
+
+        # log_ne: uniform prior (log-uniform in n_e)
+        log_ne_min, log_ne_max = self.prior_config.log_ne_range
+        x[1] = log_ne_min + u[1] * (log_ne_max - log_ne_min)
+
+        # Concentrations: Dirichlet-like via stick-breaking
+        # For n elements, we have n-1 free parameters
+        if self.n_elements > 1:
+            # Stick-breaking transformation for Dirichlet(alpha, alpha, ..., alpha)
+            alpha = self.prior_config.concentration_alpha
+            remaining = 1.0
+            for i in range(self.n_elements - 1):
+                # Beta distribution via inverse CDF
+                from scipy import stats
+                beta_sample = stats.beta.ppf(u[2 + i], alpha, alpha * (self.n_elements - 1 - i))
+                x[2 + i] = remaining * beta_sample
+                remaining -= x[2 + i]
+
+        return x
+
+    def _params_to_concentrations(self, params: np.ndarray) -> np.ndarray:
+        """
+        Convert parameter vector to full concentration array.
+
+        The last concentration is determined by sum-to-one constraint.
+        """
+        if self.n_elements == 1:
+            return np.array([1.0])
+
+        conc = np.zeros(self.n_elements)
+        conc[:-1] = params[2:]
+        conc[-1] = max(0.0, 1.0 - np.sum(conc[:-1]))
+        return conc
+
+    def _log_likelihood(
+        self, params: np.ndarray, observed: np.ndarray
+    ) -> float:
+        """
+        Compute log-likelihood for nested sampling.
+
+        Parameters
+        ----------
+        params : array
+            [T_eV, log_ne, c_1, ..., c_{n-1}]
+        observed : array
+            Observed spectrum
+
+        Returns
+        -------
+        float
+            Log-likelihood value
+        """
+        T_eV = params[0]
+        log_ne = params[1]
+        concentrations = self._params_to_concentrations(params)
+
+        # Check bounds
+        if T_eV <= 0 or np.any(concentrations < 0) or np.any(concentrations > 1):
+            return -np.inf
+
+        try:
+            # Forward model (using NumPy version for dynesty compatibility)
+            predicted = self.forward_model.forward_numpy(T_eV, log_ne, concentrations)
+
+            # Log-likelihood with noise model
+            sigma_read = self.noise_params.readout_noise
+            dark = self.noise_params.dark_current
+
+            # Combined variance: shot noise + readout + dark
+            variance = np.abs(predicted) + sigma_read**2 + dark
+
+            # Gaussian log-likelihood
+            residuals = observed - predicted
+            log_lik = -0.5 * np.sum(residuals**2 / variance + np.log(2 * np.pi * variance))
+
+            if not np.isfinite(log_lik):
+                return -np.inf
+
+            return float(log_lik)
+
+        except Exception:
+            return -np.inf
+
+    def run(
+        self,
+        observed: np.ndarray,
+        nlive: int = 100,
+        dlogz: float = 0.1,
+        sample: str = "auto",
+        bound: str = "multi",
+        seed: int = 42,
+        maxiter: Optional[int] = None,
+        maxcall: Optional[int] = None,
+        verbose: bool = True,
+    ) -> NestedSamplingResult:
+        """
+        Run nested sampling.
+
+        Parameters
+        ----------
+        observed : array
+            Observed spectrum
+        nlive : int
+            Number of live points (default: 100, use 500+ for production)
+        dlogz : float
+            Target evidence tolerance (default: 0.1)
+        sample : str
+            Sampling method: 'auto', 'unif', 'rwalk', 'slice', 'rslice'
+        bound : str
+            Bounding method: 'none', 'single', 'multi', 'balls', 'cubes'
+        seed : int
+            Random seed
+        maxiter : int, optional
+            Maximum iterations
+        maxcall : int, optional
+            Maximum likelihood calls
+        verbose : bool
+            Show progress (default: True)
+
+        Returns
+        -------
+        NestedSamplingResult
+            Results with posterior samples and evidence
+        """
+        observed_np = np.asarray(observed)
+
+        # Create likelihood function (closure over observed)
+        def loglike(params):
+            return self._log_likelihood(params, observed_np)
+
+        # Set random state
+        rstate = np.random.default_rng(seed)
+
+        logger.info(
+            f"Starting nested sampling: nlive={nlive}, dlogz={dlogz}, "
+            f"ndim={self.ndim}"
+        )
+
+        # Create and run sampler
+        sampler = DynestyNestedSampler(
+            loglike,
+            self._prior_transform,
+            self.ndim,
+            nlive=nlive,
+            bound=bound,
+            sample=sample,
+            rstate=rstate,
+        )
+
+        sampler.run_nested(
+            dlogz=dlogz,
+            maxiter=maxiter,
+            maxcall=maxcall,
+            print_progress=verbose,
+        )
+
+        results = sampler.results
+
+        # Extract results
+        samples = results.samples  # Shape: (n_samples, ndim)
+        weights = np.exp(results.logwt - results.logwt.max())
+        weights /= weights.sum()
+
+        # Evidence
+        log_evidence = float(results.logz[-1])
+        log_evidence_err = float(results.logzerr[-1])
+        information = float(results.information[-1]) if hasattr(results, 'information') else 0.0
+
+        # Compute weighted statistics
+        T_samples = samples[:, 0]
+        log_ne_samples = samples[:, 1]
+
+        T_mean = float(np.average(T_samples, weights=weights))
+        T_std = float(np.sqrt(np.average((T_samples - T_mean)**2, weights=weights)))
+
+        log_ne_mean = float(np.average(log_ne_samples, weights=weights))
+        log_ne_std = float(np.sqrt(np.average((log_ne_samples - log_ne_mean)**2, weights=weights)))
+
+        # Concentration statistics
+        conc_samples = np.array([self._params_to_concentrations(s) for s in samples])
+        conc_mean = {}
+        conc_std = {}
+        for i, el in enumerate(self.elements):
+            c_samples = conc_samples[:, i]
+            c_mean = float(np.average(c_samples, weights=weights))
+            c_std = float(np.sqrt(np.average((c_samples - c_mean)**2, weights=weights)))
+            conc_mean[el] = c_mean
+            conc_std[el] = c_std
+
+        # Build result
+        result = NestedSamplingResult(
+            samples={
+                "T_eV": T_samples,
+                "log_ne": log_ne_samples,
+                "concentrations": conc_samples,
+            },
+            weights=weights,
+            log_evidence=log_evidence,
+            log_evidence_err=log_evidence_err,
+            information=information,
+            T_eV_mean=T_mean,
+            T_eV_std=T_std,
+            log_ne_mean=log_ne_mean,
+            log_ne_std=log_ne_std,
+            concentrations_mean=conc_mean,
+            concentrations_std=conc_std,
+            n_live=nlive,
+            n_iterations=int(results.niter),
+            n_calls=int(np.sum(results.ncall)),  # ncall may be array
+        )
+
+        logger.info(
+            f"Nested sampling complete: ln(Z) = {log_evidence:.2f} ± {log_evidence_err:.2f}, "
+            f"T = {T_mean:.3f} ± {T_std:.3f} eV"
+        )
+
+        return result
 
 
 def run_mcmc(

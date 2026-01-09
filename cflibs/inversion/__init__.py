@@ -58,6 +58,17 @@ try:
 except ImportError:
     _HAS_BAYESIAN = False
 
+# Nested sampling (requires dynesty)
+try:
+    from cflibs.inversion.bayesian import (
+        NestedSampler,
+        NestedSamplingResult,
+    )
+
+    _HAS_NESTED = True
+except ImportError:
+    _HAS_NESTED = False
+
 __all__ = [
     "LineObservation",
     "BoltzmannFitResult",
@@ -99,4 +110,11 @@ if _HAS_BAYESIAN:
         "create_temperature_prior",
         "create_density_prior",
         "create_concentration_prior",
+    ])
+
+# Add Nested sampling exports if available
+if _HAS_NESTED:
+    __all__.extend([
+        "NestedSampler",
+        "NestedSamplingResult",
     ])

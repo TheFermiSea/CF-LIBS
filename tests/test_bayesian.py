@@ -693,3 +693,259 @@ class TestMCMCSampling:
             assert axes is None or hasattr(axes, "__iter__") or hasattr(axes, "flat")
         except Exception:
             pass
+
+
+# --- Nested Sampling Tests (CF-LIBS-nfo) ---
+
+
+@pytest.mark.requires_jax
+class TestNestedSampling:
+    """Tests for nested sampling functionality."""
+
+    def test_nested_sampling_result_dataclass(self):
+        """Test NestedSamplingResult dataclass creation and properties."""
+        from cflibs.inversion.bayesian import NestedSamplingResult
+
+        # Create minimal result
+        result = NestedSamplingResult(
+            samples={"T_eV": np.array([1.0, 1.1, 1.2]), "log_ne": np.array([17.0, 17.1, 17.2])},
+            weights=np.array([0.3, 0.4, 0.3]),
+            log_evidence=-100.0,
+            log_evidence_err=0.5,
+            information=2.5,
+            T_eV_mean=1.1,
+            T_eV_std=0.1,
+            log_ne_mean=17.1,
+            log_ne_std=0.1,
+            concentrations_mean={"Fe": 0.5, "Ca": 0.5},
+            concentrations_std={"Fe": 0.1, "Ca": 0.1},
+            n_live=100,
+            n_iterations=500,
+            n_calls=10000,
+        )
+
+        # Test basic properties
+        assert result.log_evidence == -100.0
+        assert result.log_evidence_err == 0.5
+        assert result.information == 2.5
+
+        # Test derived properties (use approximate comparison for floating point)
+        from cflibs.core.constants import EV_TO_K
+        assert np.isclose(result.T_K_mean, result.T_eV_mean * EV_TO_K)
+        assert np.isclose(result.n_e_mean, 10.0**17.1)
+
+        # Test evidence property
+        assert np.isclose(result.evidence, np.exp(-100.0))
+
+    def test_nested_sampling_result_summary_table(self):
+        """Test summary table generation."""
+        from cflibs.inversion.bayesian import NestedSamplingResult
+
+        result = NestedSamplingResult(
+            samples={"T_eV": np.array([1.0]), "log_ne": np.array([17.0])},
+            weights=np.array([1.0]),
+            log_evidence=-50.0,
+            log_evidence_err=0.3,
+            information=3.0,
+            T_eV_mean=1.0,
+            T_eV_std=0.05,
+            log_ne_mean=17.0,
+            log_ne_std=0.2,
+            concentrations_mean={"Fe": 1.0},
+            concentrations_std={"Fe": 0.01},
+            n_live=100,
+            n_iterations=200,
+            n_calls=5000,
+        )
+
+        table = result.summary_table()
+        assert isinstance(table, str)
+        assert "Nested Sampling" in table
+        assert "ln(Z)" in table
+        assert "Information" in table
+        assert "T [eV]" in table
+        assert "Fe" in table
+
+    def test_nested_sampling_result_model_comparison(self):
+        """Test Bayes factor model comparison."""
+        from cflibs.inversion.bayesian import NestedSamplingResult
+
+        # Create two mock results with different evidences
+        result_a = NestedSamplingResult(
+            samples={"T_eV": np.array([1.0]), "log_ne": np.array([17.0])},
+            weights=np.array([1.0]),
+            log_evidence=-100.0,
+            log_evidence_err=0.5,
+            information=2.0,
+            T_eV_mean=1.0,
+            T_eV_std=0.1,
+            log_ne_mean=17.0,
+            log_ne_std=0.2,
+            concentrations_mean={"Fe": 1.0},
+            concentrations_std={"Fe": 0.05},
+        )
+
+        result_b = NestedSamplingResult(
+            samples={"T_eV": np.array([1.0]), "log_ne": np.array([17.0])},
+            weights=np.array([1.0]),
+            log_evidence=-105.0,  # Lower evidence (worse model)
+            log_evidence_err=0.5,
+            information=2.0,
+            T_eV_mean=1.0,
+            T_eV_std=0.1,
+            log_ne_mean=17.0,
+            log_ne_std=0.2,
+            concentrations_mean={"Fe": 1.0},
+            concentrations_std={"Fe": 0.05},
+        )
+
+        comparison = NestedSamplingResult.compare_models(
+            result_a, result_b, "Model A", "Model B"
+        )
+
+        assert isinstance(comparison, str)
+        assert "Model Comparison" in comparison
+        assert "Δln(Z)" in comparison
+        assert "Bayes factor" in comparison
+        assert "Model A" in comparison
+
+    def test_nested_sampler_import(self):
+        """Test NestedSampler can be imported."""
+        dynesty = pytest.importorskip("dynesty")
+        from cflibs.inversion.bayesian import NestedSampler, HAS_DYNESTY
+
+        assert HAS_DYNESTY is True
+        assert NestedSampler is not None
+
+    def test_nested_sampler_init(self, bayesian_db):
+        """Test NestedSampler initialization."""
+        dynesty = pytest.importorskip("dynesty")
+        from cflibs.inversion.bayesian import NestedSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe", "Ca"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        sampler = NestedSampler(model)
+
+        assert sampler.n_elements == 2
+        assert sampler.ndim == 3  # T_eV + log_ne + (2-1) concentrations
+        assert sampler.forward_model is model
+
+    def test_nested_sampler_prior_transform(self, bayesian_db):
+        """Test prior transform from unit cube to physical space."""
+        dynesty = pytest.importorskip("dynesty")
+        from cflibs.inversion.bayesian import NestedSampler, PriorConfig
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe", "Ca"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        config = PriorConfig(T_eV_range=(0.5, 3.0), log_ne_range=(15.0, 19.0))
+        sampler = NestedSampler(model, prior_config=config)
+
+        # Test transform at boundaries
+        u_min = np.array([0.0, 0.0, 0.0])
+        u_max = np.array([1.0, 1.0, 1.0])
+        u_mid = np.array([0.5, 0.5, 0.5])
+
+        x_min = sampler._prior_transform(u_min)
+        x_max = sampler._prior_transform(u_max)
+        x_mid = sampler._prior_transform(u_mid)
+
+        # Check T_eV bounds
+        assert x_min[0] == 0.5  # T_min
+        assert x_max[0] == 3.0  # T_max
+        assert 0.5 < x_mid[0] < 3.0
+
+        # Check log_ne bounds
+        assert x_min[1] == 15.0
+        assert x_max[1] == 19.0
+        assert 15.0 < x_mid[1] < 19.0
+
+    def test_nested_sampler_params_to_concentrations(self, bayesian_db):
+        """Test parameter to concentration conversion."""
+        dynesty = pytest.importorskip("dynesty")
+        from cflibs.inversion.bayesian import NestedSampler
+
+        # Single element case
+        model_single = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+        sampler_single = NestedSampler(model_single)
+        conc = sampler_single._params_to_concentrations(np.array([1.0, 17.0]))
+        assert len(conc) == 1
+        assert conc[0] == 1.0
+
+        # Multi-element case
+        model_multi = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe", "Ca"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+        sampler_multi = NestedSampler(model_multi)
+        params = np.array([1.0, 17.0, 0.6])  # T_eV, log_ne, c_Fe
+        conc = sampler_multi._params_to_concentrations(params)
+        assert len(conc) == 2
+        assert conc[0] == 0.6
+        assert conc[1] == 0.4  # 1.0 - 0.6
+        assert np.isclose(np.sum(conc), 1.0)
+
+    @pytest.mark.slow
+    def test_nested_sampler_run_smoke(self, bayesian_db):
+        """Smoke test for nested sampling run (minimal iterations)."""
+        dynesty = pytest.importorskip("dynesty")
+        from cflibs.inversion.bayesian import NestedSampler, NestedSamplingResult
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),  # Wide range to ensure Fe lines exist
+            pixels=50,
+        )
+
+        # Generate synthetic observation
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 50, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = NestedSampler(model)
+        result = sampler.run(
+            observed,
+            nlive=20,  # Minimal for smoke test
+            dlogz=1.0,  # Loose tolerance for speed
+            maxiter=100,  # Cap iterations
+            verbose=False,
+        )
+
+        # Check result type
+        assert isinstance(result, NestedSamplingResult)
+
+        # Check evidence is computed
+        assert np.isfinite(result.log_evidence)
+        assert result.log_evidence_err > 0
+
+        # Check samples exist
+        assert "T_eV" in result.samples
+        assert "log_ne" in result.samples
+        assert len(result.weights) == len(result.samples["T_eV"])
+
+        # Check weighted mean is in reasonable range
+        assert 0.5 < result.T_eV_mean < 3.0
+        assert 15.0 < result.log_ne_mean < 19.0
+
+        # Check metadata
+        assert result.n_live == 20
+        assert result.n_iterations > 0
+        assert result.n_calls > 0

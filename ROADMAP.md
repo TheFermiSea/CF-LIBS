@@ -22,7 +22,7 @@ The core insight driving this roadmap: building inversion algorithms on top of i
 | Phase 2b | ✅ Complete | Classic CF-LIBS implementation (Boltzmann, solver, closure) |
 | Phase 2c | ✅ Complete | Quality metrics and diagnostics (95 tests) |
 | Phase 2d | ✅ Complete | Advanced forward fitting (manifold + hybrid inversion) |
-| Phase 3 | 🔄 In Progress | Bayesian methods and uncertainty |
+| Phase 3 | ✅ Complete | Bayesian methods and uncertainty |
 | Phase 4 | 📋 Future | Ecosystem and integrations |
 
 ---
@@ -205,9 +205,9 @@ For difficult cases (heavy interference, high opacity) where classic CF-LIBS str
 
 ---
 
-## Phase 3: Bayesian Methods and Uncertainty 🔄
+## Phase 3: Bayesian Methods and Uncertainty ✅
 
-**Status**: In Progress
+**Status**: Complete
 **Priority**: Normal (P2)
 **Tracking**: `bd show CF-LIBS-cjq`
 
@@ -243,14 +243,16 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [x] ArviZ integration (`plot_trace()`, `plot_posterior()`)
 - [x] **Fixed**: Voigt profile gradients now stable via Weideman rational approximation (CF-LIBS-452)
 
-### Remaining Tasks
+### Completed Tasks
 
-#### Nested Sampling (Model Comparison)
-`CF-LIBS-nfo` | P3
+#### Nested Sampling (Model Comparison) ✅
+`CF-LIBS-nfo` | Complete
 
-- [ ] dynesty or jaxns integration
-- [ ] Evidence calculation for model selection
-- [ ] Compare: single-T vs multi-T plasma models
+- [x] dynesty integration via `NestedSampler` class
+- [x] Evidence calculation: `log_evidence`, `log_evidence_err` in `NestedSamplingResult`
+- [x] Bayes factor model comparison: `NestedSamplingResult.compare_models()`
+- [x] Unit cube prior transform with Dirichlet stick-breaking for concentrations
+- [x] 8 tests in `tests/test_bayesian.py::TestNestedSampling`
 
 #### Uncertainty Reporting ✅
 `CF-LIBS-k7g` | Complete
