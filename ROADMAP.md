@@ -104,7 +104,11 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 - [x] Data structure for line observations (`LineObservation`, `BoltzmannPlotData`)
 - [x] Weighted linear regression with outlier rejection
 - [x] Sigma-clipping for robust fitting
+- [x] RANSAC robust fitting for gross outliers
+- [x] Huber M-estimation for moderate outliers
+- [x] `FitMethod` enum for method selection
 - [x] `BoltzmannPlotFitter` in `cflibs/inversion/boltzmann.py`
+- [x] 20 tests in `tests/test_boltzmann.py`
 
 #### Iterative CF-LIBS Solver
 - [x] `IterativeCFLIBSSolver` in `cflibs/inversion/solver.py`
@@ -122,18 +126,22 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 - [x] `SelfAbsorptionCorrector` in `cflibs/inversion/self_absorption.py`
 - [x] Recursive correction with optical depth estimation
 - [x] Line masking as fallback
+- [x] Algorithm limitations documented (homogeneous plasma, LTE, Gaussian profile assumptions)
+- [x] 46 tests in `tests/test_self_absorption.py`
 
 #### Automatic Line Selection
 - [x] `LineSelector` in `cflibs/inversion/line_selection.py`
-- [x] Quality scoring: SNR × isolation factor
+- [x] Quality scoring: SNR × (1/σ_atomic) × isolation factor
 - [x] Energy spread requirement
 - [x] Resonance line exclusion option
+- [x] Integration tests with Boltzmann fitting
+- [x] 42 tests in `tests/test_line_selection.py`
 
 ---
 
 ## Phase 2c: Quality Metrics and Diagnostics ✅
 
-**Status**: Complete (95 tests passing)
+**Status**: Complete (139 tests in quality/selection/absorption modules)
 **Priority**: High (P1)
 **Tracking**: `bd show CF-LIBS-4xu`
 
@@ -150,12 +158,14 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 #### Line Selection Quality
 - [x] Isolation scoring for line interference
 - [x] Energy spread requirements
-- [x] 32 tests in `tests/test_line_selection.py`
+- [x] Scoring algorithm documented (SNR × atomic data quality × isolation)
+- [x] 42 tests in `tests/test_line_selection.py`
 
 #### Self-Absorption Diagnostics
 - [x] Optical depth estimation
 - [x] Correction factor tracking
-- [x] 32 tests in `tests/test_self_absorption.py`
+- [x] Algorithm limitations documented
+- [x] 46 tests in `tests/test_self_absorption.py`
 
 #### Error Propagation
 `CF-LIBS-0pb` | P2 | Remaining
@@ -222,7 +232,7 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [x] Likelihood function: `log P(spectrum | T, n_e, C)` via `log_likelihood()`
 - [x] Noise model: Poisson (shot) + Gaussian (readout) + dark current
 - [x] JAX-compatible for autodiff (integrates with NumPyro)
-- [x] 21 tests in `tests/test_bayesian.py`
+- [x] 57 tests in `tests/test_bayesian.py`
 
 #### Prior Specification ✅
 `CF-LIBS-zbs` | Complete
@@ -241,7 +251,12 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [x] Convergence diagnostics: R-hat (Gelman-Rubin) and ESS via ArviZ
 - [x] `summary_table()` for publication-ready output
 - [x] ArviZ integration (`plot_trace()`, `plot_posterior()`)
+- [x] `posterior_predictive_check()` for model validation (chi-squared, Bayesian p-value)
 - [x] **Fixed**: Voigt profile gradients now stable via Weideman rational approximation (CF-LIBS-452)
+- [x] User Guide with workflow examples in module docstring
+- [x] Prior Selection Guide (temperature, density, concentration)
+- [x] Prior Sensitivity Analysis documentation
+- [x] Convergence Diagnostics guide
 
 ### Completed Tasks
 
@@ -292,14 +307,34 @@ bd show CF-LIBS-xxx        # Issue details
 bd dep tree CF-LIBS-y7o    # Dependency tree
 ```
 
+## Literature Review
+
+A systematic review of high-performance LIBS algorithms (2018-2025) was conducted to guide implementation priorities. Key findings are documented in `docs/literature/high_performance_libs_algorithms.md`.
+
+**Tracking**: `bd show CF-LIBS-4eh` (Implementation Priorities), `bd show CF-LIBS-h1l` (Research Gaps)
+
+### Implemented from Literature
+- RANSAC/Huber robust fitting for outlier rejection (CF-LIBS-4eh.1)
+- Self-absorption validation framework (CF-LIBS-4eh.2)
+- Line quality scoring integration (CF-LIBS-4eh.3)
+- Posterior predictive checks for Bayesian UQ (CF-LIBS-4eh.4)
+
+### Future Directions (P3/P4)
+- Multi-element joint optimization
+- Transfer learning for instrument calibration
+- Real-time analysis pipelines
+- Physics-informed neural networks
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 Priority areas for contribution:
-1. **Phase 3 Bayesian** - NumPyro integration, MCMC sampling
-2. **Error Propagation** - Monte Carlo uncertainty (CF-LIBS-0pb)
-3. **Testing** - Additional round-trip validation scenarios
+1. **Error Propagation** - Monte Carlo uncertainty (CF-LIBS-0pb)
+2. **Benchmark Database** - Open LIBS spectral reference data (CF-LIBS-h1l.1)
+3. **Matrix Effects** - Correction methods for complex samples (CF-LIBS-h1l.2)
 4. **Documentation** - Examples, tutorials, Jupyter notebooks
 
 ## References
