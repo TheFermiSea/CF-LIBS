@@ -21,7 +21,7 @@ The core insight driving this roadmap: building inversion algorithms on top of i
 | Phase 2a | ✅ Complete | Physics foundation (partition functions, Voigt, Stark) |
 | Phase 2b | ✅ Complete | Classic CF-LIBS implementation (Boltzmann, solver, closure) |
 | Phase 2c | ✅ Complete | Quality metrics and diagnostics (95 tests) |
-| Phase 2d | 🔄 In Progress | Advanced forward fitting (manifold physics done) |
+| Phase 2d | ✅ Complete | Advanced forward fitting (manifold + hybrid inversion) |
 | Phase 3 | 📋 Planned | Bayesian methods and uncertainty |
 | Phase 4 | 📋 Future | Ecosystem and integrations |
 
@@ -166,9 +166,9 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 
 ---
 
-## Phase 2d: Advanced Forward Fitting 🔄
+## Phase 2d: Advanced Forward Fitting ✅
 
-**Status**: In Progress
+**Status**: Complete
 **Priority**: Normal (P2)
 **Tracking**: `bd show CF-LIBS-cxm`
 
@@ -187,21 +187,21 @@ For difficult cases (heavy interference, high opacity) where classic CF-LIBS str
 - [x] Configuration options: `use_voigt_profile`, `use_stark_broadening`
 - [x] Physics version metadata in HDF5 manifolds
 
-### Remaining Tasks
+#### Round-Trip Testing ✅
+`CF-LIBS-4wl` | Complete
 
-#### Hybrid Inversion Strategy
-`CF-LIBS-o7b` | P2
+- [x] `GoldenSpectrumGenerator`: Synthetic spectra with known ground truth
+- [x] `NoiseModel`: Realistic noise (Poisson shot + Gaussian readout + laser fluctuations)
+- [x] `RoundTripValidator`: Forward-inverse pipeline validation
+- [x] 17 tests in `tests/test_round_trip.py`
 
-- [ ] Coarse search: Manifold nearest-neighbor (cosine similarity)
-- [ ] Fine-tune: JAX autodiff + BFGS/L-M optimizer
-- [ ] Combine global search + local precision
+#### Hybrid Inversion Strategy ✅
+`CF-LIBS-o7b` | Complete
 
-#### Round-Trip Testing
-`CF-LIBS-4wl` | P2
-
-- [ ] Generate "Golden Spectra" with known parameters
-- [ ] Add realistic noise (Poisson + Gaussian)
-- [ ] Verify parameter recovery: T±5%, n_e±20%
+- [x] `HybridInverter`: Manifold coarse search + JAX L-BFGS optimization
+- [x] `SpectralFitter`: Standalone JAX-based spectral fitting
+- [x] Parameter packing with log-transform (positivity) and softmax (simplex)
+- [x] 14 tests in `tests/test_hybrid_inversion.py`
 
 ---
 
@@ -209,8 +209,7 @@ For difficult cases (heavy interference, high opacity) where classic CF-LIBS str
 
 **Status**: Planned
 **Priority**: Normal (P2)
-**Tracking**: `bd show CF-LIBS-phase3` (to be created)
-**Blocked by**: Phase 2d completion
+**Tracking**: `bd show CF-LIBS-cjq`
 
 Full uncertainty quantification via Bayesian inference. Critical for scientific credibility.
 
@@ -288,10 +287,10 @@ bd dep tree CF-LIBS-y7o    # Dependency tree
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 Priority areas for contribution:
-1. **Phase 2a physics** - Voigt profiles, Stark broadening
-2. **Phase 2b classic solver** - Boltzmann plots, closure equation
-3. **Testing** - Round-trip tests, benchmark spectra
-4. **Documentation** - Examples, tutorials
+1. **Phase 3 Bayesian** - NumPyro integration, MCMC sampling
+2. **Error Propagation** - Monte Carlo uncertainty (CF-LIBS-0pb)
+3. **Testing** - Additional round-trip validation scenarios
+4. **Documentation** - Examples, tutorials, Jupyter notebooks
 
 ## References
 
