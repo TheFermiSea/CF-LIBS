@@ -22,7 +22,7 @@ The core insight driving this roadmap: building inversion algorithms on top of i
 | Phase 2b | ✅ Complete | Classic CF-LIBS implementation (Boltzmann, solver, closure) |
 | Phase 2c | ✅ Complete | Quality metrics and diagnostics (95 tests) |
 | Phase 2d | ✅ Complete | Advanced forward fitting (manifold + hybrid inversion) |
-| Phase 3 | 📋 Planned | Bayesian methods and uncertainty |
+| Phase 3 | 🔄 In Progress | Bayesian methods and uncertainty |
 | Phase 4 | 📋 Future | Ecosystem and integrations |
 
 ---
@@ -205,29 +205,35 @@ For difficult cases (heavy interference, high opacity) where classic CF-LIBS str
 
 ---
 
-## Phase 3: Bayesian Methods and Uncertainty 📋
+## Phase 3: Bayesian Methods and Uncertainty 🔄
 
-**Status**: Planned
+**Status**: In Progress
 **Priority**: Normal (P2)
 **Tracking**: `bd show CF-LIBS-cjq`
 
 Full uncertainty quantification via Bayesian inference. Critical for scientific credibility.
 
-### Tasks
+### Completed Tasks
 
-#### Bayesian Forward Model
-`CF-LIBS-bayes-fwd` | P2
+#### Bayesian Forward Model ✅
+`CF-LIBS-cxp` | Complete
 
-- [ ] Likelihood function: `P(spectrum | T, n_e, C)`
-- [ ] Noise model: Poisson (shot) + Gaussian (readout)
-- [ ] JAX-compatible log-likelihood for autodiff
+- [x] `BayesianForwardModel` class with full physics (Saha-Boltzmann, Voigt, Stark)
+- [x] Likelihood function: `log P(spectrum | T, n_e, C)` via `log_likelihood()`
+- [x] Noise model: Poisson (shot) + Gaussian (readout) + dark current
+- [x] JAX-compatible for autodiff (integrates with NumPyro)
+- [x] 21 tests in `tests/test_bayesian.py`
 
-#### Prior Specification
-`CF-LIBS-bayes-prior` | P2
+#### Prior Specification ✅
+`CF-LIBS-zbs` | Complete
 
-- [ ] Physically motivated priors for T (0.5-3 eV), n_e (10^15-10^19)
-- [ ] Simplex prior for concentrations (sum to 1)
-- [ ] Informative priors from literature constraints
+- [x] `PriorConfig` dataclass with physical bounds
+- [x] Temperature prior: uniform on 0.5-3 eV (typical LIBS range)
+- [x] Electron density prior: log-uniform (Jeffreys) on 10^15-10^19 cm^-3
+- [x] Concentration prior: Dirichlet (enforces simplex constraint)
+- [x] `create_temperature_prior()`, `create_density_prior()`, `create_concentration_prior()` functions
+
+### Remaining Tasks
 
 #### MCMC Sampling
 `CF-LIBS-bayes-mcmc` | P2

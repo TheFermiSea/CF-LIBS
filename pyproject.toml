@@ -39,6 +39,11 @@ jax-metal = ["jax>=0.4.20", "jax-metal>=0.1.0"]
 jax-cuda = ["jax[cuda12]>=0.4.20"]
 # HDF5 for manifold storage
 hdf5 = ["h5py>=3.8.0"]
+# Bayesian inference (MCMC, nested sampling)
+bayesian = [
+    "numpyro>=0.14.0",
+    "arviz>=0.17.0",
+]
 # Development dependencies
 dev = [
     "pytest>=7.4.0",
@@ -58,6 +63,8 @@ local = [
     "jax>=0.4.20",
     "jax-metal>=0.1.0",
     "h5py>=3.8.0",
+    "numpyro>=0.14.0",
+    "arviz>=0.17.0",
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-benchmark>=4.0.0",
@@ -69,6 +76,8 @@ local = [
 cluster = [
     "jax[cuda12]>=0.4.20",
     "h5py>=3.8.0",
+    "numpyro>=0.14.0",
+    "arviz>=0.17.0",
     "mpi4py>=3.1.0",
 ]
 

@@ -36,6 +36,25 @@ try:
 except ImportError:
     _HAS_HYBRID = False
 
+# Bayesian inference (requires JAX + NumPyro)
+try:
+    from cflibs.inversion.bayesian import (
+        BayesianForwardModel,
+        AtomicDataArrays,
+        NoiseParameters,
+        PriorConfig,
+        log_likelihood,
+        bayesian_model,
+        run_mcmc,
+        create_temperature_prior,
+        create_density_prior,
+        create_concentration_prior,
+    )
+
+    _HAS_BAYESIAN = True
+except ImportError:
+    _HAS_BAYESIAN = False
+
 __all__ = [
     "LineObservation",
     "BoltzmannFitResult",
@@ -60,3 +79,18 @@ __all__ = [
 # Add hybrid inversion exports if available
 if _HAS_HYBRID:
     __all__.extend(["HybridInverter", "HybridInversionResult", "SpectralFitter"])
+
+# Add Bayesian exports if available
+if _HAS_BAYESIAN:
+    __all__.extend([
+        "BayesianForwardModel",
+        "AtomicDataArrays",
+        "NoiseParameters",
+        "PriorConfig",
+        "log_likelihood",
+        "bayesian_model",
+        "run_mcmc",
+        "create_temperature_prior",
+        "create_density_prior",
+        "create_concentration_prior",
+    ])
