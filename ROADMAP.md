@@ -252,12 +252,12 @@ Full uncertainty quantification via Bayesian inference. Critical for scientific 
 - [ ] Evidence calculation for model selection
 - [ ] Compare: single-T vs multi-T plasma models
 
-#### Uncertainty Reporting
-`CF-LIBS-k7g` | P2
+#### Uncertainty Reporting ✅
+`CF-LIBS-k7g` | Complete
 
 - [x] MCMCResult with credible intervals: T±σ, n_e±σ, C±σ
-- [ ] Correlation analysis between parameters
-- [ ] ArviZ corner plots
+- [x] Correlation analysis: `correlation_matrix()`, `correlation_table()`
+- [x] ArviZ visualization: `plot_corner()`, `plot_forest()`
 
 ---
 
