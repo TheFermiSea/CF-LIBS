@@ -6,12 +6,87 @@ including:
 - JAX-compatible forward model with full physics (Saha-Boltzmann, Voigt, Stark)
 - Physically motivated priors for plasma parameters
 - Log-likelihood function with realistic noise model (Poisson + Gaussian)
+- MCMC sampling with NUTS algorithm (NumPyro)
+- Nested sampling for model comparison (dynesty)
+- Convergence diagnostics (R-hat, ESS, divergences)
+- Posterior predictive checks for model validation
 
 The implementation is designed to work with NumPyro for MCMC sampling.
 
-References:
-- Tognoni et al., "CF-LIBS: State of the art" (2010)
-- Ciucci et al., "New procedure for quantitative elemental analysis by LIBS" (1999)
+User Guide
+----------
+1. **Basic MCMC workflow**:
+
+    >>> model = BayesianForwardModel(db_path, elements=["Fe", "Cu"], ...)
+    >>> sampler = MCMCSampler(model)
+    >>> result = sampler.run(observed_spectrum, num_samples=2000, num_chains=4)
+    >>> print(result.summary_table())
+
+2. **Check convergence** (use multiple chains for production):
+
+    >>> if result.is_converged:
+    ...     print("Converged! R-hat < 1.01 for all parameters")
+    >>> else:
+    ...     print(f"Warning: {result.convergence_status.value}")
+
+3. **Posterior predictive check**:
+
+    >>> ppc = sampler.posterior_predictive_check(result, observed)
+    >>> if ppc["p_value"] > 0.05:
+    ...     print("Model fits data well")
+
+4. **Model comparison** (nested sampling):
+
+    >>> ns = NestedSampler(model)
+    >>> result = ns.run(observed, nlive=500)
+    >>> print(f"Evidence: ln(Z) = {result.log_evidence:.2f}")
+
+Prior Selection Guide
+---------------------
+**Temperature (T_eV)**:
+- Default: Uniform(0.5, 3.0) eV
+- LIBS typically: 0.6-1.5 eV (7000-17000 K)
+- Use narrower range if prior information available
+
+**Electron Density (log_ne)**:
+- Default: Uniform(15, 19) on log10 scale (log-uniform = Jeffreys prior)
+- LIBS typically: 10^16 - 10^18 cm^-3
+- Appropriate for scale parameters with unknown order of magnitude
+
+**Concentrations**:
+- Default: Dirichlet(alpha=1.0) = uniform on simplex
+- alpha > 1: Favors more equal concentrations
+- alpha < 1: Favors sparse compositions (one dominant element)
+- Use known_concentrations for informative priors if matrix is known
+
+Prior Sensitivity Analysis
+--------------------------
+If results are sensitive to prior choice:
+1. Run with different prior ranges and compare posteriors
+2. Check that posterior is narrower than prior (data is informative)
+3. For robust results, use minimally informative priors:
+   - Temperature: wide uniform covering all plausible LIBS values
+   - Density: log-uniform spanning expected orders of magnitude
+   - Concentrations: Dirichlet(1) unless strong prior knowledge exists
+
+Convergence Diagnostics
+-----------------------
+- **R-hat < 1.01**: Chains have mixed well (required for convergence)
+- **ESS > 100**: Sufficient effective samples for reliable estimates
+- **Divergences = 0**: No numerical issues during sampling
+
+If not converged:
+1. Increase num_warmup and num_samples
+2. Use multiple chains (num_chains=4 recommended)
+3. Check for multimodality (use nested sampling)
+4. Adjust target_accept_prob (higher = more conservative)
+
+References
+----------
+- Hoffman & Gelman (2014): NUTS sampler algorithm
+- Phan et al. (2019): NumPyro compositional effects
+- Tognoni et al. (2010): CF-LIBS state of the art
+- Ciucci et al. (1999): CF-LIBS quantitative analysis
 """
 
 from dataclasses import dataclass, field
@@ -1492,6 +1567,126 @@ class MCMCSampler:
         except Exception as e:
             logger.warning(f"Forest plot failed: {e}")
             return None
+
+    def posterior_predictive_check(
+        self,
+        result: MCMCResult,
+        observed: np.ndarray,
+        n_samples: int = 100,
+        seed: int = 42,
+    ) -> Dict[str, Any]:
+        """
+        Perform posterior predictive check for model validation.
+
+        Generates synthetic spectra from posterior samples and compares
+        to observed data. A well-fitting model should produce predictions
+        that are statistically consistent with observations.
+
+        The check computes:
+        1. Predicted spectra from posterior samples
+        2. Residuals relative to observation
+        3. Chi-squared statistics
+        4. Bayesian p-value (proportion of simulated chi-squared > observed)
+
+        Parameters
+        ----------
+        result : MCMCResult
+            MCMC result from run()
+        observed : np.ndarray
+            Observed spectrum
+        n_samples : int
+            Number of posterior samples to use (default: 100)
+        seed : int
+            Random seed for sampling
+
+        Returns
+        -------
+        dict
+            Contains:
+            - 'predicted_mean': Mean predicted spectrum
+            - 'predicted_std': Standard deviation of predictions
+            - 'residuals': observed - predicted_mean
+            - 'chi_squared_obs': Chi-squared of observed vs predicted mean
+            - 'chi_squared_sim': Array of simulated chi-squared values
+            - 'p_value': Bayesian p-value (P(chi_sq_sim > chi_sq_obs))
+            - 'model_adequate': True if p_value > 0.05 (95% level)
+
+        Notes
+        -----
+        A good model should have p_value between 0.05 and 0.95. Values near 0
+        indicate the model underfits (predictions don't match data), while
+        values near 1 indicate overfitting (model fits noise).
+        """
+        rng = np.random.default_rng(seed)
+
+        # Get posterior samples
+        T_samples = np.array(result.samples["T_eV"]).flatten()
+        log_ne_samples = np.array(result.samples["log_ne"]).flatten()
+        conc_samples = np.array(result.samples["concentrations"]).reshape(
+            -1, len(self.elements)
+        )
+
+        # Select random subset
+        n_available = len(T_samples)
+        n_use = min(n_samples, n_available)
+        indices = rng.choice(n_available, size=n_use, replace=False)
+
+        # Generate predictions from posterior
+        predictions = []
+        for idx in indices:
+            T_eV = float(T_samples[idx])
+            log_ne = float(log_ne_samples[idx])
+            conc = conc_samples[idx]
+
+            pred = self.forward_model.forward_numpy(T_eV, log_ne, conc)
+            predictions.append(pred)
+
+        predictions = np.array(predictions)
+
+        # Summary statistics
+        predicted_mean = np.mean(predictions, axis=0)
+        predicted_std = np.std(predictions, axis=0)
+
+        # Residuals
+        residuals = observed - predicted_mean
+
+        # Noise model variance
+        variance = (
+            np.abs(predicted_mean) / self.noise_params.gain
+            + self.noise_params.readout_noise ** 2
+            + self.noise_params.dark_current
+        )
+        variance = np.maximum(variance, 1e-6)
+
+        # Observed chi-squared
+        chi_sq_obs = np.sum(residuals ** 2 / variance)
+
+        # Simulated chi-squared from posterior predictive
+        chi_sq_sim = []
+        for pred in predictions:
+            # Simulate data from predictive distribution
+            noise_std = np.sqrt(variance)
+            simulated = pred + rng.normal(0, noise_std)
+
+            # Chi-squared for simulated vs prediction
+            chi_sq = np.sum((simulated - pred) ** 2 / variance)
+            chi_sq_sim.append(chi_sq)
+
+        chi_sq_sim = np.array(chi_sq_sim)
+
+        # Bayesian p-value
+        p_value = np.mean(chi_sq_sim >= chi_sq_obs)
+
+        return {
+            "predicted_mean": predicted_mean,
+            "predicted_std": predicted_std,
+            "residuals": residuals,
+            "chi_squared_obs": float(chi_sq_obs),
+            "chi_squared_sim": chi_sq_sim,
+            "p_value": float(p_value),
+            "model_adequate": 0.05 < p_value < 0.95,
+            "n_samples_used": n_use,
+        }
 
 
 class NestedSampler:

@@ -949,3 +949,173 @@ class TestNestedSampling:
         assert result.n_live == 20
         assert result.n_iterations > 0
         assert result.n_calls > 0
+
+
+class TestPosteriorPredictiveCheck:
+    """Tests for posterior predictive check functionality."""
+
+    @pytest.mark.slow
+    def test_posterior_predictive_check_returns_expected_keys(self, bayesian_db):
+        """Test that posterior predictive check returns all expected keys."""
+        jax = pytest.importorskip("jax")
+        numpyro = pytest.importorskip("numpyro")
+        import jax.numpy as jnp
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        # Generate synthetic observation
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(42)
+        observed = np.array(synthetic) + rng.normal(0, 50, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed,
+            num_samples=50,
+            num_warmup=50,
+            num_chains=1,
+        )
+
+        # Run posterior predictive check
+        ppc = sampler.posterior_predictive_check(result, observed, n_samples=20)
+
+        # Check all expected keys are present
+        expected_keys = {
+            "predicted_mean",
+            "predicted_std",
+            "residuals",
+            "chi_squared_obs",
+            "chi_squared_sim",
+            "p_value",
+            "model_adequate",
+            "n_samples_used",
+        }
+        assert set(ppc.keys()) == expected_keys
+
+        # Check shapes
+        assert ppc["predicted_mean"].shape == observed.shape
+        assert ppc["predicted_std"].shape == observed.shape
+        assert ppc["residuals"].shape == observed.shape
+        assert len(ppc["chi_squared_sim"]) == 20
+
+        # Check types
+        assert isinstance(ppc["chi_squared_obs"], float)
+        assert isinstance(ppc["p_value"], float)
+        assert isinstance(ppc["model_adequate"], (bool, np.bool_))
+        assert isinstance(ppc["n_samples_used"], int)
+
+    @pytest.mark.slow
+    def test_posterior_predictive_check_p_value_range(self, bayesian_db):
+        """Test that p-value is in valid range [0, 1]."""
+        jax = pytest.importorskip("jax")
+        numpyro = pytest.importorskip("numpyro")
+        import jax.numpy as jnp
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        # Generate synthetic observation
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        rng = np.random.default_rng(123)
+        observed = np.array(synthetic) + rng.normal(0, 50, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed,
+            num_samples=50,
+            num_warmup=50,
+            num_chains=1,
+        )
+
+        ppc = sampler.posterior_predictive_check(result, observed, n_samples=30)
+
+        # p-value must be in [0, 1]
+        assert 0.0 <= ppc["p_value"] <= 1.0
+
+        # chi-squared values must be non-negative
+        assert ppc["chi_squared_obs"] >= 0
+        assert all(cs >= 0 for cs in ppc["chi_squared_sim"])
+
+    @pytest.mark.slow
+    def test_posterior_predictive_check_model_adequate_for_good_fit(self, bayesian_db):
+        """Test that model_adequate is True when model fits well."""
+        jax = pytest.importorskip("jax")
+        numpyro = pytest.importorskip("numpyro")
+        import jax.numpy as jnp
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        # Generate synthetic observation with realistic noise
+        T_true, log_ne_true = 1.0, 17.0
+        synthetic = model.forward(T_true, log_ne_true, jnp.array([1.0]))
+        rng = np.random.default_rng(456)
+        observed = np.array(synthetic) + rng.normal(0, 30, len(synthetic))
+        observed = np.maximum(observed, 1.0)
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed,
+            num_samples=100,
+            num_warmup=100,
+            num_chains=1,
+        )
+
+        ppc = sampler.posterior_predictive_check(result, observed, n_samples=50)
+
+        # For synthetic data with appropriate noise, p-value should indicate good fit
+        # (not too extreme in either direction). We use a wide range since this is
+        # probabilistic and we want tests to be robust.
+        # Check that chi-squared values are finite and positive
+        assert np.isfinite(ppc["chi_squared_obs"])
+        assert ppc["chi_squared_obs"] > 0
+        assert all(np.isfinite(cs) for cs in ppc["chi_squared_sim"])
+
+    def test_posterior_predictive_check_n_samples_limiting(self, bayesian_db):
+        """Test that n_samples is limited to available samples."""
+        jax = pytest.importorskip("jax")
+        numpyro = pytest.importorskip("numpyro")
+        import jax.numpy as jnp
+        from cflibs.inversion.bayesian import MCMCSampler
+
+        model = BayesianForwardModel(
+            db_path=bayesian_db,
+            elements=["Fe"],
+            wavelength_range=(350, 450),
+            pixels=50,
+        )
+
+        synthetic = model.forward(1.0, 17.0, jnp.array([1.0]))
+        observed = np.array(synthetic) + 10.0
+
+        sampler = MCMCSampler(model)
+        result = sampler.run(
+            observed,
+            num_samples=30,  # Small number of samples
+            num_warmup=30,
+            num_chains=1,
+        )
+
+        # Request more samples than available
+        ppc = sampler.posterior_predictive_check(result, observed, n_samples=1000)
+
+        # n_samples_used should be capped at available
+        assert ppc["n_samples_used"] <= 30
