@@ -3,6 +3,60 @@ Automatic line selection for CF-LIBS analysis.
 
 Provides quality scoring and filtering of spectral lines to improve
 Boltzmann plot reliability.
+
+Scoring Algorithm
+-----------------
+Each spectral line receives a composite quality score:
+
+    score = SNR × (1/σ_atomic) × isolation
+
+Where:
+    - **SNR**: Signal-to-noise ratio = intensity / uncertainty
+    - **σ_atomic**: Atomic data uncertainty (transition probability accuracy)
+    - **isolation**: Spectral isolation factor (1.0 = isolated, 0.0 = blended)
+
+Isolation Factor
+----------------
+Computed as:
+
+    isolation = 1 - exp(-Δλ / λ_iso)
+
+Where:
+    - Δλ: Wavelength separation to nearest line (nm)
+    - λ_iso: Characteristic isolation scale (default 0.1 nm)
+
+Default Thresholds
+------------------
+- min_snr: 10.0 (minimum signal-to-noise ratio)
+- min_energy_spread_ev: 2.0 eV (for reliable temperature determination)
+- min_lines_per_element: 3 (minimum lines needed per element)
+- isolation_wavelength_nm: 0.1 nm (isolation characteristic scale)
+- max_lines_per_element: 20 (to avoid overweighting single element)
+
+Atomic Data Uncertainty Grades (NIST)
+-------------------------------------
+- AAA: ≤0.3%    - A: ≤3%      - C: ≤25%
+- AA:  ≤1%     - B+: ≤7%     - D+: ≤40%
+- A+:  ≤2%     - B:  ≤10%    - D:  ≤50%
+               - C+: ≤18%    - E:  >50%
+
+Selection Criteria
+------------------
+Lines are rejected if any of:
+1. SNR < min_snr threshold
+2. Line is a resonance transition (high self-absorption risk)
+3. Isolation factor < 0.5 (severely blended)
+4. Exceeds max_lines_per_element after sorting by score
+
+Warnings are issued for:
+- Energy spread below minimum for reliable T determination
+- Fewer than min_lines_per_element available
+
+Literature References
+---------------------
+- Clegg et al. (2017): Line selection strategies for LIBS quantification
+- Tognoni et al. (2006): Quantitative LIBS analysis review
+- NIST ASD: Atomic transition probability accuracy grades
 """
 
 from dataclasses import dataclass, field

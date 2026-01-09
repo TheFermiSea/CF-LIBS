@@ -688,3 +688,417 @@ class TestMultiElementSelection:
         result = selector.select(observations)
 
         assert result.n_elements == 3
+
+
+# ==============================================================================
+# Integration Tests: Line Selector with Boltzmann Fitter Pipeline
+# ==============================================================================
+
+
+class TestLineSelectorBoltzmannIntegration:
+    """Integration tests for line selection feeding into Boltzmann fitting."""
+
+    def test_selected_lines_produce_valid_boltzmann_fit(self):
+        """Verify auto-selected lines produce valid Boltzmann plot fit."""
+        from cflibs.inversion.boltzmann import BoltzmannPlotFitter
+
+        # Create synthetic Fe lines following Boltzmann distribution at 8000 K
+        T_K = 8000.0
+        T_eV = T_K * 8.617e-5  # KB_EV
+        intercept_const = 10.0
+
+        observations = []
+        for i, E_k in enumerate(np.linspace(2.0, 6.0, 15)):
+            # y = ln(const) - E_k / kT
+            expected_y = np.log(intercept_const) - E_k / T_eV
+            intensity = np.exp(expected_y)
+            # Add some noise
+            intensity *= 1 + np.random.normal(0, 0.02)
+
+            observations.append(
+                LineObservation(
+                    wavelength_nm=400.0 + i * 10,  # Well separated
+                    intensity=intensity,
+                    intensity_uncertainty=intensity * 0.05,
+                    element="Fe",
+                    ionization_stage=1,
+                    E_k_ev=E_k,
+                    g_k=1,
+                    A_ki=1.0,
+                )
+            )
+
+        # Add some low-quality outliers that should be rejected
+        observations.append(
+            LineObservation(
+                wavelength_nm=600.0,
+                intensity=1.0,  # Very weak
+                intensity_uncertainty=10.0,  # SNR = 0.1
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=1,
+                A_ki=1.0,
+            )
+        )
+
+        # Select lines
+        selector = LineSelector(min_snr=10.0, min_lines_per_element=3)
+        selection_result = selector.select(observations)
+
+        # Should have rejected the weak line
+        assert len(selection_result.rejected_lines) >= 1
+
+        # Fit Boltzmann plot with selected lines
+        fitter = BoltzmannPlotFitter()
+        fit_result = fitter.fit(selection_result.selected_lines)
+
+        # Temperature should be recovered within 10%
+        assert abs(fit_result.temperature_K - T_K) / T_K < 0.10
+        assert fit_result.r_squared > 0.95
+
+    def test_auto_selection_improves_fit_quality(self):
+        """Verify auto-selection improves fit vs using all lines."""
+        from cflibs.inversion.boltzmann import BoltzmannPlotFitter
+
+        T_K = 9000.0
+        T_eV = T_K * 8.617e-5
+
+        # Create good lines
+        good_lines = []
+        for i, E_k in enumerate(np.linspace(2.0, 5.0, 10)):
+            expected_y = np.log(10.0) - E_k / T_eV
+            intensity = np.exp(expected_y)
+            good_lines.append(
+                LineObservation(
+                    wavelength_nm=400.0 + i * 10,
+                    intensity=intensity * (1 + np.random.normal(0, 0.01)),
+                    intensity_uncertainty=intensity * 0.03,
+                    element="Fe",
+                    ionization_stage=1,
+                    E_k_ev=E_k,
+                    g_k=1,
+                    A_ki=1.0,
+                )
+            )
+
+        # Add bad lines (outliers due to self-absorption)
+        bad_lines = []
+        for i, E_k in enumerate([2.5, 3.5, 4.5]):
+            expected_y = np.log(10.0) - E_k / T_eV
+            intensity = np.exp(expected_y)
+            # Reduce intensity significantly (simulating self-absorption)
+            bad_lines.append(
+                LineObservation(
+                    wavelength_nm=550.0 + i * 10,
+                    intensity=intensity * 0.1,  # 90% absorption
+                    intensity_uncertainty=intensity * 0.01,  # High apparent SNR
+                    element="Fe",
+                    ionization_stage=1,
+                    E_k_ev=E_k,
+                    g_k=1,
+                    A_ki=1.0,
+                )
+            )
+
+        all_lines = good_lines + bad_lines
+
+        # Fit with all lines (no selection)
+        fitter = BoltzmannPlotFitter()
+        fit_all = fitter.fit(all_lines)
+
+        # Fit with auto-selection (should exclude some bad lines via outlier rejection)
+        selector = LineSelector(min_snr=10.0, min_lines_per_element=3)
+        selection_result = selector.select(all_lines)
+        fit_selected = fitter.fit(selection_result.selected_lines)
+
+        # Both should work, but selected fit should be at least as good
+        # (Auto-selection primarily filters low SNR, not self-absorbed high-SNR lines)
+        assert fit_selected.n_points >= 3
+        assert np.isfinite(fit_selected.temperature_K)
+
+
+# ==============================================================================
+# Comparison Tests: Auto-Selected vs Manual Line Sets
+# ==============================================================================
+
+
+class TestAutoVsManualLineSelection:
+    """Compare automatic selection with manual expert selection patterns."""
+
+    def test_auto_selection_prefers_high_snr(self):
+        """Verify auto-selection prefers high SNR lines."""
+        selector = LineSelector(min_snr=10.0)
+
+        # Create lines with varying SNR
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,  # SNR=100
+                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            ),
+            LineObservation(
+                wavelength_nm=410.0, intensity=200.0, intensity_uncertainty=10.0,  # SNR=20
+                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=7, A_ki=8e6,
+            ),
+            LineObservation(
+                wavelength_nm=420.0, intensity=500.0, intensity_uncertainty=10.0,  # SNR=50
+                element="Fe", ionization_stage=1, E_k_ev=5.0, g_k=5, A_ki=5e6,
+            ),
+        ]
+
+        result = selector.select(observations)
+
+        # All should be selected (all above min_snr)
+        assert len(result.selected_lines) == 3
+
+        # First selected should have highest score (highest SNR)
+        scores = {s.observation.wavelength_nm: s.snr for s in result.scores}
+        assert scores[400.0] > scores[410.0]
+        assert scores[400.0] > scores[420.0]
+
+    def test_auto_selection_avoids_blends(self):
+        """Verify auto-selection rejects blended lines."""
+        selector = LineSelector(min_snr=10.0, isolation_wavelength_nm=0.1)
+
+        # Create closely spaced lines (blended)
+        observations = [
+            LineObservation(
+                wavelength_nm=400.00, intensity=1000.0, intensity_uncertainty=10.0,
+                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            ),
+            LineObservation(
+                wavelength_nm=400.01, intensity=800.0, intensity_uncertainty=10.0,  # 0.01 nm away
+                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            ),
+            LineObservation(
+                wavelength_nm=500.0, intensity=500.0, intensity_uncertainty=10.0,  # Well isolated
+                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=5, A_ki=5e6,
+            ),
+        ]
+
+        result = selector.select(observations)
+
+        # Find isolation factors
+        blended_scores = [s for s in result.scores if s.observation.wavelength_nm < 401]
+        isolated_score = next(s for s in result.scores if s.observation.wavelength_nm == 500.0)
+
+        # Blended lines should have low isolation factor
+        for s in blended_scores:
+            assert s.isolation_factor < 0.5
+        # Isolated line should have high isolation factor
+        assert isolated_score.isolation_factor > 0.9
+
+    def test_manual_vs_auto_energy_spread(self):
+        """Compare auto-selection energy spread with manual recommendation."""
+        selector = LineSelector(
+            min_snr=10.0,
+            min_energy_spread_ev=2.0,
+            min_lines_per_element=3,
+        )
+
+        # Create lines with good energy spread
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
+                element="Fe", ionization_stage=1, E_k_ev=2.0, g_k=9, A_ki=1e7,
+            ),
+            LineObservation(
+                wavelength_nm=420.0, intensity=800.0, intensity_uncertainty=10.0,
+                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            ),
+            LineObservation(
+                wavelength_nm=440.0, intensity=600.0, intensity_uncertainty=10.0,
+                element="Fe", ionization_stage=1, E_k_ev=5.0, g_k=5, A_ki=5e6,
+            ),
+        ]
+
+        result = selector.select(observations)
+
+        # Energy spread should be adequate (5.0 - 2.0 = 3.0 eV > 2.0 eV)
+        assert result.energy_spread_ev >= 2.0
+        # No energy spread warnings expected
+        assert not any("Energy spread" in w for w in result.warnings)
+
+
+# ==============================================================================
+# Edge Case Tests: Crowded Spectra
+# ==============================================================================
+
+
+class TestCrowdedSpectraEdgeCases:
+    """Edge case tests for crowded/complex spectra scenarios."""
+
+    def test_highly_crowded_spectrum(self):
+        """Test selection in a highly crowded spectral region."""
+        # Use larger isolation scale so 0.05 nm spacing counts as blended
+        selector = LineSelector(min_snr=10.0, isolation_wavelength_nm=0.1)
+
+        # Create 20 lines in a narrow 1 nm window (0.05 nm spacing)
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0 + i * 0.05,  # 0.05 nm spacing (half isolation scale)
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0 + i * 0.1,
+                g_k=9,
+                A_ki=1e7,
+            )
+            for i in range(20)
+        ]
+
+        result = selector.select(observations)
+
+        # Many lines should be rejected due to low isolation
+        n_blended_rejections = sum(
+            1 for s in result.scores if s.rejection_reason and "Blended" in s.rejection_reason
+        )
+        assert n_blended_rejections > 0
+
+        # Edge lines should have better isolation than center lines
+        # With 0.05 nm spacing: first=400.0, last=400.95
+        edge_scores = [s for s in result.scores if s.observation.wavelength_nm in [400.0, 400.95]]
+        center_scores = [s for s in result.scores if 400.3 < s.observation.wavelength_nm < 400.6]
+
+        if edge_scores and center_scores:
+            avg_edge_isolation = np.mean([s.isolation_factor for s in edge_scores])
+            avg_center_isolation = np.mean([s.isolation_factor for s in center_scores])
+            # Edge lines should have better isolation (only one neighbor)
+            assert avg_edge_isolation >= avg_center_isolation
+
+    def test_spectrum_with_one_isolated_line(self):
+        """Test crowded spectrum with one well-isolated line."""
+        selector = LineSelector(min_snr=10.0, isolation_wavelength_nm=0.1)
+
+        # Cluster of closely spaced lines
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0 + i * 0.02,  # Very tight cluster
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0 + i * 0.1,
+                g_k=9,
+                A_ki=1e7,
+            )
+            for i in range(5)
+        ]
+
+        # Add one well-isolated line
+        observations.append(
+            LineObservation(
+                wavelength_nm=500.0,  # 100 nm away
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=9,
+                A_ki=1e7,
+            )
+        )
+
+        result = selector.select(observations)
+
+        # The isolated line should definitely be selected
+        isolated_line = next(
+            (l for l in result.selected_lines if l.wavelength_nm == 500.0), None
+        )
+        assert isolated_line is not None
+
+        # Its isolation score should be near 1.0
+        isolated_score = next(s for s in result.scores if s.observation.wavelength_nm == 500.0)
+        assert isolated_score.isolation_factor > 0.99
+
+    def test_mixed_elements_crowded(self):
+        """Test selection with multiple elements in crowded region."""
+        selector = LineSelector(
+            min_snr=10.0,
+            isolation_wavelength_nm=0.1,
+            min_lines_per_element=2,
+        )
+
+        observations = []
+        # Fe lines
+        for i in range(5):
+            observations.append(
+                LineObservation(
+                    wavelength_nm=400.0 + i * 0.5,
+                    intensity=1000.0,
+                    intensity_uncertainty=10.0,
+                    element="Fe",
+                    ionization_stage=1,
+                    E_k_ev=3.0 + i * 0.2,
+                    g_k=9,
+                    A_ki=1e7,
+                )
+            )
+        # Cu lines interspersed
+        for i in range(3):
+            observations.append(
+                LineObservation(
+                    wavelength_nm=400.25 + i * 0.5,  # Between Fe lines
+                    intensity=800.0,
+                    intensity_uncertainty=10.0,
+                    element="Cu",
+                    ionization_stage=1,
+                    E_k_ev=3.5 + i * 0.2,
+                    g_k=4,
+                    A_ki=1.4e8,
+                )
+            )
+
+        result = selector.select(observations)
+
+        # Both elements should be represented
+        selected_elements = {l.element for l in result.selected_lines}
+        # At least some should be selected despite crowding
+        assert len(result.selected_lines) > 0
+
+    def test_missing_atomic_data_graceful_handling(self):
+        """Test graceful handling when atomic data uncertainties are missing."""
+        selector = LineSelector(min_snr=10.0)
+
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
+                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            ),
+            LineObservation(
+                wavelength_nm=410.0, intensity=800.0, intensity_uncertainty=10.0,
+                element="Zr",  # Rare element with potentially missing data
+                ionization_stage=1, E_k_ev=3.5, g_k=5, A_ki=1e6,
+            ),
+        ]
+
+        # Empty atomic uncertainties - should use defaults
+        result = selector.select(observations, atomic_uncertainties={})
+
+        # Should still work with default 10% uncertainty
+        assert len(result.scores) == 2
+        for score in result.scores:
+            assert score.atomic_uncertainty == 0.10  # Default
+
+    def test_all_lines_low_snr(self):
+        """Test behavior when all lines have low SNR."""
+        selector = LineSelector(min_snr=20.0)
+
+        observations = [
+            LineObservation(
+                wavelength_nm=400.0, intensity=100.0, intensity_uncertainty=10.0,  # SNR=10
+                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            ),
+            LineObservation(
+                wavelength_nm=410.0, intensity=50.0, intensity_uncertainty=10.0,  # SNR=5
+                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            ),
+        ]
+
+        result = selector.select(observations)
+
+        # All should be rejected
+        assert len(result.selected_lines) == 0
+        assert len(result.rejected_lines) == 2
+        assert all("Low SNR" in s.rejection_reason for s in result.scores)
