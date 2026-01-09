@@ -88,7 +88,8 @@ def apply_instrument_function_jax(
     intensity_j = jnp.asarray(intensity)
 
     dwl = jnp.diff(wavelength_j)
-    if not bool(jnp.allclose(dwl, dwl[0], rtol=1e-6)):
+    # Use rtol=1e-4 for JAX (float32 default has ~1e-5 precision vs float64's ~1e-13)
+    if not bool(jnp.allclose(dwl, dwl[0], rtol=1e-4)):
         raise ValueError("Wavelength grid must be evenly spaced for convolution")
 
     delta_wl = float(dwl[0])
