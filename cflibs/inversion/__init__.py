@@ -28,6 +28,14 @@ from cflibs.inversion.self_absorption import (
     estimate_optical_depth_from_intensity_ratio,
 )
 
+# Hybrid inversion (requires JAX)
+try:
+    from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter
+
+    _HAS_HYBRID = True
+except ImportError:
+    _HAS_HYBRID = False
+
 __all__ = [
     "LineObservation",
     "BoltzmannFitResult",
@@ -48,3 +56,7 @@ __all__ = [
     "SelfAbsorptionCorrector",
     "estimate_optical_depth_from_intensity_ratio",
 ]
+
+# Add hybrid inversion exports if available
+if _HAS_HYBRID:
+    __all__.extend(["HybridInverter", "HybridInversionResult", "SpectralFitter"])
