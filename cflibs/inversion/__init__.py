@@ -2,7 +2,12 @@
 Inversion algorithms for CF-LIBS.
 """
 
-from cflibs.inversion.boltzmann import LineObservation, BoltzmannFitResult, BoltzmannPlotFitter
+from cflibs.inversion.boltzmann import (
+    LineObservation,
+    BoltzmannFitResult,
+    BoltzmannPlotFitter,
+    FitMethod,
+)
 
 from cflibs.inversion.closure import ClosureEquation, ClosureResult
 
@@ -73,6 +78,7 @@ __all__ = [
     "LineObservation",
     "BoltzmannFitResult",
     "BoltzmannPlotFitter",
+    "FitMethod",
     "ClosureEquation",
     "ClosureResult",
     "IterativeCFLIBSSolver",
