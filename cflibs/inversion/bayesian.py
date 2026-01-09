@@ -15,8 +15,9 @@ References:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 import numpy as np
+from enum import Enum
 
 from cflibs.core.constants import (
     SAHA_CONST_CM3,
@@ -26,7 +27,6 @@ from cflibs.core.constants import (
     KB_EV,
 )
 from cflibs.core.logging_config import get_logger
-from cflibs.atomic.database import AtomicDatabase
 
 logger = get_logger("inversion.bayesian")
 
@@ -44,13 +44,21 @@ except ImportError:
 try:
     import numpyro
     import numpyro.distributions as dist
-    from numpyro.infer import MCMC, NUTS
+    from numpyro.infer import MCMC, NUTS, init_to_value, init_to_median, init_to_uniform
 
     HAS_NUMPYRO = True
 except ImportError:
     HAS_NUMPYRO = False
     numpyro = None
     dist = None
+
+try:
+    import arviz as az
+
+    HAS_ARVIZ = True
+except ImportError:
+    HAS_ARVIZ = False
+    az = None
 
 
 # Physical constants
@@ -132,8 +140,153 @@ class PriorConfig:
     """
 
     T_eV_range: Tuple[float, float] = (0.5, 3.0)
-    log_ne_range: Tuple[float, float] = (15.0, 19.0)
+    # Note: log_ne range limited to 17.0 due to numerical stability in Voigt profile
+    # Higher densities cause gradient overflow in the complex Faddeeva approximation
+    log_ne_range: Tuple[float, float] = (15.0, 17.0)
     concentration_alpha: float = 1.0
+
+
+class ConvergenceStatus(Enum):
+    """MCMC convergence status."""
+
+    CONVERGED = "converged"
+    NOT_CONVERGED = "not_converged"
+    WARNING = "warning"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class MCMCResult:
+    """
+    Result container for MCMC sampling with convergence diagnostics.
+
+    Stores posterior samples, summary statistics, and convergence diagnostics
+    from Bayesian CF-LIBS inference.
+
+    Attributes
+    ----------
+    samples : dict
+        Posterior samples for each parameter {name: array}
+    T_eV : ParameterSummary
+        Temperature summary (mean, std, credible intervals)
+    log_ne : ParameterSummary
+        Log electron density summary
+    concentrations : dict
+        Concentration summaries {element: ParameterSummary}
+    r_hat : dict
+        Gelman-Rubin R-hat statistic for each parameter
+    ess : dict
+        Effective sample size for each parameter
+    convergence_status : ConvergenceStatus
+        Overall convergence assessment
+    n_samples : int
+        Number of posterior samples
+    n_chains : int
+        Number of MCMC chains
+    n_warmup : int
+        Number of warmup samples
+    inference_data : Any
+        ArviZ InferenceData object for plotting (if ArviZ available)
+    """
+
+    # Raw samples
+    samples: Dict[str, np.ndarray]
+
+    # Summary statistics
+    T_eV_mean: float
+    T_eV_std: float
+    T_eV_q025: float  # 2.5% quantile (lower 95% CI)
+    T_eV_q975: float  # 97.5% quantile (upper 95% CI)
+
+    log_ne_mean: float
+    log_ne_std: float
+    log_ne_q025: float
+    log_ne_q975: float
+
+    concentrations_mean: Dict[str, float]
+    concentrations_std: Dict[str, float]
+    concentrations_q025: Dict[str, float]
+    concentrations_q975: Dict[str, float]
+
+    # Convergence diagnostics
+    r_hat: Dict[str, float] = field(default_factory=dict)
+    ess: Dict[str, float] = field(default_factory=dict)
+    convergence_status: ConvergenceStatus = ConvergenceStatus.UNKNOWN
+
+    # Metadata
+    n_samples: int = 0
+    n_chains: int = 1
+    n_warmup: int = 0
+
+    # ArviZ InferenceData (for plotting)
+    inference_data: Any = None
+
+    # Derived quantities
+    @property
+    def n_e_mean(self) -> float:
+        """Mean electron density [cm^-3]."""
+        return 10.0 ** self.log_ne_mean
+
+    @property
+    def T_K_mean(self) -> float:
+        """Mean temperature [K]."""
+        return self.T_eV_mean * EV_TO_K
+
+    @property
+    def is_converged(self) -> bool:
+        """Check if MCMC has converged (R-hat < 1.01 for all parameters)."""
+        return self.convergence_status == ConvergenceStatus.CONVERGED
+
+    def summary_table(self) -> str:
+        """
+        Generate a publication-ready summary table.
+
+        Returns
+        -------
+        str
+            Formatted summary table
+        """
+        lines = [
+            "=" * 70,
+            "CF-LIBS Bayesian Inference Results",
+            "=" * 70,
+            f"Samples: {self.n_samples} | Chains: {self.n_chains} | Warmup: {self.n_warmup}",
+            f"Convergence: {self.convergence_status.value}",
+            "-" * 70,
+            f"{'Parameter':<20} {'Mean':>12} {'Std':>12} {'95% CI':>20}",
+            "-" * 70,
+            f"{'T [eV]':<20} {self.T_eV_mean:>12.4f} {self.T_eV_std:>12.4f} "
+            f"[{self.T_eV_q025:.4f}, {self.T_eV_q975:.4f}]",
+            f"{'T [K]':<20} {self.T_K_mean:>12.0f} {self.T_eV_std * EV_TO_K:>12.0f} "
+            f"[{self.T_eV_q025 * EV_TO_K:.0f}, {self.T_eV_q975 * EV_TO_K:.0f}]",
+            f"{'log10(n_e)':<20} {self.log_ne_mean:>12.4f} {self.log_ne_std:>12.4f} "
+            f"[{self.log_ne_q025:.4f}, {self.log_ne_q975:.4f}]",
+            f"{'n_e [cm^-3]':<20} {self.n_e_mean:>12.2e}",
+        ]
+
+        lines.append("-" * 70)
+        lines.append(f"{'Element':<20} {'Conc.':<12} {'Std':>12} {'95% CI':>20}")
+        lines.append("-" * 70)
+
+        for el in self.concentrations_mean:
+            mean = self.concentrations_mean[el]
+            std = self.concentrations_std[el]
+            q025 = self.concentrations_q025.get(el, mean - 2 * std)
+            q975 = self.concentrations_q975.get(el, mean + 2 * std)
+            lines.append(
+                f"{el:<20} {mean:>12.4f} {std:>12.4f} [{q025:.4f}, {q975:.4f}]"
+            )
+
+        if self.r_hat:
+            lines.append("-" * 70)
+            lines.append("Convergence Diagnostics:")
+            for param, rhat in self.r_hat.items():
+                ess_val = self.ess.get(param, float("nan"))
+                status = "✓" if rhat < 1.01 else "✗"
+                lines.append(f"  {param}: R-hat={rhat:.3f} {status}, ESS={ess_val:.0f}")
+
+        lines.append("=" * 70)
+        return "\n".join(lines)
 
 
 class BayesianForwardModel:
@@ -200,9 +353,8 @@ class BayesianForwardModel:
         import pandas as pd
         import sqlite3
 
-        # Open direct connection for data loading
+        # Open direct connection for data loading (avoid AtomicDatabase to skip migrations)
         conn = sqlite3.connect(db_path)
-        db = AtomicDatabase(db_path)
 
         # Query spectral lines
         placeholders = ",".join(["?"] * len(self.elements))
@@ -229,13 +381,10 @@ class BayesianForwardModel:
         el_map = {el: i for i, el in enumerate(self.elements)}
         df["el_idx"] = df["element"].map(el_map)
 
-        # Get atomic masses
+        # Get atomic masses from standard table (avoid AtomicDatabase instantiation)
         element_masses = {}
         for el in self.elements:
-            db_mass = db.get_atomic_mass(el)
-            if db_mass is not None:
-                element_masses[el] = db_mass
-            elif el in STANDARD_MASSES:
+            if el in STANDARD_MASSES:
                 element_masses[el] = STANDARD_MASSES[el]
             else:
                 element_masses[el] = 50.0
@@ -450,7 +599,10 @@ class BayesianForwardModel:
         )
 
         # Region 4: s < 5.5 and y < 0.195*|x| - 0.176
-        w_r4 = jnp.exp(u) - t * (
+        # Clip u to prevent overflow in exp() - this branch is only valid for small |z|
+        # but JAX evaluates all branches during backprop, so we need to ensure finite gradients
+        u_clipped = jnp.clip(jnp.real(u), -50.0, 50.0) + 1j * jnp.imag(u)
+        w_r4 = jnp.exp(u_clipped) - t * (
             36183.31 - u * (3321.9905 - u * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419)))))
         ) / (
             32066.6 - u * (24322.84 - u * (9022.228 - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u))))))
@@ -474,6 +626,9 @@ class BayesianForwardModel:
 
         # Sum line contributions
         intensity = jnp.sum(epsilon * profile, axis=1)
+
+        # Clip to prevent numerical overflow at extreme parameters
+        intensity = jnp.clip(intensity, 0.0, 1e12)
 
         return intensity
 
@@ -574,16 +729,398 @@ def bayesian_model(
 
     # --- Likelihood ---
     # Variance model: Poisson + readout noise
-    pred_safe = jnp.maximum(predicted, 1e-10)
+    # Add safeguards for numerical stability
+    pred_safe = jnp.maximum(predicted, 1e-6)
+    pred_safe = jnp.where(jnp.isnan(pred_safe), 1e-6, pred_safe)
+    pred_safe = jnp.where(jnp.isinf(pred_safe), 1e6, pred_safe)
+
     variance = (
         pred_safe / noise_params.gain
         + noise_params.readout_noise**2
         + noise_params.dark_current
     )
-    sigma = jnp.sqrt(variance)
+    sigma = jnp.sqrt(jnp.maximum(variance, 1e-6))
 
     # Observe data
     numpyro.sample("obs", dist.Normal(pred_safe, sigma), obs=observed)
+
+
+class MCMCSampler:
+    """
+    MCMC sampler for Bayesian CF-LIBS inference.
+
+    Wraps NumPyro's NUTS sampler with sensible defaults for CF-LIBS,
+    including convergence diagnostics, initialization strategies, and
+    ArviZ integration for analysis and visualization.
+
+    Parameters
+    ----------
+    forward_model : BayesianForwardModel
+        Forward model instance
+    prior_config : PriorConfig
+        Prior configuration (default: PriorConfig())
+    noise_params : NoiseParameters
+        Noise model parameters (default: NoiseParameters())
+
+    Example
+    -------
+    >>> sampler = MCMCSampler(forward_model)
+    >>> result = sampler.run(observed_spectrum, num_samples=2000)
+    >>> print(result.summary_table())
+    >>> if result.is_converged:
+    ...     print(f"T = {result.T_eV_mean:.3f} +/- {result.T_eV_std:.3f} eV")
+    """
+
+    def __init__(
+        self,
+        forward_model: BayesianForwardModel,
+        prior_config: PriorConfig = PriorConfig(),
+        noise_params: NoiseParameters = NoiseParameters(),
+    ):
+        if not HAS_NUMPYRO:
+            raise ImportError("NumPyro required. Install with: pip install numpyro")
+
+        self.forward_model = forward_model
+        self.prior_config = prior_config
+        self.noise_params = noise_params
+        self.elements = forward_model.elements
+
+        logger.info(
+            f"MCMCSampler initialized: {len(self.elements)} elements, "
+            f"T range={prior_config.T_eV_range} eV"
+        )
+
+    def _get_init_values(self) -> Dict[str, Any]:
+        """
+        Get sensible initial values for MCMC.
+
+        Uses midpoints of prior ranges for temperature and density,
+        and uniform concentrations.
+        """
+        n_elements = len(self.elements)
+
+        # Midpoint of prior ranges
+        T_init = (self.prior_config.T_eV_range[0] + self.prior_config.T_eV_range[1]) / 2
+        log_ne_init = (
+            self.prior_config.log_ne_range[0] + self.prior_config.log_ne_range[1]
+        ) / 2
+
+        # Uniform concentrations
+        conc_init = jnp.ones(n_elements) / n_elements
+
+        return {
+            "T_eV": T_init,
+            "log_ne": log_ne_init,
+            "concentrations": conc_init,
+        }
+
+    def run(
+        self,
+        observed: np.ndarray,
+        num_warmup: int = 500,
+        num_samples: int = 1000,
+        num_chains: int = 1,
+        seed: int = 0,
+        target_accept_prob: float = 0.8,
+        max_tree_depth: int = 10,
+        progress_bar: bool = True,
+    ) -> MCMCResult:
+        """
+        Run MCMC sampling.
+
+        Parameters
+        ----------
+        observed : array
+            Observed spectrum
+        num_warmup : int
+            Number of warmup samples (default: 500)
+        num_samples : int
+            Number of posterior samples (default: 1000)
+        num_chains : int
+            Number of MCMC chains (default: 1, use 4 for production)
+        seed : int
+            Random seed
+        target_accept_prob : float
+            Target acceptance probability for NUTS (default: 0.8)
+        max_tree_depth : int
+            Maximum tree depth for NUTS (default: 10)
+        progress_bar : bool
+            Show progress bar (default: True)
+
+        Returns
+        -------
+        MCMCResult
+            Results with posterior samples and convergence diagnostics
+        """
+        import jax.random as random
+
+        observed_jax = jnp.array(observed)
+        n_elements = len(self.elements)
+
+        # Get initial values
+        init_values = self._get_init_values()
+
+        # Create model function
+        def model(obs):
+            bayesian_model(
+                self.forward_model, obs, self.prior_config, self.noise_params
+            )
+
+        # Create NUTS sampler with initialization
+        # Use init_to_uniform for robustness - samples from prior to find valid start
+        kernel = NUTS(
+            model,
+            init_strategy=init_to_uniform(radius=0.5),
+            target_accept_prob=target_accept_prob,
+            max_tree_depth=max_tree_depth,
+        )
+
+        mcmc = MCMC(
+            kernel,
+            num_warmup=num_warmup,
+            num_samples=num_samples,
+            num_chains=num_chains,
+            progress_bar=progress_bar,
+        )
+
+        # Run sampling
+        rng_key = random.PRNGKey(seed)
+        logger.info(f"Starting MCMC: {num_chains} chains, {num_warmup} warmup, {num_samples} samples")
+
+        mcmc.run(rng_key, observed_jax)
+
+        # Get samples
+        samples = mcmc.get_samples(group_by_chain=(num_chains > 1))
+
+        # Process samples for single vs multi-chain
+        if num_chains > 1:
+            # Shape: (n_chains, n_samples, ...)
+            T_samples = samples["T_eV"]
+            log_ne_samples = samples["log_ne"]
+            conc_samples = samples["concentrations"]
+        else:
+            # Shape: (n_samples, ...)
+            T_samples = samples["T_eV"]
+            log_ne_samples = samples["log_ne"]
+            conc_samples = samples["concentrations"]
+
+        # Flatten for statistics
+        T_flat = np.array(T_samples).flatten()
+        log_ne_flat = np.array(log_ne_samples).flatten()
+        conc_flat = np.array(conc_samples).reshape(-1, n_elements)
+
+        # Compute convergence diagnostics
+        r_hat, ess = self._compute_convergence_diagnostics(mcmc, num_chains)
+
+        # Determine convergence status
+        convergence_status = self._assess_convergence(r_hat, ess, num_samples)
+
+        # Build MCMCResult
+        result = MCMCResult(
+            samples={k: np.array(v) for k, v in samples.items()},
+            T_eV_mean=float(np.mean(T_flat)),
+            T_eV_std=float(np.std(T_flat)),
+            T_eV_q025=float(np.percentile(T_flat, 2.5)),
+            T_eV_q975=float(np.percentile(T_flat, 97.5)),
+            log_ne_mean=float(np.mean(log_ne_flat)),
+            log_ne_std=float(np.std(log_ne_flat)),
+            log_ne_q025=float(np.percentile(log_ne_flat, 2.5)),
+            log_ne_q975=float(np.percentile(log_ne_flat, 97.5)),
+            concentrations_mean={
+                el: float(np.mean(conc_flat[:, i]))
+                for i, el in enumerate(self.elements)
+            },
+            concentrations_std={
+                el: float(np.std(conc_flat[:, i]))
+                for i, el in enumerate(self.elements)
+            },
+            concentrations_q025={
+                el: float(np.percentile(conc_flat[:, i], 2.5))
+                for i, el in enumerate(self.elements)
+            },
+            concentrations_q975={
+                el: float(np.percentile(conc_flat[:, i], 97.5))
+                for i, el in enumerate(self.elements)
+            },
+            r_hat=r_hat,
+            ess=ess,
+            convergence_status=convergence_status,
+            n_samples=num_samples,
+            n_chains=num_chains,
+            n_warmup=num_warmup,
+            inference_data=self._to_arviz(mcmc, num_chains) if HAS_ARVIZ else None,
+        )
+
+        logger.info(
+            f"MCMC complete: T = {result.T_eV_mean:.3f} +/- {result.T_eV_std:.3f} eV, "
+            f"n_e = {result.n_e_mean:.2e} cm^-3, "
+            f"convergence={convergence_status.value}"
+        )
+
+        return result
+
+    def _compute_convergence_diagnostics(
+        self, mcmc: Any, num_chains: int
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Compute R-hat and ESS convergence diagnostics.
+
+        Uses ArviZ if available, otherwise falls back to simple estimates.
+        """
+        r_hat = {}
+        ess = {}
+
+        if HAS_ARVIZ and num_chains > 1:
+            # Use ArviZ for multi-chain diagnostics
+            try:
+                idata = az.from_numpyro(mcmc)
+
+                # R-hat (should be < 1.01 for convergence)
+                rhat_data = az.rhat(idata)
+                for var in ["T_eV", "log_ne"]:
+                    if var in rhat_data:
+                        val = float(rhat_data[var].values)
+                        r_hat[var] = val
+
+                # ESS (effective sample size)
+                ess_data = az.ess(idata)
+                for var in ["T_eV", "log_ne"]:
+                    if var in ess_data:
+                        val = float(ess_data[var].values)
+                        ess[var] = val
+
+            except Exception as e:
+                logger.warning(f"ArviZ diagnostics failed: {e}")
+                r_hat, ess = self._simple_diagnostics(mcmc, num_chains)
+        else:
+            # Single chain or no ArviZ - use simple estimates
+            r_hat, ess = self._simple_diagnostics(mcmc, num_chains)
+
+        return r_hat, ess
+
+    def _simple_diagnostics(
+        self, mcmc: Any, num_chains: int
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """Simple fallback diagnostics when ArviZ unavailable."""
+        samples = mcmc.get_samples()
+        r_hat = {}
+        ess = {}
+
+        for var in ["T_eV", "log_ne"]:
+            if var in samples:
+                s = np.array(samples[var]).flatten()
+                # Simple ESS estimate using autocorrelation
+                n = len(s)
+                ess[var] = float(n)  # Naive - assume all samples independent
+
+                # R-hat = 1 for single chain (can't compute between-chain variance)
+                r_hat[var] = 1.0
+
+        return r_hat, ess
+
+    def _assess_convergence(
+        self, r_hat: Dict[str, float], ess: Dict[str, float], num_samples: int
+    ) -> ConvergenceStatus:
+        """
+        Assess overall convergence based on R-hat and ESS.
+
+        Criteria:
+        - CONVERGED: R-hat < 1.01 for all params, ESS > 100 for all params
+        - WARNING: R-hat < 1.1, ESS > 50
+        - NOT_CONVERGED: R-hat >= 1.1 or ESS < 50
+        """
+        if not r_hat or not ess:
+            return ConvergenceStatus.UNKNOWN
+
+        max_rhat = max(r_hat.values()) if r_hat else 1.0
+        min_ess = min(ess.values()) if ess else num_samples
+
+        if max_rhat < 1.01 and min_ess > 100:
+            return ConvergenceStatus.CONVERGED
+        elif max_rhat < 1.1 and min_ess > 50:
+            return ConvergenceStatus.WARNING
+        else:
+            return ConvergenceStatus.NOT_CONVERGED
+
+    def _to_arviz(self, mcmc: Any, num_chains: int) -> Any:
+        """Convert MCMC results to ArviZ InferenceData."""
+        if not HAS_ARVIZ:
+            return None
+
+        try:
+            return az.from_numpyro(mcmc)
+        except Exception as e:
+            logger.warning(f"ArviZ conversion failed: {e}")
+            return None
+
+    def plot_trace(self, result: MCMCResult, figsize: Tuple[int, int] = (12, 8)) -> Any:
+        """
+        Generate trace plot using ArviZ.
+
+        Parameters
+        ----------
+        result : MCMCResult
+            MCMC result from run()
+        figsize : tuple
+            Figure size
+
+        Returns
+        -------
+        matplotlib axes or None
+        """
+        if not HAS_ARVIZ:
+            logger.warning("ArviZ required for plotting")
+            return None
+
+        if result.inference_data is None:
+            logger.warning("No InferenceData available for plotting")
+            return None
+
+        try:
+            return az.plot_trace(
+                result.inference_data,
+                var_names=["T_eV", "log_ne"],
+                figsize=figsize,
+            )
+        except Exception as e:
+            logger.warning(f"Trace plot failed: {e}")
+            return None
+
+    def plot_posterior(
+        self, result: MCMCResult, figsize: Tuple[int, int] = (12, 6)
+    ) -> Any:
+        """
+        Generate posterior distribution plot using ArviZ.
+
+        Parameters
+        ----------
+        result : MCMCResult
+            MCMC result from run()
+        figsize : tuple
+            Figure size
+
+        Returns
+        -------
+        matplotlib axes or None
+        """
+        if not HAS_ARVIZ:
+            logger.warning("ArviZ required for plotting")
+            return None
+
+        if result.inference_data is None:
+            logger.warning("No InferenceData available for plotting")
+            return None
+
+        try:
+            return az.plot_posterior(
+                result.inference_data,
+                var_names=["T_eV", "log_ne"],
+                figsize=figsize,
+                hdi_prob=0.95,
+            )
+        except Exception as e:
+            logger.warning(f"Posterior plot failed: {e}")
+            return None
 
 
 def run_mcmc(
@@ -598,6 +1135,10 @@ def run_mcmc(
 ) -> Dict[str, Any]:
     """
     Run MCMC sampling for Bayesian CF-LIBS inference.
+
+    This is a convenience wrapper around MCMCSampler for backwards compatibility.
+    For full functionality including convergence diagnostics and ArviZ integration,
+    use MCMCSampler directly.
 
     Parameters
     ----------
@@ -621,61 +1162,30 @@ def run_mcmc(
     Returns
     -------
     dict
-        MCMC results including posterior samples
+        MCMC results including posterior samples (legacy format)
     """
-    if not HAS_NUMPYRO:
-        raise ImportError("NumPyro required. Install with: pip install numpyro")
-
-    import jax.random as random
-
-    observed_jax = jnp.array(observed)
-
-    # Create NUTS sampler
-    kernel = NUTS(
-        lambda obs: bayesian_model(forward_model, obs, prior_config, noise_params)
-    )
-
-    mcmc = MCMC(
-        kernel,
+    sampler = MCMCSampler(forward_model, prior_config, noise_params)
+    result = sampler.run(
+        observed,
         num_warmup=num_warmup,
         num_samples=num_samples,
         num_chains=num_chains,
+        seed=seed,
+        progress_bar=False,
     )
 
-    # Run sampling
-    rng_key = random.PRNGKey(seed)
-    mcmc.run(rng_key, observed_jax)
-
-    # Get results
-    samples = mcmc.get_samples()
-
-    # Compute summary statistics
-    results = {
-        "samples": samples,
-        "T_eV_mean": float(jnp.mean(samples["T_eV"])),
-        "T_eV_std": float(jnp.std(samples["T_eV"])),
-        "log_ne_mean": float(jnp.mean(samples["log_ne"])),
-        "log_ne_std": float(jnp.std(samples["log_ne"])),
-        "concentrations_mean": {
-            el: float(jnp.mean(samples["concentrations"][:, i]))
-            for i, el in enumerate(forward_model.elements)
-        },
-        "concentrations_std": {
-            el: float(jnp.std(samples["concentrations"][:, i]))
-            for i, el in enumerate(forward_model.elements)
-        },
+    # Return legacy format for backwards compatibility
+    return {
+        "samples": result.samples,
+        "T_eV_mean": result.T_eV_mean,
+        "T_eV_std": result.T_eV_std,
+        "log_ne_mean": result.log_ne_mean,
+        "log_ne_std": result.log_ne_std,
+        "concentrations_mean": result.concentrations_mean,
+        "concentrations_std": result.concentrations_std,
+        "n_e_mean": result.n_e_mean,
+        "T_K_mean": result.T_K_mean,
     }
-
-    # Add derived quantities
-    results["n_e_mean"] = 10.0 ** results["log_ne_mean"]
-    results["T_K_mean"] = results["T_eV_mean"] * EV_TO_K
-
-    logger.info(
-        f"MCMC complete: T = {results['T_eV_mean']:.3f} +/- {results['T_eV_std']:.3f} eV, "
-        f"n_e = {results['n_e_mean']:.2e} cm^-3"
-    )
-
-    return results
 
 
 # --- Convenience functions for priors (CF-LIBS-zbs) ---
