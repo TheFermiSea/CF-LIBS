@@ -124,3 +124,32 @@ if _HAS_NESTED:
         "NestedSampler",
         "NestedSamplingResult",
     ])
+
+# Uncertainty propagation (requires uncertainties package)
+try:
+    from cflibs.inversion.uncertainty import (
+        HAS_UNCERTAINTIES,
+        create_boltzmann_uncertainties,
+        temperature_from_slope,
+        saha_factor_with_uncertainty,
+        propagate_through_closure_standard,
+        propagate_through_closure_matrix,
+        extract_values_and_uncertainties,
+    )
+
+    _HAS_UNCERTAINTY = True
+except ImportError:
+    _HAS_UNCERTAINTY = False
+    HAS_UNCERTAINTIES = False
+
+# Add uncertainty exports if available
+if _HAS_UNCERTAINTY:
+    __all__.extend([
+        "HAS_UNCERTAINTIES",
+        "create_boltzmann_uncertainties",
+        "temperature_from_slope",
+        "saha_factor_with_uncertainty",
+        "propagate_through_closure_standard",
+        "propagate_through_closure_matrix",
+        "extract_values_and_uncertainties",
+    ])

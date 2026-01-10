@@ -110,6 +110,9 @@ class BoltzmannFitResult:
         Number of iterations performed
     inlier_mask : np.ndarray
         Boolean mask of inlier points (True = used in fit)
+    covariance_matrix : np.ndarray, optional
+        2x2 covariance matrix [[var(slope), cov], [cov, var(intercept)]].
+        Used for propagating correlated uncertainties.
     """
 
     temperature_K: float
@@ -124,6 +127,7 @@ class BoltzmannFitResult:
     fit_method: str = "sigma_clip"
     n_iterations: int = 1
     inlier_mask: Optional[np.ndarray] = field(default=None, repr=False)
+    covariance_matrix: Optional[np.ndarray] = field(default=None, repr=False)
 
 
 class BoltzmannPlotFitter:
@@ -245,6 +249,7 @@ class BoltzmannPlotFitter:
         intercept_err = 0.0
         r_squared = 0.0
         n_iterations = 0
+        covariance_matrix = None
 
         for iteration in range(self.max_iterations):
             n_iterations = iteration + 1
@@ -265,10 +270,12 @@ class BoltzmannPlotFitter:
                     (m, c), cov = np.polyfit(x, y, 1, w=weights, cov=True)
                     slope_err = np.sqrt(cov[0, 0])
                     intercept_err = np.sqrt(cov[1, 1])
+                    covariance_matrix = cov
                 else:
                     m, c = np.polyfit(x, y, 1, w=weights)
                     slope_err = np.inf
                     intercept_err = np.inf
+                    covariance_matrix = None
             except np.linalg.LinAlgError:
                 logger.error("Linear regression failed")
                 return self._empty_result()
@@ -299,7 +306,7 @@ class BoltzmannPlotFitter:
 
         return self._create_result(
             slope, slope_err, intercept, intercept_err, r_squared,
-            mask, indices, "sigma_clip", n_iterations
+            mask, indices, "sigma_clip", n_iterations, covariance_matrix
         )
 
     def _fit_ransac(
@@ -375,7 +382,7 @@ class BoltzmannPlotFitter:
         y_inliers = y[best_inliers]
         y_err_inliers = y_err[best_inliers]
 
-        slope, intercept, slope_err, intercept_err = self._weighted_fit(
+        slope, intercept, slope_err, intercept_err, covariance_matrix = self._weighted_fit(
             x_inliers, y_inliers, y_err_inliers
         )
 
@@ -391,7 +398,7 @@ class BoltzmannPlotFitter:
 
         return self._create_result(
             slope, slope_err, intercept, intercept_err, r_squared,
-            final_mask, indices, "ransac", self.ransac_max_trials
+            final_mask, indices, "ransac", self.ransac_max_trials, covariance_matrix
         )
 
     def _fit_huber(
@@ -463,10 +470,12 @@ class BoltzmannPlotFitter:
             slope, intercept = new_slope, new_intercept
 
         # Final fit with covariance (using final weights)
+        covariance_matrix = None
         try:
             (slope, intercept), cov = np.polyfit(x, y, 1, w=combined_weights, cov=True)
             slope_err = np.sqrt(cov[0, 0])
             intercept_err = np.sqrt(cov[1, 1])
+            covariance_matrix = cov
         except np.linalg.LinAlgError:
             slope_err = np.inf
             intercept_err = np.inf
@@ -491,7 +500,7 @@ class BoltzmannPlotFitter:
 
         return self._create_result(
             slope, slope_err, intercept, intercept_err, r_squared,
-            final_mask, indices, "huber", n_iterations
+            final_mask, indices, "huber", n_iterations, covariance_matrix
         )
 
     def _compute_weights(self, y_err: np.ndarray) -> np.ndarray:
@@ -512,14 +521,21 @@ class BoltzmannPlotFitter:
     def _weighted_fit(
         self, x: np.ndarray, y: np.ndarray, y_err: np.ndarray
     ) -> tuple:
-        """Perform weighted linear fit returning slope, intercept, and uncertainties."""
+        """Perform weighted linear fit returning slope, intercept, uncertainties, and covariance.
+
+        Returns
+        -------
+        tuple
+            (slope, intercept, slope_err, intercept_err, covariance_matrix)
+            covariance_matrix is 2x2: [[var(slope), cov], [cov, var(intercept)]]
+        """
         weights = self._compute_weights(y_err)
         try:
             (m, c), cov = np.polyfit(x, y, 1, w=weights, cov=True)
-            return m, c, np.sqrt(cov[0, 0]), np.sqrt(cov[1, 1])
+            return m, c, np.sqrt(cov[0, 0]), np.sqrt(cov[1, 1]), cov
         except np.linalg.LinAlgError:
             m, c = np.polyfit(x, y, 1, w=weights)
-            return m, c, np.inf, np.inf
+            return m, c, np.inf, np.inf, None
 
     def _create_result(
         self,
@@ -532,8 +548,16 @@ class BoltzmannPlotFitter:
         indices: np.ndarray,
         method: str,
         n_iterations: int,
+        covariance_matrix: Optional[np.ndarray] = None,
     ) -> BoltzmannFitResult:
-        """Create BoltzmannFitResult with temperature calculation."""
+        """Create BoltzmannFitResult with temperature calculation.
+
+        Parameters
+        ----------
+        covariance_matrix : np.ndarray, optional
+            2x2 covariance matrix [[var(slope), cov], [cov, var(intercept)]].
+            Used for propagating correlated uncertainties through Saha/closure.
+        """
         if slope >= 0:
             logger.warning(
                 f"Positive or zero slope ({slope}) detected. "
@@ -560,6 +584,7 @@ class BoltzmannPlotFitter:
             fit_method=method,
             n_iterations=n_iterations,
             inlier_mask=mask.copy(),
+            covariance_matrix=covariance_matrix,
         )
 
     def _empty_result(self) -> BoltzmannFitResult:
@@ -577,6 +602,7 @@ class BoltzmannPlotFitter:
             fit_method=self.method.value,
             n_iterations=0,
             inlier_mask=None,
+            covariance_matrix=None,
         )
 
     def plot(

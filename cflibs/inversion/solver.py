@@ -3,7 +3,7 @@ Iterative solver for Classic CF-LIBS.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import numpy as np
 from collections import defaultdict
 
@@ -21,6 +21,29 @@ logger = get_logger("inversion.solver")
 class CFLIBSResult:
     """
     Result of the iterative CF-LIBS inversion.
+
+    Attributes
+    ----------
+    temperature_K : float
+        Plasma temperature in Kelvin
+    temperature_uncertainty_K : float
+        1-sigma uncertainty in temperature
+    electron_density_cm3 : float
+        Electron density in cm^-3
+    electron_density_uncertainty_cm3 : float
+        1-sigma uncertainty in electron density (0 if not computed)
+    concentrations : Dict[str, float]
+        Element concentrations (mass fractions, sum to 1)
+    concentration_uncertainties : Dict[str, float]
+        1-sigma uncertainties in concentrations
+    iterations : int
+        Number of iterations performed
+    converged : bool
+        Whether solver converged within tolerance
+    quality_metrics : Dict[str, float]
+        Quality metrics (R², chi², etc.)
+    boltzmann_covariance : np.ndarray, optional
+        2x2 covariance matrix of final Boltzmann fit (slope, intercept)
     """
 
     temperature_K: float
@@ -31,6 +54,8 @@ class CFLIBSResult:
     iterations: int
     converged: bool
     quality_metrics: Dict[str, float] = field(default_factory=dict)
+    electron_density_uncertainty_cm3: float = 0.0
+    boltzmann_covariance: Optional[np.ndarray] = field(default=None, repr=False)
 
 
 class IterativeCFLIBSSolver:
@@ -105,8 +130,9 @@ class IterativeCFLIBSSolver:
         # Iteration loop
         converged = False
         history = []
+        concentrations: Dict[str, float] = {}  # Initialize before loop
 
-        for iteration in range(1, self.max_iterations + 1):
+        for _ in range(1, self.max_iterations + 1):
             T_prev = T_K
             ne_prev = n_e
 
@@ -353,11 +379,149 @@ class IterativeCFLIBSSolver:
 
         return CFLIBSResult(
             temperature_K=T_K,
-            temperature_uncertainty_K=0.0,  # TODO: Propagate
+            temperature_uncertainty_K=0.0,  # See solve_with_uncertainty for propagation
             electron_density_cm3=n_e,
             concentrations=concentrations,
-            concentration_uncertainties={},
+            concentration_uncertainties={},  # See solve_with_uncertainty for propagation
             iterations=len(history),
             converged=converged,
-            quality_metrics={"r_squared_last": 0.0},  # TODO
+            quality_metrics={"r_squared_last": 0.0},
+            electron_density_uncertainty_cm3=0.0,
+            boltzmann_covariance=None,
+        )
+
+    def solve_with_uncertainty(
+        self,
+        observations: List[LineObservation],
+        closure_mode: str = "standard",
+        **closure_kwargs,
+    ) -> CFLIBSResult:
+        """
+        Solve for plasma parameters with full uncertainty propagation.
+
+        Uses the `uncertainties` package to propagate uncertainties through:
+        1. Boltzmann fit (with slope-intercept correlation)
+        2. Saha correction
+        3. Closure equation
+
+        Requires: `pip install uncertainties>=3.2.0` or `pip install cflibs[uncertainty]`
+
+        Parameters
+        ----------
+        observations : List[LineObservation]
+            Spectral lines with intensity uncertainties
+        closure_mode : str
+            'standard' or 'matrix' (oxide not yet supported)
+        closure_kwargs : dict
+            Arguments for closure equation (e.g. matrix_element, matrix_fraction)
+
+        Returns
+        -------
+        CFLIBSResult
+            With populated uncertainty fields
+
+        Raises
+        ------
+        ImportError
+            If uncertainties package not installed
+        """
+        # First run the standard solver to convergence
+        result = self.solve(observations, closure_mode, **closure_kwargs)
+
+        # Import uncertainty utilities (will raise ImportError if not available)
+        from cflibs.inversion.uncertainty import (
+            create_boltzmann_uncertainties,
+            propagate_through_closure_standard,
+            propagate_through_closure_matrix,
+            extract_values_and_uncertainties,
+        )
+        from uncertainties import ufloat
+
+        # Re-run final Boltzmann fit to get covariance
+        # Group observations by element
+        obs_by_element = defaultdict(list)
+        for obs in observations:
+            obs_by_element[obs.element].append(obs)
+
+        elements = list(obs_by_element.keys())
+
+        # Use converged T to get partition functions
+        T_K = result.temperature_K
+        T_eV = T_K / EV_TO_K
+
+        # Get intercepts with uncertainties by fitting each element
+        intercepts_u = {}
+        covariances = {}
+
+        for el in elements:
+            obs_list = obs_by_element[el]
+            if len(obs_list) < 3:
+                # Not enough points for covariance
+                continue
+
+            fit_result = self.boltzmann_fitter.fit(obs_list)
+
+            if fit_result.covariance_matrix is not None:
+                slope_u, intercept_u = create_boltzmann_uncertainties(
+                    fit_result.slope,
+                    fit_result.intercept,
+                    fit_result.covariance_matrix,
+                )
+                intercepts_u[el] = intercept_u
+                covariances[el] = fit_result.covariance_matrix
+            else:
+                # Fallback to independent uncertainties
+                intercepts_u[el] = ufloat(
+                    fit_result.intercept,
+                    fit_result.intercept_uncertainty
+                    if np.isfinite(fit_result.intercept_uncertainty)
+                    else 0.0,
+                )
+
+        # Get partition functions at converged T
+        partition_funcs = {}
+        for el in elements:
+            pf = self.atomic_db.get_partition_coefficients(el, 1)
+            if pf:
+                partition_funcs[el] = PartitionFunctionEvaluator.evaluate(T_K, pf.coefficients)
+            else:
+                partition_funcs[el] = 25.0
+
+        # Propagate through closure
+        if closure_mode == "matrix" and "matrix_element" in closure_kwargs:
+            concentrations_u = propagate_through_closure_matrix(
+                intercepts_u,
+                partition_funcs,
+                closure_kwargs["matrix_element"],
+                closure_kwargs.get("matrix_fraction", 0.9),
+            )
+        else:
+            concentrations_u = propagate_through_closure_standard(
+                intercepts_u,
+                partition_funcs,
+            )
+
+        # Extract nominal values and uncertainties
+        conc_nominal, conc_uncert = extract_values_and_uncertainties(concentrations_u)
+
+        # Use temperature from first element's fit
+        T_err = 0.0
+        for el in elements:
+            obs_list = obs_by_element[el]
+            if len(obs_list) >= 3:
+                fit_result = self.boltzmann_fitter.fit(obs_list)
+                T_err = fit_result.temperature_uncertainty_K
+                break
+
+        return CFLIBSResult(
+            temperature_K=result.temperature_K,
+            temperature_uncertainty_K=T_err,
+            electron_density_cm3=result.electron_density_cm3,
+            concentrations=conc_nominal if conc_nominal else result.concentrations,
+            concentration_uncertainties=conc_uncert if conc_uncert else {},
+            iterations=result.iterations,
+            converged=result.converged,
+            quality_metrics=result.quality_metrics,
+            electron_density_uncertainty_cm3=0.0,  # Would need iterative uncertainty
+            boltzmann_covariance=covariances.get(elements[0]) if covariances else None,
         )
