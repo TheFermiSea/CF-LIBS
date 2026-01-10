@@ -27,6 +27,7 @@ from cflibs.plasma.state import SingleZoneLTEPlasma
 def temp_db():
     """Create a temporary atomic database for testing."""
     db_fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(db_fd)  # Close file descriptor to prevent leaks
 
     conn = sqlite3.connect(db_path)
 
@@ -209,6 +210,7 @@ def temp_config_file(sample_config_dict):
     import yaml
 
     config_fd, config_path = tempfile.mkstemp(suffix=".yaml")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
 
     with open(config_path, "w") as f:
         yaml.dump(sample_config_dict, f)

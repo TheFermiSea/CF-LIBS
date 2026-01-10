@@ -2,6 +2,7 @@
 Tests for I/O utilities.
 """
 
+import os
 import pytest
 import numpy as np
 import tempfile
@@ -17,6 +18,7 @@ def test_save_spectrum_csv():
     intensity = np.exp(-(((wavelength - 500) / 50) ** 2))
 
     fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)  # Close file descriptor to prevent leaks
     Path(temp_path).unlink()
 
     try:
@@ -39,6 +41,7 @@ def test_save_spectrum_custom_header():
     intensity = np.ones_like(wavelength)
 
     fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)  # Close file descriptor to prevent leaks
     Path(temp_path).unlink()
 
     try:
@@ -105,6 +108,7 @@ def test_load_spectrum_numpy_format():
     intensity = np.ones_like(wavelength)
 
     fd, temp_path = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)  # Close file descriptor to prevent leaks
 
     try:
         # Save as space-separated

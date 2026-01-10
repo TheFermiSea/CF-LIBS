@@ -2,6 +2,7 @@
 Integration tests for complete CF-LIBS workflows.
 """
 
+import os
 import pytest
 import numpy as np
 from pathlib import Path
@@ -85,6 +86,7 @@ def test_save_and_load_spectrum():
     intensity = np.exp(-(((wavelength - 500) / 50) ** 2))
 
     fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)  # Close file descriptor to prevent leaks
     Path(temp_path).unlink()
 
     try:

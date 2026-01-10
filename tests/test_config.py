@@ -2,6 +2,7 @@
 Tests for configuration management module.
 """
 
+import os
 import pytest
 import tempfile
 from pathlib import Path
@@ -26,6 +27,7 @@ def test_load_config_yaml(temp_config_file):
 def test_load_config_json(sample_config_dict):
     """Test loading JSON configuration."""
     config_fd, config_path = tempfile.mkstemp(suffix=".json")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
 
     try:
         with open(config_path, "w") as f:
@@ -47,6 +49,7 @@ def test_load_config_not_found():
 def test_load_config_invalid_format():
     """Test loading invalid file format."""
     config_fd, config_path = tempfile.mkstemp(suffix=".txt")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
 
     try:
         with open(config_path, "w") as f:
@@ -61,6 +64,7 @@ def test_load_config_invalid_format():
 def test_save_config_yaml(sample_config_dict):
     """Test saving YAML configuration."""
     config_fd, config_path = tempfile.mkstemp(suffix=".yaml")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
     Path(config_path).unlink()  # Remove temp file
 
     try:
@@ -78,6 +82,7 @@ def test_save_config_yaml(sample_config_dict):
 def test_save_config_json(sample_config_dict):
     """Test saving JSON configuration."""
     config_fd, config_path = tempfile.mkstemp(suffix=".json")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
     Path(config_path).unlink()
 
     try:

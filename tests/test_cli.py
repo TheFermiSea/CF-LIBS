@@ -25,7 +25,9 @@ def test_forward_model_cmd_missing_config():
 
 def test_forward_model_cmd_invalid_config():
     """Test forward command with invalid config."""
+    import os
     config_fd, config_path = tempfile.mkstemp(suffix=".yaml")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
 
     try:
         with open(config_path, "w") as f:

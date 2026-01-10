@@ -20,9 +20,22 @@ from cflibs.core.constants import KB_EV
 
 
 def create_synthetic_lines(
-    T_K: float, n_points: int = 10, noise_level: float = 0.05
+    T_K: float, n_points: int = 10, noise_level: float = 0.05, seed: int | None = None
 ) -> list[LineObservation]:
-    """Generate synthetic spectral lines following Boltzmann distribution."""
+    """Generate synthetic spectral lines following Boltzmann distribution.
+
+    Parameters
+    ----------
+    T_K : float
+        Temperature in Kelvin
+    n_points : int
+        Number of spectral lines to generate
+    noise_level : float
+        Standard deviation of noise in ln(I) space
+    seed : int, optional
+        Random seed for reproducibility
+    """
+    rng = np.random.default_rng(seed)
     T_eV = T_K * KB_EV
 
     # Random upper energies between 2 and 6 eV
@@ -38,7 +51,7 @@ def create_synthetic_lines(
         expected_y = np.log(intercept_const) - Ek / T_eV
 
         # Add noise
-        y_noisy = expected_y + np.random.normal(0, noise_level)
+        y_noisy = expected_y + rng.normal(0, noise_level)
 
         # Back-calculate Intensity (assuming lam=1, g=1, A=1 for simplicity)
         # y = ln(I) -> I = exp(y)
@@ -81,7 +94,7 @@ def test_boltzmann_fit_perfect():
 def test_outlier_rejection():
     """Test that outliers are correctly rejected."""
     T_target = 8000.0
-    lines = create_synthetic_lines(T_target, n_points=10, noise_level=0.01)
+    lines = create_synthetic_lines(T_target, n_points=10, noise_level=0.01, seed=42)
 
     # Add an outlier (e.g. self-absorbed line, intensity lower than expected)
     # y = ln(I...) - Ek/kT. Lower I -> lower y.
@@ -190,7 +203,7 @@ class TestSigmaClipFitting:
     def test_sigma_clip_clean_data(self):
         """Sigma-clip should work well on clean data."""
         T_target = 10000.0
-        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001)
+        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.SIGMA_CLIP)
         result = fitter.fit(lines)
@@ -224,7 +237,7 @@ class TestRANSACFitting:
     def test_ransac_clean_data(self):
         """RANSAC should work on clean data."""
         T_target = 10000.0
-        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001)
+        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.RANSAC)
         result = fitter.fit(lines)
@@ -253,7 +266,7 @@ class TestRANSACFitting:
     def test_ransac_few_points(self):
         """RANSAC with very few points."""
         T_target = 9000.0
-        lines = create_synthetic_lines(T_target, n_points=5, noise_level=0.01)
+        lines = create_synthetic_lines(T_target, n_points=5, noise_level=0.01, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.RANSAC, ransac_min_samples=2)
         result = fitter.fit(lines)
@@ -268,7 +281,7 @@ class TestHuberFitting:
     def test_huber_clean_data(self):
         """Huber should work well on clean data."""
         T_target = 10000.0
-        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001)
+        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.001, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.HUBER)
         result = fitter.fit(lines)
@@ -296,7 +309,7 @@ class TestHuberFitting:
     def test_huber_convergence(self):
         """Huber IRLS should converge."""
         T_target = 7500.0
-        lines = create_synthetic_lines(T_target, n_points=12, noise_level=0.02)
+        lines = create_synthetic_lines(T_target, n_points=12, noise_level=0.02, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.HUBER, max_iterations=50)
         result = fitter.fit(lines)
@@ -311,7 +324,7 @@ class TestMethodComparison:
     def test_all_methods_agree_on_clean_data(self):
         """All methods should give similar results on clean data."""
         T_target = 9000.0
-        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.005)
+        lines = create_synthetic_lines(T_target, n_points=20, noise_level=0.005, seed=42)
 
         results = {}
         for method in FitMethod:
@@ -347,7 +360,7 @@ class TestBoltzmannFitResultAttributes:
 
     def test_result_has_fit_method(self):
         """Result should include fit method used."""
-        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01)
+        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01, seed=42)
 
         for method in FitMethod:
             fitter = BoltzmannPlotFitter(method=method)
@@ -356,7 +369,7 @@ class TestBoltzmannFitResultAttributes:
 
     def test_result_has_iteration_count(self):
         """Result should include iteration count."""
-        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01)
+        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.SIGMA_CLIP)
         result = fitter.fit(lines)
@@ -365,7 +378,7 @@ class TestBoltzmannFitResultAttributes:
 
     def test_result_has_inlier_mask(self):
         """Result should include inlier mask."""
-        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01)
+        lines = create_synthetic_lines(8000.0, n_points=10, noise_level=0.01, seed=42)
 
         fitter = BoltzmannPlotFitter(method=FitMethod.RANSAC)
         result = fitter.fit(lines)
@@ -383,7 +396,7 @@ class TestEdgeCases:
         T_target = 8000.0
         # Very noisy data with aggressive rejection (1-sigma with 30% noise)
         # This is an edge case - the algorithm may reject all points
-        lines = create_synthetic_lines(T_target, n_points=10, noise_level=0.3)
+        lines = create_synthetic_lines(T_target, n_points=10, noise_level=0.3, seed=42)
 
         fitter = BoltzmannPlotFitter(
             method=FitMethod.SIGMA_CLIP, outlier_sigma=1.0, max_iterations=10

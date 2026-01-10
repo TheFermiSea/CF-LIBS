@@ -31,7 +31,9 @@ from cflibs.inversion.hybrid import (
 @pytest.fixture
 def mock_manifold_file():
     """Create a minimal mock manifold HDF5 file."""
+    import os
     fd, path = tempfile.mkstemp(suffix=".h5")
+    os.close(fd)  # Close file descriptor to prevent leaks
 
     with h5py.File(path, "w") as f:
         # Create wavelength grid

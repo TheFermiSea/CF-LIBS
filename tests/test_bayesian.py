@@ -38,7 +38,9 @@ from cflibs.inversion.bayesian import (
 @pytest.fixture
 def bayesian_db():
     """Create a database with partition functions and Stark parameters for Bayesian tests."""
+    import os
     fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)  # Close file descriptor to prevent leaks
 
     conn = sqlite3.connect(db_path)
 

@@ -2,6 +2,7 @@
 Tests for instrument modeling.
 """
 
+import os
 import pytest
 import numpy as np
 from pathlib import Path
@@ -36,6 +37,7 @@ def test_instrument_model_from_file(temp_config_file):
 def test_instrument_model_from_file_missing_section():
     """Test loading instrument model from invalid config."""
     config_fd, config_path = tempfile.mkstemp(suffix=".yaml")
+    os.close(config_fd)  # Close file descriptor to prevent leaks
 
     try:
         with open(config_path, "w") as f:
