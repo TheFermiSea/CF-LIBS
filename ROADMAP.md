@@ -141,7 +141,7 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 
 ## Phase 2c: Quality Metrics and Diagnostics ✅
 
-**Status**: Complete (139 tests in quality/selection/absorption modules)
+**Status**: Complete (204 tests in quality/selection/absorption/outliers modules)
 **Priority**: High (P1)
 **Tracking**: `bd show CF-LIBS-4xu`
 
@@ -166,6 +166,23 @@ Implemented the standard CF-LIBS algorithm used in literature (Ciucci, Tognoni, 
 - [x] Correction factor tracking
 - [x] Algorithm limitations documented
 - [x] 46 tests in `tests/test_self_absorption.py`
+
+#### Outlier Detection ✅
+`CF-LIBS-n95`, `CF-LIBS-gy2` | Complete
+
+- [x] **SAM (Spectral Angle Mapper)**: `SpectralAngleMapper` in `cflibs/inversion/outliers.py`
+  - Intensity-invariant outlier detection (robust to shot-to-shot laser fluctuations)
+  - `sam_distance()`, `detect_outlier_spectra()` convenience functions
+  - Configurable angular threshold with automatic calculation option
+  - 35 tests in `tests/test_outliers.py`
+- [x] **MAD (Median Absolute Deviation)**: `MADOutlierDetector` in `cflibs/inversion/outliers.py`
+  - Robust outlier detection with 50% breakdown point
+  - Three modes: `1d` (scalar), `spectrum` (entire spectra), `channel` (per-wavelength)
+  - `mad_outliers_1d()`, `mad_outliers_spectra()`, `mad_clean_channels()` convenience functions
+  - Channel cleaning with interpolation or median replacement for cosmic ray removal
+  - 30 tests in `tests/test_outliers.py`
+- [x] `OutlierMethod` enum for method selection
+- [x] `SAMResult`, `MADResult` dataclasses with statistics and indices
 
 #### Error Propagation
 `CF-LIBS-0pb` | P2 | Remaining
