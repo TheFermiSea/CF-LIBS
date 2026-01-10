@@ -1,3 +1,10 @@
+"""
+Tests for partition function utilities.
+
+Tests the polynomial partition function evaluator and integration with
+the Saha-Boltzmann solver for computing ionization equilibrium.
+"""
+
 import numpy as np
 from cflibs.plasma.partition import polynomial_partition_function
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
