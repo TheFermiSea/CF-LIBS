@@ -153,3 +153,20 @@ if _HAS_UNCERTAINTY:
         "propagate_through_closure_matrix",
         "extract_values_and_uncertainties",
     ])
+
+# Outlier detection (always available - no external dependencies)
+from cflibs.inversion.outliers import (
+    OutlierMethod,
+    SAMResult,
+    SpectralAngleMapper,
+    sam_distance,
+    detect_outlier_spectra,
+)
+
+__all__.extend([
+    "OutlierMethod",
+    "SAMResult",
+    "SpectralAngleMapper",
+    "sam_distance",
+    "detect_outlier_spectra",
+])
