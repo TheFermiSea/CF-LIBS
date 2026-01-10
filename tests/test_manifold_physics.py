@@ -252,8 +252,9 @@ class TestVoigtProfileJAX:
         voigt = voigt_profile_jax(wl_grid, center, sigma, gamma, amplitude=1.0)
         gaussian = gaussian_profile_jax(wl_grid, center, sigma, amplitude=1.0)
 
-        # Should be nearly identical - use atol for near-zero wing values
-        np.testing.assert_allclose(np.array(voigt), np.array(gaussian), rtol=0.01, atol=1e-8)
+        # Should be nearly identical - use relaxed atol for float32 near-zero values
+        # The Voigt has small residual values (~1e-8) in wings where Gaussian is exactly 0
+        np.testing.assert_allclose(np.array(voigt), np.array(gaussian), rtol=0.01, atol=1e-7)
 
     def test_voigt_matches_lorentzian_limit(self):
         """Test Voigt approaches Lorentzian when sigma → 0."""

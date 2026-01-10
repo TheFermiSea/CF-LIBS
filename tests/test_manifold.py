@@ -249,7 +249,7 @@ class TestManifoldLoader:
 
         assert index == 3
         assert similarity > 0.9
-        assert params["T_eV"] == 1.2
+        assert params["T_eV"] == pytest.approx(1.2, rel=1e-6)  # float32 precision
         assert params["n_e_cm3"] == pytest.approx(5e16)
 
         loader.close()
