@@ -88,6 +88,7 @@ class TestStarkCalculation:
         # Should fallback to estimate
         assert fwhm > 0.0
 
+    @pytest.mark.requires_jax
     def test_jax_imports(self):
         """Test JAX implementation matches standard."""
         pytest.importorskip("jax")

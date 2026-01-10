@@ -4,12 +4,17 @@ Tests for hybrid inversion (manifold + gradient descent).
 These tests validate the two-stage inversion approach:
 1. Coarse search: Manifold nearest-neighbor
 2. Fine tuning: JAX autodiff + L-BFGS optimization
+
+Requirements: JAX, h5py
 """
 
 import pytest
 import numpy as np
 import tempfile
 from pathlib import Path
+
+# Mark entire module as requiring JAX
+pytestmark = pytest.mark.requires_jax
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")

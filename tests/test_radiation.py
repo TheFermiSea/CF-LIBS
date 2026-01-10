@@ -113,6 +113,7 @@ def test_calculate_spectrum_emissivity(atomic_db, sample_plasma):
     assert np.all(emissivity >= 0)
 
 
+@pytest.mark.requires_jax
 def test_calculate_spectrum_emissivity_jax(atomic_db, sample_plasma):
     """Test calculating spectrum emissivity with JAX path."""
     try:

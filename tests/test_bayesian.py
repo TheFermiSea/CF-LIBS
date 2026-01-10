@@ -6,6 +6,8 @@ These tests validate:
 2. Log-likelihood calculation with noise model
 3. Prior creation functions
 4. MCMC sampling (integration test)
+
+Requirements: JAX, NumPyro (optional for MCMC tests)
 """
 
 import pytest
@@ -13,6 +15,12 @@ import numpy as np
 import sqlite3
 import tempfile
 from pathlib import Path
+
+# Mark entire module as requiring JAX
+pytestmark = [
+    pytest.mark.requires_jax,
+    pytest.mark.requires_bayesian,
+]
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")

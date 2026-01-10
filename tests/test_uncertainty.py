@@ -3,11 +3,15 @@ Tests for uncertainty propagation utilities.
 
 Tests the `cflibs.inversion.uncertainty` module which provides automatic
 correlation-aware uncertainty propagation using the `uncertainties` package.
+
+Requirements: uncertainties>=3.2.0
 """
 
 import pytest
 import numpy as np
 
+# Mark entire module as requiring uncertainties package
+pytestmark = pytest.mark.requires_uncertainty
 
 # Skip all tests if uncertainties not available
 pytest.importorskip("uncertainties")

@@ -1,12 +1,22 @@
 """
 Pytest configuration and shared fixtures for CF-LIBS tests.
+
+This module provides:
+- Automatic JAX CPU backend configuration (Metal is experimental)
+- Shared fixtures for database, plasma, and atomic data
+- Factory fixtures for generating synthetic test data
 """
 
+import os
 import pytest
 import numpy as np
 import sqlite3
 import tempfile
 from pathlib import Path
+
+# Force JAX to use CPU backend before any JAX imports
+# Metal backend is experimental and causes test failures
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 from cflibs.atomic.structures import Transition, EnergyLevel
 from cflibs.atomic.database import AtomicDatabase

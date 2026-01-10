@@ -2,10 +2,15 @@
 Tests for manifold generator physics functions.
 
 Validates JAX-compatible physics implementations against NumPy reference.
+
+Requirements: JAX
 """
 
 import numpy as np
 import pytest
+
+# Mark entire module as requiring JAX
+pytestmark = pytest.mark.requires_jax
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")

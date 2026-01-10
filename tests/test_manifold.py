@@ -208,6 +208,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @pytest.mark.requires_jax
     def test_find_nearest_spectrum_jax(self, tmp_path):
         """Test finding nearest spectrum with JAX."""
         try:
