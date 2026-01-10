@@ -6,16 +6,18 @@ from replicate measurements, which is essential for reliable CF-LIBS analysis.
 
 Methods implemented:
 - **SAM (Spectral Angle Mapper)**: Angle-based similarity insensitive to intensity scaling
-- **MAD (Median Absolute Deviation)**: Robust univariate outlier detection (planned)
+- **MAD (Median Absolute Deviation)**: Robust univariate outlier detection
 
-SAM is particularly useful for LIBS because:
-1. Shot-to-shot laser energy fluctuations cause intensity variations
-2. SAM compares spectral *shape*, ignoring overall intensity scaling
-3. Anomalous spectra (e.g., plasma didn't form, contamination) have different shapes
+**SAM** is useful when spectral *shape* matters (shot-to-shot intensity variations
+are acceptable, but shape changes indicate anomalies).
+
+**MAD** is useful for detecting outliers in univariate data or when intensity
+values themselves need to be cleaned (per-channel or per-spectrum).
 
 References:
     - Kruse et al. (1993), "The Spectral Image Processing System (SIPS)"
     - Zhang et al. (2017), "Spectral preprocessing for LIBS"
+    - Leys et al. (2013), "Detecting outliers: Do not use standard deviation"
 """
 
 from dataclasses import dataclass
@@ -32,7 +34,7 @@ class OutlierMethod(Enum):
     """Method for outlier detection."""
 
     SAM = "sam"  # Spectral Angle Mapper
-    # MAD = "mad"  # Median Absolute Deviation (future)
+    MAD = "mad"  # Median Absolute Deviation
 
 
 @dataclass
@@ -482,3 +484,506 @@ def detect_outlier_spectra(
         reference_method=reference_method,
     )
     return mapper.detect_outliers(spectra)
+
+
+# =============================================================================
+# MAD (Median Absolute Deviation) Outlier Detection
+# =============================================================================
+
+# MAD scale factor: for normal distribution, MAD ≈ 0.6745 × σ
+# So σ ≈ MAD × 1.4826
+MAD_SCALE_FACTOR = 1.4826
+
+
+@dataclass
+class MADResult:
+    """
+    Results of MAD-based outlier detection.
+
+    Attributes
+    ----------
+    outlier_mask : np.ndarray
+        Boolean mask where True indicates an outlier.
+        Shape depends on mode: (n_spectra,) for spectrum mode,
+        (n_spectra, n_wavelengths) for channel mode.
+    median : np.ndarray or float
+        Median value(s) used as center.
+    mad : np.ndarray or float
+        MAD value(s) computed.
+    threshold : float
+        Number of scaled MAD units used for detection.
+    n_outliers : int
+        Total number of outlier values detected.
+    mode : str
+        Detection mode ('spectrum', 'channel', or '1d').
+    statistic : str
+        Statistic used for spectrum mode ('total_intensity', 'max_intensity', etc.)
+    inlier_indices : np.ndarray, optional
+        Indices of inlier items (for spectrum/1d mode). None for channel mode.
+    outlier_indices : np.ndarray, optional
+        Indices of outlier items (for spectrum/1d mode). None for channel mode.
+    """
+
+    outlier_mask: np.ndarray
+    median: np.ndarray
+    mad: np.ndarray
+    threshold: float
+    n_outliers: int
+    mode: str
+    statistic: str = ""
+    inlier_indices: Optional[np.ndarray] = None
+    outlier_indices: Optional[np.ndarray] = None
+
+    def __post_init__(self):
+        """Compute indices if not provided."""
+        if self.inlier_indices is None and self.outlier_mask.ndim == 1:
+            self.outlier_indices = np.where(self.outlier_mask)[0]
+            self.inlier_indices = np.where(~self.outlier_mask)[0]
+
+    @property
+    def n_inliers(self) -> int:
+        """Number of inlier items."""
+        if self.inlier_indices is not None:
+            return len(self.inlier_indices)
+        return int(np.sum(~self.outlier_mask))
+
+    @property
+    def outlier_fraction(self) -> float:
+        """Fraction of values flagged as outliers."""
+        total = self.outlier_mask.size
+        return self.n_outliers / total if total > 0 else 0.0
+
+    def summary(self) -> str:
+        """Generate a human-readable summary."""
+        lines = [
+            f"MAD Outlier Detection Results ({self.mode} mode):",
+            f"  Total items: {self.outlier_mask.size}",
+            f"  Outliers: {self.n_outliers} ({self.outlier_fraction*100:.1f}%)",
+            f"  Threshold: {self.threshold} scaled MAD units",
+        ]
+        if self.statistic:
+            lines.append(f"  Statistic: {self.statistic}")
+        if self.mode in ("spectrum", "1d") and self.n_outliers > 0 and self.outlier_indices is not None:
+            lines.append(f"  Outlier indices: {list(self.outlier_indices)}")
+        return "\n".join(lines)
+
+
+class MADOutlierDetector:
+    """
+    Median Absolute Deviation (MAD) outlier detector for LIBS spectra.
+
+    MAD is a robust measure of statistical dispersion:
+
+        MAD = median(|X_i - median(X)|)
+
+    For normally distributed data, MAD ≈ 0.6745 × σ. We scale MAD by 1.4826
+    to estimate the standard deviation, then flag values beyond k × scaled_MAD
+    from the median as outliers.
+
+    MAD is more robust than standard deviation because:
+    1. Median is not affected by extreme outliers
+    2. 50% of data can be outliers before MAD breaks down (vs ~0% for std)
+
+    Parameters
+    ----------
+    threshold : float
+        Number of scaled MAD units for outlier detection (default: 3.0).
+        Points beyond median ± threshold × scaled_MAD are flagged.
+    mode : str
+        Detection mode:
+        - 'spectrum': Flag entire spectra based on summary statistic
+        - 'channel': Flag individual (spectrum, wavelength) values
+        - '1d': Operate on 1D array directly
+    statistic : str
+        For 'spectrum' mode, which statistic to compute per spectrum:
+        - 'total_intensity': Sum of all intensities (default)
+        - 'max_intensity': Maximum intensity
+        - 'mean_intensity': Mean intensity
+        - 'std_intensity': Standard deviation of intensities
+
+    Examples
+    --------
+    >>> # Detect outlier spectra by total intensity
+    >>> mad = MADOutlierDetector(threshold=3.0, mode='spectrum')
+    >>> result = mad.detect_outliers(spectra)
+    >>> clean_spectra = spectra[~result.outlier_mask]
+
+    >>> # Clean individual channel values
+    >>> mad = MADOutlierDetector(threshold=3.0, mode='channel')
+    >>> result = mad.detect_outliers(spectra)
+    >>> # result.outlier_mask has shape (n_spectra, n_wavelengths)
+
+    >>> # Simple 1D outlier detection
+    >>> mad = MADOutlierDetector(threshold=3.0, mode='1d')
+    >>> result = mad.detect_outliers(intensity_values)
+    """
+
+    def __init__(
+        self,
+        threshold: float = 3.0,
+        mode: str = "spectrum",
+        statistic: str = "total_intensity",
+    ):
+        if mode not in ("spectrum", "channel", "1d"):
+            raise ValueError(f"Unknown mode: {mode}. Use 'spectrum', 'channel', or '1d'")
+        if statistic not in ("total_intensity", "max_intensity", "mean_intensity", "std_intensity"):
+            raise ValueError(f"Unknown statistic: {statistic}")
+        if threshold <= 0:
+            raise ValueError(f"Threshold must be positive, got {threshold}")
+
+        self.threshold = threshold
+        self.mode = mode
+        self.statistic = statistic
+
+    def compute_mad(self, data: np.ndarray, axis: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute median and MAD of data.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Input data
+        axis : int, optional
+            Axis along which to compute. None for flattened array.
+
+        Returns
+        -------
+        median : np.ndarray
+            Median value(s)
+        mad : np.ndarray
+            MAD value(s)
+        """
+        median = np.median(data, axis=axis, keepdims=True if axis is not None else False)
+        if axis is not None:
+            # Need to broadcast for subtraction
+            deviations = np.abs(data - median)
+        else:
+            deviations = np.abs(data - median)
+        mad = np.median(deviations, axis=axis, keepdims=False)
+
+        # Squeeze median if keepdims was used
+        if axis is not None:
+            median = np.squeeze(median, axis=axis)
+
+        return median, mad
+
+    def detect_outliers(
+        self,
+        data: np.ndarray,
+    ) -> MADResult:
+        """
+        Detect outliers using MAD.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Input data. Shape depends on mode:
+            - '1d': 1D array of values
+            - 'spectrum'/'channel': 2D array of shape (n_spectra, n_wavelengths)
+
+        Returns
+        -------
+        MADResult
+            Detection results
+        """
+        data = np.asarray(data, dtype=np.float64)
+
+        if self.mode == "1d":
+            return self._detect_1d(data)
+        elif self.mode == "spectrum":
+            return self._detect_spectrum(data)
+        else:  # channel
+            return self._detect_channel(data)
+
+    def _detect_1d(self, data: np.ndarray) -> MADResult:
+        """Detect outliers in 1D data."""
+        if data.ndim != 1:
+            raise ValueError(f"Expected 1D array for mode='1d', got shape {data.shape}")
+
+        median, mad = self.compute_mad(data)
+        scaled_mad = mad * MAD_SCALE_FACTOR
+
+        if scaled_mad < 1e-10:
+            # All values essentially identical
+            logger.warning("MAD is near zero - data may be constant")
+            outlier_mask = np.zeros(len(data), dtype=bool)
+        else:
+            deviations = np.abs(data - median)
+            outlier_mask = deviations > self.threshold * scaled_mad
+
+        outlier_indices = np.where(outlier_mask)[0]
+        inlier_indices = np.where(~outlier_mask)[0]
+        n_outliers = int(np.sum(outlier_mask))
+
+        if n_outliers > 0:
+            logger.info(f"MAD (1d) detected {n_outliers}/{len(data)} outliers")
+
+        return MADResult(
+            outlier_mask=outlier_mask,
+            median=np.array([median]),
+            mad=np.array([mad]),
+            threshold=self.threshold,
+            n_outliers=n_outliers,
+            mode="1d",
+            statistic="",
+            inlier_indices=inlier_indices,
+            outlier_indices=outlier_indices,
+        )
+
+    def _detect_spectrum(self, data: np.ndarray) -> MADResult:
+        """Detect outlier spectra based on summary statistic."""
+        if data.ndim != 2:
+            raise ValueError(f"Expected 2D array for mode='spectrum', got shape {data.shape}")
+
+        # Compute statistic per spectrum
+        if self.statistic == "total_intensity":
+            values = np.sum(data, axis=1)
+        elif self.statistic == "max_intensity":
+            values = np.max(data, axis=1)
+        elif self.statistic == "mean_intensity":
+            values = np.mean(data, axis=1)
+        else:  # std_intensity
+            values = np.std(data, axis=1)
+
+        median, mad = self.compute_mad(values)
+        scaled_mad = mad * MAD_SCALE_FACTOR
+
+        if scaled_mad < 1e-10:
+            logger.warning("MAD is near zero - spectra may be nearly identical")
+            outlier_mask = np.zeros(len(values), dtype=bool)
+        else:
+            deviations = np.abs(values - median)
+            outlier_mask = deviations > self.threshold * scaled_mad
+
+        outlier_indices = np.where(outlier_mask)[0]
+        inlier_indices = np.where(~outlier_mask)[0]
+        n_outliers = int(np.sum(outlier_mask))
+
+        if n_outliers > 0:
+            logger.info(
+                f"MAD (spectrum/{self.statistic}) detected {n_outliers}/{len(values)} outliers"
+            )
+
+        return MADResult(
+            outlier_mask=outlier_mask,
+            median=np.array([median]),
+            mad=np.array([mad]),
+            threshold=self.threshold,
+            n_outliers=n_outliers,
+            mode="spectrum",
+            statistic=self.statistic,
+            inlier_indices=inlier_indices,
+            outlier_indices=outlier_indices,
+        )
+
+    def _detect_channel(self, data: np.ndarray) -> MADResult:
+        """Detect outliers independently at each wavelength channel."""
+        if data.ndim != 2:
+            raise ValueError(f"Expected 2D array for mode='channel', got shape {data.shape}")
+
+        n_spectra, n_channels = data.shape
+
+        # Compute MAD along spectrum axis (axis=0) for each channel
+        median, mad = self.compute_mad(data, axis=0)
+        scaled_mad = mad * MAD_SCALE_FACTOR
+
+        # Compute deviations from median for each (spectrum, channel)
+        deviations = np.abs(data - median)
+
+        # Handle channels with zero MAD (constant or nearly constant across spectra)
+        # When MAD=0, we still want to detect outliers if any deviation exists
+        # Use the maximum deviation as a fallback scale, or flag any deviation > 0
+        zero_mad_mask = scaled_mad < 1e-10
+        if np.any(zero_mad_mask):
+            # For channels with zero MAD, flag any point that deviates significantly
+            # from the median (use absolute threshold based on median magnitude)
+            median_magnitude = np.abs(median)
+            # Fallback: flag if deviation > threshold% of median (or > 1 if median ~ 0)
+            fallback_threshold = np.maximum(median_magnitude * 0.01, 1.0)
+            safe_scaled_mad = np.where(zero_mad_mask, fallback_threshold, scaled_mad)
+        else:
+            safe_scaled_mad = scaled_mad
+
+        outlier_mask = deviations > self.threshold * safe_scaled_mad
+
+        n_outliers = int(np.sum(outlier_mask))
+
+        if n_outliers > 0:
+            logger.info(
+                f"MAD (channel) detected {n_outliers}/{data.size} outlier values "
+                f"across {n_spectra} spectra × {n_channels} channels"
+            )
+
+        return MADResult(
+            outlier_mask=outlier_mask,
+            median=median,
+            mad=mad,
+            threshold=self.threshold,
+            n_outliers=n_outliers,
+            mode="channel",
+            statistic="",
+            inlier_indices=None,
+            outlier_indices=None,
+        )
+
+    def filter_spectra(
+        self,
+        spectra: np.ndarray,
+    ) -> Tuple[np.ndarray, MADResult]:
+        """
+        Filter out outlier spectra (spectrum mode only).
+
+        Parameters
+        ----------
+        spectra : np.ndarray
+            2D array of shape (n_spectra, n_wavelengths)
+
+        Returns
+        -------
+        filtered_spectra : np.ndarray
+            Spectra with outliers removed
+        result : MADResult
+            Detection results
+        """
+        if self.mode != "spectrum":
+            raise ValueError("filter_spectra only works with mode='spectrum'")
+
+        result = self.detect_outliers(spectra)
+        filtered = spectra[~result.outlier_mask]
+        return filtered, result
+
+    def clean_channels(
+        self,
+        spectra: np.ndarray,
+        replacement: str = "median",
+    ) -> Tuple[np.ndarray, MADResult]:
+        """
+        Replace outlier channel values with robust estimate.
+
+        Parameters
+        ----------
+        spectra : np.ndarray
+            2D array of shape (n_spectra, n_wavelengths)
+        replacement : str
+            Replacement method:
+            - 'median': Replace with channel median (default)
+            - 'nan': Replace with NaN
+            - 'interpolate': Linear interpolation from neighbors
+
+        Returns
+        -------
+        cleaned_spectra : np.ndarray
+            Spectra with outlier values replaced
+        result : MADResult
+            Detection results
+        """
+        if self.mode != "channel":
+            raise ValueError("clean_channels only works with mode='channel'")
+        if replacement not in ("median", "nan", "interpolate"):
+            raise ValueError(f"Unknown replacement method: {replacement}")
+
+        result = self.detect_outliers(spectra)
+        cleaned = spectra.copy()
+
+        if replacement == "median":
+            # Broadcast median to match outlier positions
+            for i in range(spectra.shape[0]):
+                mask = result.outlier_mask[i]
+                cleaned[i, mask] = result.median[mask]
+        elif replacement == "nan":
+            cleaned[result.outlier_mask] = np.nan
+        else:  # interpolate
+            for i in range(spectra.shape[0]):
+                mask = result.outlier_mask[i]
+                if np.any(mask):
+                    good_idx = np.where(~mask)[0]
+                    bad_idx = np.where(mask)[0]
+                    if len(good_idx) >= 2:
+                        cleaned[i, bad_idx] = np.interp(
+                            bad_idx, good_idx, cleaned[i, good_idx]
+                        )
+                    else:
+                        # Not enough good points for interpolation
+                        cleaned[i, bad_idx] = result.median[bad_idx]
+
+        return cleaned, result
+
+
+def mad_outliers_1d(
+    data: np.ndarray,
+    threshold: float = 3.0,
+) -> MADResult:
+    """
+    Convenience function for MAD outlier detection on 1D data.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        1D array of values
+    threshold : float
+        Number of scaled MAD units (default: 3.0)
+
+    Returns
+    -------
+    MADResult
+        Detection results
+    """
+    detector = MADOutlierDetector(threshold=threshold, mode="1d")
+    return detector.detect_outliers(data)
+
+
+def mad_outliers_spectra(
+    spectra: np.ndarray,
+    threshold: float = 3.0,
+    statistic: str = "total_intensity",
+) -> MADResult:
+    """
+    Convenience function for MAD outlier detection on spectra.
+
+    Flags entire spectra based on a summary statistic.
+
+    Parameters
+    ----------
+    spectra : np.ndarray
+        2D array of shape (n_spectra, n_wavelengths)
+    threshold : float
+        Number of scaled MAD units (default: 3.0)
+    statistic : str
+        Statistic to use: 'total_intensity', 'max_intensity',
+        'mean_intensity', or 'std_intensity'
+
+    Returns
+    -------
+    MADResult
+        Detection results
+    """
+    detector = MADOutlierDetector(threshold=threshold, mode="spectrum", statistic=statistic)
+    return detector.detect_outliers(spectra)
+
+
+def mad_clean_channels(
+    spectra: np.ndarray,
+    threshold: float = 3.0,
+    replacement: str = "median",
+) -> Tuple[np.ndarray, MADResult]:
+    """
+    Clean outlier channel values in spectra using MAD.
+
+    Parameters
+    ----------
+    spectra : np.ndarray
+        2D array of shape (n_spectra, n_wavelengths)
+    threshold : float
+        Number of scaled MAD units (default: 3.0)
+    replacement : str
+        'median', 'nan', or 'interpolate'
+
+    Returns
+    -------
+    cleaned_spectra : np.ndarray
+        Spectra with outlier values replaced
+    result : MADResult
+        Detection results
+    """
+    detector = MADOutlierDetector(threshold=threshold, mode="channel")
+    return detector.clean_channels(spectra, replacement=replacement)

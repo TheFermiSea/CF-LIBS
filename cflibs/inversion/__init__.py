@@ -161,6 +161,11 @@ from cflibs.inversion.outliers import (
     SpectralAngleMapper,
     sam_distance,
     detect_outlier_spectra,
+    MADResult,
+    MADOutlierDetector,
+    mad_outliers_1d,
+    mad_outliers_spectra,
+    mad_clean_channels,
 )
 
 __all__.extend([
@@ -169,4 +174,9 @@ __all__.extend([
     "SpectralAngleMapper",
     "sam_distance",
     "detect_outlier_spectra",
+    "MADResult",
+    "MADOutlierDetector",
+    "mad_outliers_1d",
+    "mad_outliers_spectra",
+    "mad_clean_channels",
 ])
