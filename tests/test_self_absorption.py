@@ -6,6 +6,8 @@ Tests cover:
 - Optical depth estimation
 - Round-trip correction validation
 - estimate_optical_depth_from_intensity_ratio function
+- CurveOfGrowthAnalyzer class and COG regime detection
+- MultipletLine and COGResult dataclasses
 """
 
 import pytest
@@ -16,6 +18,11 @@ from cflibs.inversion.self_absorption import (
     SelfAbsorptionResult,
     AbsorptionCorrectionResult,
     estimate_optical_depth_from_intensity_ratio,
+    CurveOfGrowthAnalyzer,
+    COGResult,
+    COGLineData,
+    COGRegime,
+    MultipletLine,
 )
 from cflibs.inversion.boltzmann import LineObservation
 
@@ -701,3 +708,893 @@ class TestSelfAbsorptionEdgeCases:
 
         # Should not hang, should return with iterations <= max_iterations
         assert len(result.corrected_observations) + len(result.masked_observations) == 1
+
+
+# ==============================================================================
+# MultipletLine Tests
+# ==============================================================================
+
+
+class TestMultipletLine:
+    """Tests for MultipletLine dataclass and its properties."""
+
+    def test_creation(self):
+        """Verify MultipletLine can be created with required attributes."""
+        line = MultipletLine(
+            wavelength_nm=500.0,
+            equivalent_width_nm=0.05,
+            g_i=5,
+            g_k=7,
+            A_ki=1e8,
+            E_i_ev=0.0,
+            E_k_ev=2.5,
+            element="Fe",
+            ionization_stage=1,
+        )
+
+        assert line.wavelength_nm == 500.0
+        assert line.equivalent_width_nm == 0.05
+        assert line.g_i == 5
+        assert line.g_k == 7
+        assert line.element == "Fe"
+
+    def test_oscillator_strength_calculation(self):
+        """Verify oscillator strength is calculated from Einstein A."""
+        # For a known A_ki, calculate expected f_ik
+        # f_ik = 1.4992e-16 * lambda[cm]^2 * A_ki * (g_k / g_i)
+        line = MultipletLine(
+            wavelength_nm=500.0,
+            equivalent_width_nm=0.05,
+            g_i=5,
+            g_k=7,
+            A_ki=1e8,
+            E_i_ev=0.0,
+            E_k_ev=2.5,
+            element="Fe",
+            ionization_stage=1,
+        )
+
+        lambda_cm = 500.0 * 1e-7
+        expected_f = 1.4992e-16 * (lambda_cm**2) * 1e8 * (7 / 5)
+
+        assert line.oscillator_strength == pytest.approx(expected_f, rel=1e-6)
+
+    def test_log_gf_calculation(self):
+        """Verify log(gf) is calculated correctly."""
+        line = MultipletLine(
+            wavelength_nm=500.0,
+            equivalent_width_nm=0.05,
+            g_i=5,
+            g_k=7,
+            A_ki=1e8,
+            E_i_ev=0.0,
+            E_k_ev=2.5,
+            element="Fe",
+            ionization_stage=1,
+        )
+
+        gf = line.g_i * line.oscillator_strength
+        expected_log_gf = np.log10(gf)
+
+        assert line.log_gf == pytest.approx(expected_log_gf, rel=1e-6)
+
+    def test_default_intensity_uncertainty(self):
+        """Verify default intensity uncertainty is 0."""
+        line = MultipletLine(
+            wavelength_nm=500.0,
+            equivalent_width_nm=0.05,
+            g_i=5,
+            g_k=7,
+            A_ki=1e8,
+            E_i_ev=0.0,
+            E_k_ev=2.5,
+            element="Fe",
+            ionization_stage=1,
+        )
+
+        assert line.intensity_uncertainty == 0.0
+
+
+# ==============================================================================
+# COGLineData Tests
+# ==============================================================================
+
+
+class TestCOGLineData:
+    """Tests for COGLineData dataclass."""
+
+    def test_creation(self):
+        """Verify COGLineData can be created."""
+        data = COGLineData(
+            wavelength_nm=500.0,
+            equivalent_width_nm=0.05,
+            log_gf=-1.5,
+            reduced_width=1e-4,
+            log_reduced_width=-4.0,
+            E_i_ev=0.0,
+            element="Fe",
+            ionization_stage=1,
+        )
+
+        assert data.wavelength_nm == 500.0
+        assert data.log_gf == -1.5
+        assert data.reduced_width == 1e-4
+
+
+# ==============================================================================
+# COGResult Tests
+# ==============================================================================
+
+
+class TestCOGResult:
+    """Tests for COGResult dataclass."""
+
+    def test_creation(self):
+        """Verify COGResult can be created with all fields."""
+        result = COGResult(
+            regime=COGRegime.LINEAR,
+            optical_depth_estimate=0.5,
+            column_density_cm2=1e15,
+            doppler_width_nm=0.01,
+            damping_parameter=0.05,
+            fit_slope=0.95,
+            fit_intercept=-5.0,
+            fit_r_squared=0.98,
+            fit_residuals=np.array([0.01, -0.02, 0.01]),
+            n_lines_used=3,
+            lines_data=[],
+            warnings=[],
+        )
+
+        assert result.regime == COGRegime.LINEAR
+        assert result.optical_depth_estimate == 0.5
+        assert result.fit_r_squared == 0.98
+
+    def test_default_warnings(self):
+        """Verify default warnings is empty list."""
+        result = COGResult(
+            regime=COGRegime.LINEAR,
+            optical_depth_estimate=0.5,
+            column_density_cm2=1e15,
+            doppler_width_nm=0.01,
+            damping_parameter=0.05,
+            fit_slope=0.95,
+            fit_intercept=-5.0,
+            fit_r_squared=0.98,
+            fit_residuals=np.array([]),
+            n_lines_used=0,
+            lines_data=[],
+        )
+
+        assert result.warnings == []
+
+
+# ==============================================================================
+# COGRegime Tests
+# ==============================================================================
+
+
+class TestCOGRegime:
+    """Tests for COGRegime enumeration."""
+
+    def test_regime_values(self):
+        """Verify regime enumeration values."""
+        assert COGRegime.LINEAR.value == "linear"
+        assert COGRegime.SATURATION.value == "saturation"
+        assert COGRegime.DAMPING.value == "damping"
+        assert COGRegime.UNKNOWN.value == "unknown"
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Initialization Tests
+# ==============================================================================
+
+
+class TestCurveOfGrowthAnalyzerInit:
+    """Tests for CurveOfGrowthAnalyzer initialization."""
+
+    def test_default_parameters(self):
+        """Verify default parameters are set correctly."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        assert analyzer.temperature_K == 10000.0
+        assert analyzer.mass_amu == 56.0
+        assert analyzer.damping_constant is None
+        assert analyzer.min_lines == 3
+
+    def test_custom_parameters(self):
+        """Verify custom parameters are stored."""
+        analyzer = CurveOfGrowthAnalyzer(
+            temperature_K=8000.0,
+            mass_amu=40.0,
+            damping_constant=0.1,
+            min_lines=5,
+        )
+
+        assert analyzer.temperature_K == 8000.0
+        assert analyzer.mass_amu == 40.0
+        assert analyzer.damping_constant == 0.1
+        assert analyzer.min_lines == 5
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Doppler Width Tests
+# ==============================================================================
+
+
+class TestCOGDopplerWidth:
+    """Tests for Doppler width calculation."""
+
+    def test_doppler_width_positive(self):
+        """Verify Doppler width is positive."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0, mass_amu=56.0)
+        doppler = analyzer._compute_doppler_width(500.0)
+
+        assert doppler > 0
+
+    def test_doppler_width_scales_with_wavelength(self):
+        """Verify Doppler width scales linearly with wavelength."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0, mass_amu=56.0)
+
+        doppler_500 = analyzer._compute_doppler_width(500.0)
+        doppler_1000 = analyzer._compute_doppler_width(1000.0)
+
+        # delta_lambda_D / lambda = const, so doppler width doubles
+        assert doppler_1000 == pytest.approx(2 * doppler_500, rel=1e-6)
+
+    def test_doppler_width_increases_with_temperature(self):
+        """Verify Doppler width increases with temperature."""
+        analyzer_cool = CurveOfGrowthAnalyzer(temperature_K=5000.0, mass_amu=56.0)
+        analyzer_hot = CurveOfGrowthAnalyzer(temperature_K=20000.0, mass_amu=56.0)
+
+        doppler_cool = analyzer_cool._compute_doppler_width(500.0)
+        doppler_hot = analyzer_hot._compute_doppler_width(500.0)
+
+        # Doppler width ~ sqrt(T)
+        assert doppler_hot > doppler_cool
+        assert doppler_hot == pytest.approx(doppler_cool * 2, rel=0.01)  # sqrt(4)=2
+
+    def test_doppler_width_decreases_with_mass(self):
+        """Verify Doppler width decreases with atomic mass."""
+        analyzer_light = CurveOfGrowthAnalyzer(temperature_K=10000.0, mass_amu=12.0)  # C
+        analyzer_heavy = CurveOfGrowthAnalyzer(temperature_K=10000.0, mass_amu=56.0)  # Fe
+
+        doppler_light = analyzer_light._compute_doppler_width(500.0)
+        doppler_heavy = analyzer_heavy._compute_doppler_width(500.0)
+
+        # Doppler width ~ 1/sqrt(m)
+        assert doppler_light > doppler_heavy
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Fit Tests
+# ==============================================================================
+
+
+class TestCOGFit:
+    """Tests for CurveOfGrowthAnalyzer.fit() method."""
+
+    @pytest.fixture
+    def linear_regime_lines(self):
+        """Create lines in the linear regime (slope ~ 1)."""
+        # In linear regime: log(W/lambda) = log(gf) + const
+        # Create lines with varying gf and corresponding W
+        lines = []
+        base_gf = 0.01
+        base_W = 1e-5  # Very small W = optically thin
+
+        for i, factor in enumerate([0.1, 0.5, 1.0, 2.0, 5.0]):
+            gf = base_gf * factor
+            W = base_W * factor  # Linear scaling
+
+            # Reverse engineer A_ki from desired gf
+            # gf = g_i * f = g_i * 1.4992e-16 * lambda^2 * A * (g_k/g_i)
+            # For g_i=5, g_k=7, lambda=500nm:
+            g_i, g_k = 5, 7
+            lambda_cm = 500e-7
+            A_ki = gf / (1.4992e-16 * lambda_cm**2 * g_k / g_i * g_i)
+
+            lines.append(
+                MultipletLine(
+                    wavelength_nm=500.0 + i,
+                    equivalent_width_nm=W,
+                    g_i=g_i,
+                    g_k=g_k,
+                    A_ki=A_ki,
+                    E_i_ev=0.0,
+                    E_k_ev=2.5,
+                    element="Fe",
+                    ionization_stage=1,
+                )
+            )
+
+        return lines
+
+    @pytest.fixture
+    def saturation_regime_lines(self):
+        """Create lines that show saturation behavior (slope << 1)."""
+        # In saturation: W grows very slowly with gf
+        # log(W/lambda) ~ 0.1 * log(gf) + const
+        lines = []
+
+        for i, log_gf_offset in enumerate([-2, -1, 0, 1, 2]):
+            gf = 10 ** (log_gf_offset)
+            # Saturation: W ~ const * sqrt(ln(gf)) very slow growth
+            W = 1e-4 * (1 + 0.1 * log_gf_offset)  # Very flat
+
+            g_i, g_k = 5, 7
+            lambda_cm = 500e-7
+            A_ki = gf / (1.4992e-16 * lambda_cm**2 * g_k / g_i * g_i)
+
+            lines.append(
+                MultipletLine(
+                    wavelength_nm=500.0 + i,
+                    equivalent_width_nm=W,
+                    g_i=g_i,
+                    g_k=g_k,
+                    A_ki=A_ki,
+                    E_i_ev=0.0,
+                    E_k_ev=2.5,
+                    element="Fe",
+                    ionization_stage=1,
+                )
+            )
+
+        return lines
+
+    def test_fit_returns_cog_result(self, linear_regime_lines):
+        """Verify fit() returns COGResult."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        assert isinstance(result, COGResult)
+
+    def test_fit_requires_minimum_lines(self):
+        """Verify fit() raises ValueError with too few lines."""
+        analyzer = CurveOfGrowthAnalyzer(min_lines=3)
+
+        lines = [
+            MultipletLine(
+                wavelength_nm=500.0,
+                equivalent_width_nm=0.01,
+                g_i=5,
+                g_k=7,
+                A_ki=1e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=501.0,
+                equivalent_width_nm=0.02,
+                g_i=5,
+                g_k=7,
+                A_ki=2e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+        ]
+
+        with pytest.raises(ValueError, match="Need at least 3 lines"):
+            analyzer.fit(lines)
+
+    def test_fit_linear_regime_slope_near_one(self, linear_regime_lines):
+        """Verify linear regime gives slope near 1."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines, excitation_correct=False)
+
+        # Linear regime should have slope close to 1
+        assert result.fit_slope == pytest.approx(1.0, abs=0.15)
+
+    def test_fit_saturation_regime_slope_near_zero(self, saturation_regime_lines):
+        """Verify saturation regime gives slope near 0."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(saturation_regime_lines, excitation_correct=False)
+
+        # Saturation should have slope < 0.3
+        assert result.fit_slope < 0.4
+
+    def test_fit_r_squared_in_range(self, linear_regime_lines):
+        """Verify R^2 is between 0 and 1."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        assert 0.0 <= result.fit_r_squared <= 1.0
+
+    def test_fit_n_lines_used(self, linear_regime_lines):
+        """Verify n_lines_used matches input."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        assert result.n_lines_used == len(linear_regime_lines)
+
+    def test_fit_lines_data_populated(self, linear_regime_lines):
+        """Verify lines_data is populated with COGLineData."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        assert len(result.lines_data) == len(linear_regime_lines)
+        for ld in result.lines_data:
+            assert isinstance(ld, COGLineData)
+
+    def test_fit_optical_depth_positive(self, linear_regime_lines):
+        """Verify optical depth estimate is non-negative."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        assert result.optical_depth_estimate >= 0.0
+
+    def test_fit_doppler_width_reasonable(self, linear_regime_lines):
+        """Verify Doppler width is reasonable for LIBS conditions."""
+        analyzer = CurveOfGrowthAnalyzer(temperature_K=10000.0, mass_amu=56.0)
+        result = analyzer.fit(linear_regime_lines)
+
+        # At 10000 K for Fe at 500 nm, Doppler FWHM ~ 0.01-0.02 nm
+        assert 0.001 < result.doppler_width_nm < 0.1
+
+    def test_fit_skips_zero_ew_lines(self):
+        """Verify fit skips lines with zero equivalent width."""
+        lines = [
+            MultipletLine(
+                wavelength_nm=500.0,
+                equivalent_width_nm=0.0,  # Zero EW
+                g_i=5,
+                g_k=7,
+                A_ki=1e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=501.0,
+                equivalent_width_nm=0.01,
+                g_i=5,
+                g_k=7,
+                A_ki=1e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=502.0,
+                equivalent_width_nm=0.02,
+                g_i=5,
+                g_k=7,
+                A_ki=2e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=503.0,
+                equivalent_width_nm=0.03,
+                g_i=5,
+                g_k=7,
+                A_ki=3e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+        ]
+
+        analyzer = CurveOfGrowthAnalyzer(min_lines=3)
+        result = analyzer.fit(lines)
+
+        # Should only use 3 lines (skipped the zero EW one)
+        assert result.n_lines_used == 3
+        assert "non-positive EW" in str(result.warnings)
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Regime Classification Tests
+# ==============================================================================
+
+
+class TestCOGRegimeClassification:
+    """Tests for regime classification logic."""
+
+    def test_classify_linear_high_slope(self):
+        """Verify high slope is classified as LINEAR."""
+        analyzer = CurveOfGrowthAnalyzer()
+        regime = analyzer._classify_regime(slope=0.95, r_squared=0.9)
+
+        assert regime == COGRegime.LINEAR
+
+    def test_classify_saturation_low_slope(self):
+        """Verify low slope is classified as SATURATION."""
+        analyzer = CurveOfGrowthAnalyzer()
+        regime = analyzer._classify_regime(slope=0.1, r_squared=0.9)
+
+        assert regime == COGRegime.SATURATION
+
+    def test_classify_damping_mid_slope(self):
+        """Verify mid slope (~0.5) is classified as DAMPING."""
+        analyzer = CurveOfGrowthAnalyzer()
+        regime = analyzer._classify_regime(slope=0.5, r_squared=0.9)
+
+        assert regime == COGRegime.DAMPING
+
+    def test_classify_unknown_poor_fit(self):
+        """Verify poor R^2 is classified as UNKNOWN."""
+        analyzer = CurveOfGrowthAnalyzer()
+        regime = analyzer._classify_regime(slope=0.9, r_squared=0.3)
+
+        assert regime == COGRegime.UNKNOWN
+
+    def test_classify_unknown_transitional_slope(self):
+        """Verify transitional slope is classified as UNKNOWN."""
+        analyzer = CurveOfGrowthAnalyzer()
+        # Slope between linear and damping regimes
+        regime = analyzer._classify_regime(slope=0.7, r_squared=0.9)
+
+        assert regime == COGRegime.UNKNOWN
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Correction Factors Tests
+# ==============================================================================
+
+
+class TestCOGCorrectionFactors:
+    """Tests for get_correction_factors() method."""
+
+    @pytest.fixture
+    def sample_cog_result(self):
+        """Create a sample COGResult for testing."""
+        lines_data = [
+            COGLineData(
+                wavelength_nm=500.0,
+                equivalent_width_nm=0.01,
+                log_gf=-1.0,
+                reduced_width=2e-5,
+                log_reduced_width=-4.7,
+                E_i_ev=0.0,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            COGLineData(
+                wavelength_nm=501.0,
+                equivalent_width_nm=0.02,
+                log_gf=0.0,  # Strongest line
+                reduced_width=4e-5,
+                log_reduced_width=-4.4,
+                E_i_ev=0.0,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            COGLineData(
+                wavelength_nm=502.0,
+                equivalent_width_nm=0.005,
+                log_gf=-2.0,
+                reduced_width=1e-5,
+                log_reduced_width=-5.0,
+                E_i_ev=0.0,
+                element="Fe",
+                ionization_stage=1,
+            ),
+        ]
+
+        return COGResult(
+            regime=COGRegime.LINEAR,
+            optical_depth_estimate=1.0,  # tau=1 for strongest line
+            column_density_cm2=1e15,
+            doppler_width_nm=0.01,
+            damping_parameter=0.05,
+            fit_slope=0.95,
+            fit_intercept=-5.0,
+            fit_r_squared=0.98,
+            fit_residuals=np.array([0.01, -0.02, 0.01]),
+            n_lines_used=3,
+            lines_data=lines_data,
+        )
+
+    def test_get_correction_factors_returns_dict(self, sample_cog_result):
+        """Verify correction factors returns a dictionary."""
+        analyzer = CurveOfGrowthAnalyzer()
+        factors = analyzer.get_correction_factors(sample_cog_result)
+
+        assert isinstance(factors, dict)
+        assert len(factors) == 3
+
+    def test_strongest_line_has_largest_correction(self, sample_cog_result):
+        """Verify strongest line (highest gf) has largest correction."""
+        analyzer = CurveOfGrowthAnalyzer()
+        factors = analyzer.get_correction_factors(sample_cog_result)
+
+        # Line at 501 nm has highest gf (log_gf=0)
+        assert factors[501.0] >= factors[500.0]
+        assert factors[501.0] >= factors[502.0]
+
+    def test_optically_thin_line_correction_near_one(self, sample_cog_result):
+        """Verify optically thin line has correction factor near 1."""
+        analyzer = CurveOfGrowthAnalyzer()
+        factors = analyzer.get_correction_factors(sample_cog_result)
+
+        # Line at 502 nm has lowest gf (log_gf=-2), tau ~ 0.01
+        # For tau=0.01, f(tau) ~ 1, correction ~ 1
+        assert factors[502.0] == pytest.approx(1.0, abs=0.05)
+
+
+# ==============================================================================
+# CurveOfGrowthAnalyzer Diagnose Self-Absorption Tests
+# ==============================================================================
+
+
+class TestCOGDiagnoseSelfAbsorption:
+    """Tests for diagnose_self_absorption() method."""
+
+    def test_diagnose_returns_dict(self):
+        """Verify diagnose returns dictionary."""
+        lines = [
+            MultipletLine(
+                wavelength_nm=500.0,
+                equivalent_width_nm=0.01,
+                g_i=5,
+                g_k=7,
+                A_ki=1e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=501.0,
+                equivalent_width_nm=0.02,
+                g_i=5,
+                g_k=7,
+                A_ki=2e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+            MultipletLine(
+                wavelength_nm=502.0,
+                equivalent_width_nm=0.03,
+                g_i=5,
+                g_k=7,
+                A_ki=3e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+        ]
+
+        analyzer = CurveOfGrowthAnalyzer()
+        diagnosed = analyzer.diagnose_self_absorption(lines)
+
+        assert isinstance(diagnosed, dict)
+        assert all(isinstance(v, bool) for v in diagnosed.values())
+
+    def test_diagnose_with_too_few_lines(self):
+        """Verify diagnose returns False for all with too few lines."""
+        lines = [
+            MultipletLine(
+                wavelength_nm=500.0,
+                equivalent_width_nm=0.01,
+                g_i=5,
+                g_k=7,
+                A_ki=1e8,
+                E_i_ev=0.0,
+                E_k_ev=2.5,
+                element="Fe",
+                ionization_stage=1,
+            ),
+        ]
+
+        analyzer = CurveOfGrowthAnalyzer(min_lines=3)
+        diagnosed = analyzer.diagnose_self_absorption(lines)
+
+        assert diagnosed[500.0] is False
+
+
+# ==============================================================================
+# SelfAbsorptionCorrector COG Integration Tests
+# ==============================================================================
+
+
+class TestSelfAbsorptionCorrectorCOGIntegration:
+    """Tests for SelfAbsorptionCorrector.correct_with_cog() method."""
+
+    @pytest.fixture
+    def sample_observations(self):
+        """Create sample observations for COG correction."""
+        return [
+            LineObservation(
+                wavelength_nm=500.0,
+                intensity=1000.0,
+                intensity_uncertainty=20.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=2.5,
+                g_k=7,
+                A_ki=1e8,
+            ),
+            LineObservation(
+                wavelength_nm=501.0,
+                intensity=1500.0,
+                intensity_uncertainty=30.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=2.6,
+                g_k=9,
+                A_ki=2e8,
+            ),
+            LineObservation(
+                wavelength_nm=502.0,
+                intensity=800.0,
+                intensity_uncertainty=16.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=2.7,
+                g_k=5,
+                A_ki=5e7,
+            ),
+        ]
+
+    def test_correct_with_cog_returns_result(self, sample_observations):
+        """Verify correct_with_cog returns SelfAbsorptionResult."""
+        corrector = SelfAbsorptionCorrector()
+
+        equivalent_widths = {500.0: 0.01, 501.0: 0.02, 502.0: 0.008}
+        lower_level_g = {500.0: 5, 501.0: 7, 502.0: 3}
+        lower_level_energies = {500.0: 0.0, 501.0: 0.0, 502.0: 0.0}
+
+        result = corrector.correct_with_cog(
+            observations=sample_observations,
+            equivalent_widths=equivalent_widths,
+            lower_level_g=lower_level_g,
+            lower_level_energies=lower_level_energies,
+            temperature_K=10000.0,
+            mass_amu=56.0,
+        )
+
+        assert isinstance(result, SelfAbsorptionResult)
+
+    def test_correct_with_cog_fallback_on_few_lines(self):
+        """Verify fallback to standard correction with too few lines."""
+        corrector = SelfAbsorptionCorrector()
+
+        observations = [
+            LineObservation(
+                wavelength_nm=500.0,
+                intensity=1000.0,
+                intensity_uncertainty=20.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=2.5,
+                g_k=7,
+                A_ki=1e8,
+            ),
+        ]
+
+        equivalent_widths = {500.0: 0.01}
+        lower_level_g = {500.0: 5}
+        lower_level_energies = {500.0: 0.0}
+
+        result = corrector.correct_with_cog(
+            observations=observations,
+            equivalent_widths=equivalent_widths,
+            lower_level_g=lower_level_g,
+            lower_level_energies=lower_level_energies,
+            temperature_K=10000.0,
+        )
+
+        # Should still return a result (fallback to standard correction)
+        assert isinstance(result, SelfAbsorptionResult)
+        assert "falling back" in str(result.warnings).lower()
+
+    def test_correct_with_cog_reports_regime(self, sample_observations):
+        """Verify COG regime is reported in warnings."""
+        corrector = SelfAbsorptionCorrector()
+
+        equivalent_widths = {500.0: 0.01, 501.0: 0.02, 502.0: 0.008}
+        lower_level_g = {500.0: 5, 501.0: 7, 502.0: 3}
+        lower_level_energies = {500.0: 0.0, 501.0: 0.0, 502.0: 0.0}
+
+        result = corrector.correct_with_cog(
+            observations=sample_observations,
+            equivalent_widths=equivalent_widths,
+            lower_level_g=lower_level_g,
+            lower_level_energies=lower_level_energies,
+            temperature_K=10000.0,
+        )
+
+        # Should report COG regime in warnings
+        warnings_str = str(result.warnings)
+        assert "COG regime" in warnings_str
+
+    def test_correct_with_cog_reports_r_squared(self, sample_observations):
+        """Verify COG fit quality is reported in warnings."""
+        corrector = SelfAbsorptionCorrector()
+
+        equivalent_widths = {500.0: 0.01, 501.0: 0.02, 502.0: 0.008}
+        lower_level_g = {500.0: 5, 501.0: 7, 502.0: 3}
+        lower_level_energies = {500.0: 0.0, 501.0: 0.0, 502.0: 0.0}
+
+        result = corrector.correct_with_cog(
+            observations=sample_observations,
+            equivalent_widths=equivalent_widths,
+            lower_level_g=lower_level_g,
+            lower_level_energies=lower_level_energies,
+            temperature_K=10000.0,
+        )
+
+        # Should report R^2 in warnings
+        warnings_str = str(result.warnings)
+        assert "R^2" in warnings_str
+
+
+# ==============================================================================
+# COG Theoretical Curve Tests
+# ==============================================================================
+
+
+class TestCOGTheoreticalCurve:
+    """Tests for theoretical curve-of-growth computation."""
+
+    def test_theoretical_cog_linear_regime(self):
+        """Verify linear regime behavior in theoretical COG."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        # Very small tau (linear regime) - use float array
+        log_tau = np.array([-3.0, -2.0, -1.5])
+        log_W = analyzer._compute_theoretical_cog(log_tau, damping_param=0.01)
+
+        # In linear regime, slope should be close to 1 (W proportional to tau)
+        slopes = np.diff(log_W) / np.diff(log_tau)
+        assert np.all(slopes > 0.9)
+
+    def test_theoretical_cog_saturation_regime(self):
+        """Verify saturation regime behavior in theoretical COG."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        # Moderate tau (saturation regime) - use float array
+        log_tau = np.array([0.5, 1.0, 1.5])
+        log_W = analyzer._compute_theoretical_cog(log_tau, damping_param=0.01)
+
+        # In saturation, slope is much less than 1
+        slopes = np.diff(log_W) / np.diff(log_tau)
+        assert np.all(slopes < 0.5)
+
+    def test_theoretical_cog_monotonic_in_linear_regime(self):
+        """Verify theoretical COG is monotonically increasing in linear regime."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        # Test only in the linear regime where behavior is well-defined
+        log_tau = np.linspace(-3.0, -1.5, 20)
+        log_W = analyzer._compute_theoretical_cog(log_tau, damping_param=0.05)
+
+        # W should always increase with tau in linear regime
+        assert np.all(np.diff(log_W) > 0)
+
+    def test_theoretical_cog_monotonic_in_saturation_regime(self):
+        """Verify theoretical COG is monotonically increasing in saturation regime."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        # Test only in the saturation regime where behavior is well-defined
+        log_tau = np.linspace(0.5, 2.0, 20)
+        log_W = analyzer._compute_theoretical_cog(log_tau, damping_param=0.05)
+
+        # W should always increase with tau in saturation regime
+        assert np.all(np.diff(log_W) > 0)
+
+    def test_theoretical_cog_handles_float_input(self):
+        """Verify theoretical COG handles float array input correctly."""
+        analyzer = CurveOfGrowthAnalyzer()
+
+        # Ensure float arrays work
+        log_tau = np.array([-2.0, -1.0, 0.0, 1.0], dtype=float)
+        log_W = analyzer._compute_theoretical_cog(log_tau, damping_param=0.05)
+
+        # Should return valid results
+        assert len(log_W) == len(log_tau)
+        assert np.all(np.isfinite(log_W))

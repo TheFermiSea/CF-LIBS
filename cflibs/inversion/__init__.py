@@ -33,6 +33,16 @@ from cflibs.inversion.self_absorption import (
     estimate_optical_depth_from_intensity_ratio,
 )
 
+from cflibs.inversion.cdsb import (
+    CDSBPlotter,
+    CDSBResult,
+    CDSBLineObservation,
+    CDSBConvergenceStatus,
+    LineOpticalDepth,
+    create_cdsb_observation,
+    from_transition,
+)
+
 # Hybrid inversion (requires JAX)
 try:
     from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter
@@ -94,6 +104,14 @@ __all__ = [
     "SelfAbsorptionResult",
     "SelfAbsorptionCorrector",
     "estimate_optical_depth_from_intensity_ratio",
+    # CD-SB plotting
+    "CDSBPlotter",
+    "CDSBResult",
+    "CDSBLineObservation",
+    "CDSBConvergenceStatus",
+    "LineOpticalDepth",
+    "create_cdsb_observation",
+    "from_transition",
 ]
 
 # Add hybrid inversion exports if available
@@ -154,6 +172,25 @@ if _HAS_UNCERTAINTY:
         "extract_values_and_uncertainties",
     ])
 
+# Monte Carlo UQ (always available - no external dependencies beyond numpy)
+from cflibs.inversion.uncertainty import (
+    MonteCarloUQ,
+    MonteCarloResult,
+    PerturbationType,
+    AtomicDataUncertainty,
+    run_monte_carlo_uq,
+    HAS_JOBLIB,
+)
+
+__all__.extend([
+    "MonteCarloUQ",
+    "MonteCarloResult",
+    "PerturbationType",
+    "AtomicDataUncertainty",
+    "run_monte_carlo_uq",
+    "HAS_JOBLIB",
+])
+
 # Outlier detection (always available - no external dependencies)
 from cflibs.inversion.outliers import (
     OutlierMethod,
@@ -179,4 +216,29 @@ __all__.extend([
     "mad_outliers_1d",
     "mad_outliers_spectra",
     "mad_clean_channels",
+])
+
+# Matrix effect correction (always available - no external dependencies)
+from cflibs.inversion.matrix_effects import (
+    MatrixType,
+    MatrixClassificationResult,
+    CorrectionFactor,
+    CorrectionFactorDB,
+    MatrixCorrectionResult,
+    MatrixEffectCorrector,
+    InternalStandardResult,
+    InternalStandardizer,
+    combine_corrections,
+)
+
+__all__.extend([
+    "MatrixType",
+    "MatrixClassificationResult",
+    "CorrectionFactor",
+    "CorrectionFactorDB",
+    "MatrixCorrectionResult",
+    "MatrixEffectCorrector",
+    "InternalStandardResult",
+    "InternalStandardizer",
+    "combine_corrections",
 ])
