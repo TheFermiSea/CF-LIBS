@@ -215,6 +215,24 @@ class Exporter(ABC):
             return "dict"
         return type(data).__name__
 
+    # --- Type detection helpers (shared by all exporters) ---
+
+    def _is_cflibs_result(self, data: Dict[str, Any]) -> bool:
+        """Check if data looks like CFLIBSResult."""
+        return "temperature_K" in data and "concentrations" in data and "converged" in data
+
+    def _is_mcmc_result(self, data: Dict[str, Any]) -> bool:
+        """Check if data looks like MCMCResult."""
+        return "T_eV_mean" in data and "concentrations_mean" in data and "samples" in data
+
+    def _is_nested_sampling_result(self, data: Dict[str, Any]) -> bool:
+        """Check if data looks like NestedSamplingResult."""
+        return "log_evidence" in data and "weights" in data
+
+    def _is_spectrum_data(self, data: Dict[str, Any]) -> bool:
+        """Check if data is spectrum (wavelength/intensity arrays)."""
+        return "wavelength" in data and "intensity" in data
+
 
 class CSVExporter(Exporter):
     """
@@ -319,26 +337,6 @@ class CSVExporter(Exporter):
             f.write("\n")
 
         logger.info(f"Exported {source_type} to CSV: {path}")
-
-    def _is_cflibs_result(self, data: Dict[str, Any]) -> bool:
-        """Check if data looks like CFLIBSResult."""
-        return (
-            "temperature_K" in data
-            and "concentrations" in data
-            and "converged" in data
-        )
-
-    def _is_mcmc_result(self, data: Dict[str, Any]) -> bool:
-        """Check if data looks like MCMCResult."""
-        return "T_eV_mean" in data and "concentrations_mean" in data and "samples" in data
-
-    def _is_nested_sampling_result(self, data: Dict[str, Any]) -> bool:
-        """Check if data looks like NestedSamplingResult."""
-        return "log_evidence" in data and "weights" in data
-
-    def _is_spectrum_data(self, data: Dict[str, Any]) -> bool:
-        """Check if data is spectrum (wavelength/intensity arrays)."""
-        return "wavelength" in data and "intensity" in data
 
     def _export_cflibs_result(self, data: Dict[str, Any]) -> List[str]:
         """Export CFLIBSResult to CSV lines."""
@@ -711,19 +709,6 @@ class HDF5Exporter(Exporter):
                 self._export_dict_hdf5(f, data_dict)
 
         logger.info(f"Exported {source_type} to HDF5: {path}")
-
-    def _is_cflibs_result(self, data: Dict[str, Any]) -> bool:
-        return (
-            "temperature_K" in data
-            and "concentrations" in data
-            and "converged" in data
-        )
-
-    def _is_mcmc_result(self, data: Dict[str, Any]) -> bool:
-        return "T_eV_mean" in data and "concentrations_mean" in data and "samples" in data
-
-    def _is_nested_sampling_result(self, data: Dict[str, Any]) -> bool:
-        return "log_evidence" in data and "weights" in data
 
     def _create_dataset(self, group, name: str, data: np.ndarray):
         """Create dataset with compression settings."""

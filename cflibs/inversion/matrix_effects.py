@@ -172,101 +172,47 @@ class CorrectionFactorDB:
     >>> corrected, uncert = factor.apply(0.50)
     """
 
+    # Default correction factors: matrix_type -> {element: (multiplicative, uncertainty)}
+    _DEFAULT_FACTORS: Dict[MatrixType, Dict[str, Tuple[float, float]]] = {
+        MatrixType.METALLIC: {
+            "Fe": (1.0, 0.05), "Cr": (1.02, 0.08), "Ni": (0.98, 0.06),
+            "Mn": (1.05, 0.10), "Si": (0.95, 0.12), "C": (0.85, 0.15),
+            "Al": (1.0, 0.06), "Cu": (0.98, 0.05), "Ti": (1.03, 0.07),
+        },
+        MatrixType.OXIDE: {
+            "Si": (1.10, 0.12), "Al": (1.08, 0.10), "Fe": (1.15, 0.12),
+            "Ca": (1.05, 0.08), "Mg": (1.12, 0.10), "Na": (0.90, 0.15),
+            "K": (0.88, 0.15),
+        },
+        MatrixType.GEOLOGICAL: {
+            "Si": (1.08, 0.10), "Al": (1.05, 0.10), "Fe": (1.12, 0.12),
+            "Ca": (1.02, 0.08), "Mg": (1.08, 0.10), "Ti": (1.10, 0.12),
+            "Mn": (1.15, 0.15),
+        },
+        MatrixType.ORGANIC: {
+            "C": (0.70, 0.20), "H": (0.80, 0.25), "N": (0.85, 0.20),
+            "O": (0.90, 0.15), "Ca": (1.20, 0.15), "K": (0.85, 0.18),
+            "Na": (0.82, 0.18), "Mg": (1.15, 0.15), "P": (1.10, 0.15),
+            "S": (1.05, 0.12),
+        },
+    }
+
     def __init__(self) -> None:
-        """Initialize empty correction factor database."""
-        # Nested dict: matrix_type -> element -> CorrectionFactor
+        """Initialize correction factor database with defaults."""
         self._factors: Dict[MatrixType, Dict[str, CorrectionFactor]] = {
             mt: {} for mt in MatrixType
         }
         self._populate_defaults()
 
     def _populate_defaults(self) -> None:
-        """
-        Populate database with default correction factors.
-
-        These are conservative defaults based on literature values and should
-        be replaced with lab-specific calibrations for best accuracy.
-        """
-        # Metallic matrices - generally well-behaved, minimal correction
-        metallic_defaults = [
-            ("Fe", 1.0, 0.05),
-            ("Cr", 1.02, 0.08),
-            ("Ni", 0.98, 0.06),
-            ("Mn", 1.05, 0.10),
-            ("Si", 0.95, 0.12),
-            ("C", 0.85, 0.15),  # Carbon often underestimated in metals
-            ("Al", 1.0, 0.06),
-            ("Cu", 0.98, 0.05),
-            ("Ti", 1.03, 0.07),
-        ]
-        for el, mult, uncert in metallic_defaults:
-            self._factors[MatrixType.METALLIC][el] = CorrectionFactor(
-                element=el,
-                matrix_type=MatrixType.METALLIC,
-                multiplicative=mult,
-                uncertainty=uncert,
-                source="default_literature",
-            )
-
-        # Oxide matrices - typically need larger corrections
-        oxide_defaults = [
-            ("Si", 1.10, 0.12),
-            ("Al", 1.08, 0.10),
-            ("Fe", 1.15, 0.12),
-            ("Ca", 1.05, 0.08),
-            ("Mg", 1.12, 0.10),
-            ("Na", 0.90, 0.15),  # Na often overestimated (volatile)
-            ("K", 0.88, 0.15),   # K often overestimated (volatile)
-        ]
-        for el, mult, uncert in oxide_defaults:
-            self._factors[MatrixType.OXIDE][el] = CorrectionFactor(
-                element=el,
-                matrix_type=MatrixType.OXIDE,
-                multiplicative=mult,
-                uncertainty=uncert,
-                source="default_literature",
-            )
-
-        # Geological matrices
-        geo_defaults = [
-            ("Si", 1.08, 0.10),
-            ("Al", 1.05, 0.10),
-            ("Fe", 1.12, 0.12),
-            ("Ca", 1.02, 0.08),
-            ("Mg", 1.08, 0.10),
-            ("Ti", 1.10, 0.12),
-            ("Mn", 1.15, 0.15),
-        ]
-        for el, mult, uncert in geo_defaults:
-            self._factors[MatrixType.GEOLOGICAL][el] = CorrectionFactor(
-                element=el,
-                matrix_type=MatrixType.GEOLOGICAL,
-                multiplicative=mult,
-                uncertainty=uncert,
-                source="default_literature",
-            )
-
-        # Organic matrices - significant corrections often needed
-        organic_defaults = [
-            ("C", 0.70, 0.20),   # Carbon saturation common
-            ("H", 0.80, 0.25),   # H detection challenging
-            ("N", 0.85, 0.20),
-            ("O", 0.90, 0.15),
-            ("Ca", 1.20, 0.15),
-            ("K", 0.85, 0.18),
-            ("Na", 0.82, 0.18),
-            ("Mg", 1.15, 0.15),
-            ("P", 1.10, 0.15),
-            ("S", 1.05, 0.12),
-        ]
-        for el, mult, uncert in organic_defaults:
-            self._factors[MatrixType.ORGANIC][el] = CorrectionFactor(
-                element=el,
-                matrix_type=MatrixType.ORGANIC,
-                multiplicative=mult,
-                uncertainty=uncert,
-                source="default_literature",
-            )
+        """Populate database with default correction factors from literature."""
+        for matrix_type, elements in self._DEFAULT_FACTORS.items():
+            for el, (mult, uncert) in elements.items():
+                self._factors[matrix_type][el] = CorrectionFactor(
+                    element=el, matrix_type=matrix_type,
+                    multiplicative=mult, uncertainty=uncert,
+                    source="default_literature",
+                )
 
     def add_factor(self, factor: CorrectionFactor) -> None:
         """

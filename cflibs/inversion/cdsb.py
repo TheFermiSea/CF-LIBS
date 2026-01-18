@@ -61,11 +61,6 @@ from cflibs.inversion.boltzmann import (
 
 logger = get_logger("inversion.cdsb")
 
-# Physical constants for optical depth calculation
-M_E = 9.1093837015e-31  # kg (electron mass)
-E_CHARGE = 1.602176634e-19  # C (elementary charge)
-EPSILON_0 = 8.854187817e-12  # F/m (vacuum permittivity)
-
 
 class CDSBConvergenceStatus(Enum):
     """Status of CD-SB iteration convergence."""
