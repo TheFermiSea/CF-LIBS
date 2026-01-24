@@ -17,8 +17,20 @@ Requirements
 Install with: pip install cflibs[widgets]
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+# pyright: reportMissingImports=false
+# pyright: reportOptionalMemberAccess=false
+# pyright: reportOptionalCall=false
+# pyright: reportInvalidTypeForm=false
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import numpy as np
+
+if TYPE_CHECKING:
+    import ipywidgets as widgets
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
 try:
     import ipywidgets as widgets
@@ -27,8 +39,8 @@ try:
     HAS_IPYWIDGETS = True
 except ImportError:
     HAS_IPYWIDGETS = False
-    widgets = None
-    display = None
+    widgets = None  # type: ignore[assignment]
+    display = None  # type: ignore[assignment]
 
 try:
     import plotly.graph_objects as go
@@ -37,8 +49,8 @@ try:
     HAS_PLOTLY = True
 except ImportError:
     HAS_PLOTLY = False
-    go = None
-    make_subplots = None
+    go = None  # type: ignore[assignment]
+    make_subplots = None  # type: ignore[assignment]
 
 HAS_WIDGETS = HAS_IPYWIDGETS and HAS_PLOTLY
 
