@@ -24,7 +24,7 @@ Install with: pip install cflibs[widgets]
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import numpy as np
 
 if TYPE_CHECKING:
@@ -109,8 +109,8 @@ class SpectrumViewer:
         self.height = height
         self.width = width
         self._spectra: List[Dict[str, Any]] = []
-        self._fig: Optional[go.FigureWidget] = None
-        self._controls: Optional[widgets.VBox] = None
+        self._fig: Optional["go.FigureWidget"] = None
+        self._controls: Optional["widgets.VBox"] = None
 
     def add_spectrum(
         self,
@@ -154,7 +154,7 @@ class SpectrumViewer:
         })
         return self
 
-    def _build_figure(self) -> go.FigureWidget:
+    def _build_figure(self) -> "go.FigureWidget":
         """Build the plotly figure with all spectra."""
         fig = go.FigureWidget()
 
@@ -201,7 +201,7 @@ class SpectrumViewer:
 
         return fig
 
-    def _build_controls(self) -> widgets.VBox:
+    def _build_controls(self) -> "widgets.VBox":
         """Build control widgets for the viewer."""
         # Wavelength range controls
         if self._spectra:
@@ -247,7 +247,7 @@ class SpectrumViewer:
             icon="refresh",
         )
 
-        def on_reset(b: Any) -> None:
+        def on_reset(_: Any) -> None:
             if self._fig is not None:
                 self._fig.update_xaxes(range=[wl_min, wl_max])
                 self._fig.update_yaxes(autorange=True)
@@ -259,7 +259,7 @@ class SpectrumViewer:
             widgets.HBox([range_slider, log_toggle, reset_btn]),
         ])
 
-    def show(self) -> widgets.VBox:
+    def show(self) -> "widgets.VBox":
         """
         Display the interactive spectrum viewer.
 
@@ -278,7 +278,7 @@ class SpectrumViewer:
         display(container)
         return container
 
-    def to_static(self, **kwargs: Any) -> go.Figure:
+    def to_static(self, **kwargs: Any) -> "go.Figure":
         """
         Export to a static plotly Figure for publication.
 
@@ -348,7 +348,7 @@ class BoltzmannPlotWidget:
         self.height = height
         self.width = width
         self.show_residuals = show_residuals
-        self._fig: Optional[go.FigureWidget] = None
+        self._fig: Optional["go.FigureWidget"] = None
         self._observations: Optional[List[Any]] = None
         self._result: Optional[Any] = None
 
@@ -376,7 +376,7 @@ class BoltzmannPlotWidget:
         self._result = result
         return self
 
-    def _build_figure(self) -> go.FigureWidget:
+    def _build_figure(self) -> "go.FigureWidget":
         """Build the plotly figure."""
         if self._observations is None or self._result is None:
             raise ValueError("No data. Call plot() first.")
@@ -547,7 +547,7 @@ class BoltzmannPlotWidget:
 
         return go.FigureWidget(fig)
 
-    def show(self) -> go.FigureWidget:
+    def show(self) -> "go.FigureWidget":
         """
         Display the interactive Boltzmann plot.
 
@@ -560,7 +560,7 @@ class BoltzmannPlotWidget:
         display(self._fig)
         return self._fig
 
-    def to_static(self, **kwargs: Any) -> go.Figure:
+    def to_static(self, **kwargs: Any) -> "go.Figure":
         """
         Export to a static plotly Figure for publication.
 
@@ -625,7 +625,7 @@ class PosteriorViewer:
         self._samples: Dict[str, np.ndarray] = {}
         self._weights: Optional[np.ndarray] = None
         self._param_labels: Dict[str, str] = {}
-        self._fig: Optional[go.FigureWidget] = None
+        self._fig: Optional["go.FigureWidget"] = None
 
     def from_mcmc_result(self, result: Any) -> "PosteriorViewer":
         """
@@ -730,7 +730,7 @@ class PosteriorViewer:
         self._param_labels = labels or {k: k for k in samples}
         return self
 
-    def _build_figure(self, params: Optional[List[str]] = None) -> go.FigureWidget:
+    def _build_figure(self, params: Optional[List[str]] = None) -> "go.FigureWidget":
         """Build the corner plot figure."""
         if not self._samples:
             raise ValueError("No samples loaded. Call from_*() first.")
@@ -853,7 +853,7 @@ class PosteriorViewer:
 
         return go.FigureWidget(fig)
 
-    def show(self, params: Optional[List[str]] = None) -> go.FigureWidget:
+    def show(self, params: Optional[List[str]] = None) -> "go.FigureWidget":
         """
         Display the interactive corner plot.
 
@@ -871,7 +871,7 @@ class PosteriorViewer:
         display(self._fig)
         return self._fig
 
-    def marginal(self, param: str) -> go.FigureWidget:
+    def marginal(self, param: str) -> "go.FigureWidget":
         """
         Display a single marginal distribution.
 
@@ -889,7 +889,7 @@ class PosteriorViewer:
         display(fig)
         return fig
 
-    def to_static(self, params: Optional[List[str]] = None, **kwargs: Any) -> go.Figure:
+    def to_static(self, params: Optional[List[str]] = None, **kwargs: Any) -> "go.Figure":
         """
         Export to a static plotly Figure for publication.
 
@@ -941,7 +941,7 @@ class QualityDashboard:
 
         self.title = title
         self._metrics: Dict[str, Any] = {}
-        self._widget: Optional[widgets.VBox] = None
+        self._widget: Optional["widgets.VBox"] = None
 
     def from_cflibs_result(self, result: Any) -> "QualityDashboard":
         """
@@ -1031,7 +1031,7 @@ class QualityDashboard:
         value: str,
         subtitle: Optional[str] = None,
         color: str = "#1f77b4",
-    ) -> widgets.VBox:
+    ) -> "widgets.VBox":
         """Create a styled metric card widget."""
         title_label = widgets.HTML(
             f"<div style='color: #666; font-size: 12px; margin-bottom: 2px;'>{title}</div>"
@@ -1058,7 +1058,7 @@ class QualityDashboard:
             ),
         )
 
-    def _build_widget(self) -> widgets.VBox:
+    def _build_widget(self) -> "widgets.VBox":
         """Build the dashboard widget."""
         if not self._metrics:
             raise ValueError("No metrics loaded. Call from_*() first.")
@@ -1201,7 +1201,7 @@ class QualityDashboard:
             diag_widget,
         ])
 
-    def show(self) -> widgets.VBox:
+    def show(self) -> "widgets.VBox":
         """
         Display the quality dashboard.
 
