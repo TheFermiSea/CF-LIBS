@@ -18,6 +18,10 @@ Usage
 >>> viewer.show()
 """
 
+from __future__ import annotations
+
+# pyright: reportMissingImports=false
+
 # Check for optional dependencies
 HAS_WIDGETS = False
 
