@@ -145,4 +145,167 @@ Implementing these methods positions the codebase to address significant gaps in
 
 ---
 
+## Appendix: Implementation Details (NotebookLM Follow-up)
+
+*Conversation continued: 97eca436-d06e-46c9-a7a6-cd79ff3e80b6*
+
+### Database Schema Update Details
+
+**Handling NIST Accuracy Grades**
+
+Pre-compute the numeric uncertainty during database generation but store the original grade string for traceability.
+
+- **Why pre-compute?** The inversion algorithms (Boltzmann/Saha) are iterative and computationally intensive. Converting string lookups inside the fitting loop adds unnecessary overhead.
+- **Implementation:** Add two columns to the `lines` table: `accuracy_grade` (TEXT) and `aki_uncertainty_rel` (FLOAT).
+
+**NIST ASD Accuracy Mapping:**
+
+```python
+ACCURACY_MAP = {
+    "AAA": 0.003,  # 0.3%
+    "AA":  0.01,   # 1%
+    "A+":  0.02,   # 2%
+    "A":   0.03,   # 3%
+    "B+":  0.07,   # 7%
+    "B":   0.10,   # 10%
+    "C+":  0.18,   # 18%
+    "C":   0.25,   # 25%
+    "D+":  0.40,   # 40%
+    "D":   0.50,   # 50%
+    "E":   0.50    # >50%, treat as 50% or exclude
+}
+```
+
+**Partition Function Uncertainty**
+
+Since NIST does not provide explicit uncertainties for Irwin polynomial coefficients, assign a conservative relative standard uncertainty (5-10%) as Type B uncertainty. At extreme temperatures (T < 3000 K or T > 20,000 K), the polynomial may diverge from the true sum-over-states.
+
+---
+
+### LTEValidator Implementation Details
+
+**McWhirter Criterion and ΔE**
+
+For multi-element samples, ΔE should be element-specific, but for a global "LTE Valid" flag, satisfy the criterion for the **largest ΔE among all elements used for quantification**.
+
+- **Code Logic:** Calculate `min_ne_required` for each element. The global plasma `n_e` must exceed the maximum of these required values.
+
+**Temperature Consistency Threshold**
+
+The 15% threshold is standard for distinguishing equilibrium states. The multi-temperature check (T_neutral vs T_ionic) is the critical "sufficiency" check:
+
+```python
+def check_temperature_consistency(self, t_neutral, t_ion, threshold=0.15):
+    """Validates if ionization equilibrium is established."""
+    if t_neutral is None or t_ion is None:
+        return False  # Cannot validate
+    deviation = abs(t_neutral - t_ion) / t_neutral
+    return deviation < threshold
+```
+
+**Plasma Equilibration Time**
+
+Use temporal evolution heuristics instead of calculating τ_rel explicitly:
+- LTE is generally valid for delay times 1 μs < t_d < 10 μs for typical LIBS plasmas in air
+- Flag warnings if t_d < 500 ns (non-equilibrium phase) or t_d > 10 μs (plasma decay/low n_e)
+
+---
+
+### UncertaintyBudget Class Design
+
+```python
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+import numpy as np
+from uncertainties import ufloat
+
+@dataclass
+class UncertaintyComponent:
+    name: str
+    value: float
+    uncertainty: float
+    dof: float = np.inf  # Degrees of freedom (inf for Type B)
+    distribution: str = 'normal'  # 'normal' or 'rectangular'
+    type: str = 'B'  # 'A' or 'B'
+
+class UncertaintyBudget:
+    """
+    GUM-compliant uncertainty manager.
+    Integrates Type A (fitting) and Type B (atomic data) errors.
+    """
+    def __init__(self):
+        self.components: Dict[str, UncertaintyComponent] = {}
+        self.correlations: Dict[str, Dict[str, float]] = {}
+
+    def add_type_a(self, name: str, value: float, std_error: float, dof: int):
+        """Add statistical uncertainty from fitting (e.g., Boltzmann slope)."""
+        self.components[name] = UncertaintyComponent(
+            name=name, value=value, uncertainty=std_error,
+            dof=dof, type='A'
+        )
+
+    def add_type_b(self, name: str, value: float, relative_u: float, distribution='normal'):
+        """
+        Add systematic uncertainty (e.g., NIST A_ki grades).
+        For rectangular distribution, u = range / sqrt(3).
+        """
+        u_val = value * relative_u
+        if distribution == 'rectangular':
+            u_val /= np.sqrt(3)  # GUM standard conversion
+
+        self.components[name] = UncertaintyComponent(
+            name=name, value=value, uncertainty=u_val,
+            distribution=distribution, type='B'
+        )
+
+    def set_correlation(self, param1: str, param2: str, coefficient: float):
+        """Set correlation coefficient r between two parameters."""
+        if param1 not in self.correlations: self.correlations[param1] = {}
+        if param2 not in self.correlations: self.correlations[param2] = {}
+        self.correlations[param1][param2] = coefficient
+        self.correlations[param2][param1] = coefficient
+
+    def get_uncertainties_object(self, name: str):
+        """Returns a ufloat for use with the uncertainties package."""
+        c = self.components[name]
+        return ufloat(c.value, c.uncertainty, tag=name)
+
+    def calculate_expanded_uncertainty(self, y: 'ufloat', k: float = 2.0) -> Dict:
+        """
+        Computes expanded uncertainty U = k * u_c.
+        y: The result of calculation using uncertainties package
+        k: Coverage factor (usually 2 for 95% confidence).
+        """
+        budget = []
+        for (var, error) in y.error_components().items():
+            budget.append({
+                'parameter': var.tag,
+                'contribution': error ** 2  # Variance contribution
+            })
+
+        return {
+            'value': y.nominal_value,
+            'combined_standard_uncertainty': y.std_dev,
+            'expanded_uncertainty': y.std_dev * k,
+            'coverage_factor': k,
+            'budget_breakdown': budget
+        }
+```
+
+### Usage Workflow for Phase 1
+
+1. **Load Atomic Data:** Retrieve A_ki and accuracy grades. Convert 'B' to 10% (Type B, rectangular).
+2. **Fit Boltzmann:** `BoltzmannPlotFitter` returns slope m and intercept q with standard errors (Type A).
+3. **Populate Budget:**
+   - Add A_ki uncertainties (Type B).
+   - Add Slope/Intercept uncertainties (Type A).
+4. **Propagate:** Use `uncertainties` package to calculate Temperature T = -1 / (k_B × m).
+5. **Report:** `UncertaintyBudget.calculate_expanded_uncertainty(T_ufloat)` returns the final T ± U (95%).
+
+---
+
+*End of NotebookLM Implementation Details*
+
+---
+
 *This review was generated by NotebookLM based on 25 source documents in the CF-LIBS research notebook.*
