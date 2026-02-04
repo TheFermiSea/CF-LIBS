@@ -630,12 +630,39 @@ Main CLI entry point.
 
 **Commands:**
 - `cflibs forward <config>` - Generate synthetic spectrum
-- `cflibs invert <spectrum> [--config]` - Invert measured spectrum (Phase 3)
+- `cflibs invert <spectrum> [--config]` - Invert measured spectrum (classic CF-LIBS)
 
 **Options:**
 - `--log-level` - Set logging level (DEBUG, INFO, WARNING, ERROR)
 - `--output` - Output file path
 - `--config` - Configuration file path
+- `--elements` - Elements to include in inversion (overrides config)
+- `--tolerance-nm` - Wavelength matching tolerance in nm
+- `--min-peak-height` - Minimum peak height (fraction of max intensity)
+- `--peak-width-nm` - Peak integration width in nm
+
+**Inversion Config (analysis section):**
+
+```yaml
+atomic_database: libs_production.db
+
+analysis:
+  elements: ["Fe", "Cu"]
+  closure_mode: standard  # standard | matrix | oxide
+  min_snr: 10.0
+  min_energy_spread_ev: 2.0
+  min_lines_per_element: 3
+  exclude_resonance: true
+  isolation_wavelength_nm: 0.1
+  max_lines_per_element: 20
+  wavelength_tolerance_nm: 0.1
+  min_peak_height: 0.01
+  peak_width_nm: 0.2
+  max_iterations: 20
+  t_tolerance_k: 100.0
+  ne_tolerance_frac: 0.1
+  pressure_pa: 101325.0
+```
 
 ---
 
@@ -655,4 +682,3 @@ All modules use descriptive error messages and proper exception types:
 Current version: **0.1.0** (Phase 0 & Phase 1 Complete)
 
 For more information, see the [User Guide](User_Guide.md) and [Contributing Guide](../CONTRIBUTING.md).
-

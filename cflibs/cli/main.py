@@ -98,18 +98,131 @@ def invert_cmd(args):
     """
     Inversion command.
 
-    Note: Inversion functionality is planned for Phase 3. This command
-    currently provides a placeholder interface.
+    Runs classic CF-LIBS inversion using detected spectral lines.
     """
-    logger.info("Inversion command (not yet implemented)")
+    from cflibs.atomic.database import AtomicDatabase
+    from cflibs.core.config import load_config
+    from cflibs.inversion.line_detection import detect_line_observations
+    from cflibs.inversion.line_selection import LineSelector
+    from cflibs.inversion.solver import IterativeCFLIBSSolver
+    from cflibs.io.exporters import create_exporter
+    from cflibs.io.spectrum import load_spectrum
+
+    logger.info("Inversion command (classic CF-LIBS)")
     logger.info(f"Spectrum file: {args.spectrum}")
     logger.info(f"Config file: {args.config}")
-    print("Inversion not yet implemented. Coming in Phase 3.")
-    print("Phase 3 will include:")
-    print("  - Boltzmann plot generation and fitting")
-    print("  - Stark line fitting for electron density")
-    print("  - Nonlinear least-squares inversion")
-    print("  - Bayesian inversion (MCMC, nested sampling)")
+
+    config = {}
+    if args.config:
+        config = load_config(args.config)
+
+    analysis_cfg = config.get("analysis", {}) if isinstance(config, dict) else {}
+
+    elements = args.elements or analysis_cfg.get("elements") or config.get("elements")
+    if elements is None:
+        raise ValueError(
+            "Elements must be specified via --elements or config 'analysis.elements'."
+        )
+    if isinstance(elements, str):
+        elements = [elements]
+
+    db_path = config.get("atomic_database", "libs_production.db")
+    if not Path(db_path).exists():
+        raise FileNotFoundError(
+            f"Atomic database not found: {db_path}. "
+            "Please run datagen_v2.py to generate the database."
+        )
+
+    wavelength, intensity = load_spectrum(args.spectrum)
+    atomic_db = AtomicDatabase(db_path)
+
+    wavelength_tolerance = (
+        args.tolerance_nm
+        if args.tolerance_nm is not None
+        else analysis_cfg.get("wavelength_tolerance_nm", 0.1)
+    )
+    min_peak_height = (
+        args.min_peak_height
+        if args.min_peak_height is not None
+        else analysis_cfg.get("min_peak_height", 0.01)
+    )
+    peak_width_nm = (
+        args.peak_width_nm
+        if args.peak_width_nm is not None
+        else analysis_cfg.get("peak_width_nm", 0.2)
+    )
+    min_relative_intensity = analysis_cfg.get("min_relative_intensity")
+
+    detection = detect_line_observations(
+        wavelength=wavelength,
+        intensity=intensity,
+        atomic_db=atomic_db,
+        elements=elements,
+        wavelength_tolerance_nm=wavelength_tolerance,
+        min_peak_height=min_peak_height,
+        peak_width_nm=peak_width_nm,
+        min_relative_intensity=min_relative_intensity,
+    )
+
+    for warning in detection.warnings:
+        logger.warning(f"Line detection warning: {warning}")
+
+    selector = LineSelector(
+        min_snr=analysis_cfg.get("min_snr", 10.0),
+        min_energy_spread_ev=analysis_cfg.get("min_energy_spread_ev", 2.0),
+        min_lines_per_element=analysis_cfg.get("min_lines_per_element", 3),
+        exclude_resonance=analysis_cfg.get("exclude_resonance", True),
+        isolation_wavelength_nm=analysis_cfg.get("isolation_wavelength_nm", 0.1),
+        max_lines_per_element=analysis_cfg.get("max_lines_per_element", 20),
+    )
+
+    selection = selector.select(
+        detection.observations,
+        resonance_lines=detection.resonance_lines,
+    )
+    observations = selection.selected_lines
+
+    if len(observations) == 0:
+        raise ValueError("No usable spectral lines detected for inversion.")
+
+    solver = IterativeCFLIBSSolver(
+        atomic_db=atomic_db,
+        max_iterations=analysis_cfg.get("max_iterations", 20),
+        t_tolerance_k=analysis_cfg.get("t_tolerance_k", 100.0),
+        ne_tolerance_frac=analysis_cfg.get("ne_tolerance_frac", 0.1),
+        pressure_pa=analysis_cfg.get("pressure_pa", None) or analysis_cfg.get("pressure", 101325.0),
+    )
+
+    closure_mode = analysis_cfg.get("closure_mode", "standard")
+    closure_kwargs = dict(analysis_cfg.get("closure_kwargs", {}))
+    if closure_mode == "matrix" and "matrix_element" in analysis_cfg:
+        closure_kwargs.setdefault("matrix_element", analysis_cfg["matrix_element"])
+    if closure_mode == "oxide" and "oxide_elements" in analysis_cfg:
+        closure_kwargs.setdefault("oxide_elements", analysis_cfg["oxide_elements"])
+
+    result = solver.solve(observations, closure_mode=closure_mode, **closure_kwargs)
+
+    if args.output:
+        output_path = Path(args.output)
+        ext = output_path.suffix.lower().lstrip(".")
+        if ext not in {"csv", "json", "h5", "hdf5"}:
+            ext = "json"
+            output_path = output_path.with_suffix(".json")
+
+        exporter = create_exporter(ext)
+        exporter.export(result, str(output_path))
+        print(f"Inversion results saved to {output_path}")
+        return
+
+    print("CF-LIBS inversion results:")
+    print(f"  Temperature: {result.temperature_K:.0f} ± {result.temperature_uncertainty_K:.0f} K")
+    print(
+        f"  Electron density: {result.electron_density_cm3:.3e} cm^-3"
+    )
+    print("  Concentrations:")
+    for element, concentration in result.concentrations.items():
+        unc = result.concentration_uncertainties.get(element, 0.0)
+        print(f"    {element}: {concentration:.4f} ± {unc:.4f}")
 
 
 def dbgen_cmd(args):
@@ -243,6 +356,31 @@ def main():
     invert_parser.add_argument("spectrum", type=str, help="Path to spectrum file (CSV or similar)")
     invert_parser.add_argument(
         "--config", type=str, default=None, help="Path to inversion configuration file"
+    )
+    invert_parser.add_argument(
+        "--elements",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Elements to include in inversion (overrides config)",
+    )
+    invert_parser.add_argument(
+        "--tolerance-nm",
+        type=float,
+        default=None,
+        help="Wavelength matching tolerance in nm (default: config or 0.1)",
+    )
+    invert_parser.add_argument(
+        "--min-peak-height",
+        type=float,
+        default=None,
+        help="Minimum peak height (fraction of max intensity, default: config or 0.01)",
+    )
+    invert_parser.add_argument(
+        "--peak-width-nm",
+        type=float,
+        default=None,
+        help="Peak integration width in nm (default: config or 0.2)",
     )
     invert_parser.add_argument(
         "--output",

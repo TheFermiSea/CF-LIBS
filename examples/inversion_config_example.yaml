@@ -1,0 +1,22 @@
+atomic_database: libs_production.db
+
+analysis:
+  elements: ["Fe", "Cu"]
+  closure_mode: standard
+  min_snr: 10.0
+  min_energy_spread_ev: 2.0
+  min_lines_per_element: 3
+  exclude_resonance: true
+  isolation_wavelength_nm: 0.1
+  max_lines_per_element: 20
+  wavelength_tolerance_nm: 0.1
+  min_peak_height: 0.01
+  peak_width_nm: 0.2
+  max_iterations: 20
+  t_tolerance_k: 100.0
+  ne_tolerance_frac: 0.1
+  pressure_pa: 101325.0
+  min_relative_intensity: null
+  # closure_kwargs:
+  #   matrix_element: Fe
+  #   oxide_elements: ["Si", "Al", "Ca"]

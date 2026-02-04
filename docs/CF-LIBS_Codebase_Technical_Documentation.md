@@ -591,6 +591,9 @@ def calculate_spectrum_emissivity(
 
 **Location**: `cflibs/inversion/`
 
+For the CLI and configuration schema used by classic CF-LIBS inversion, see
+`docs/User_Guide.md` (Inversion section) and `docs/API_Reference.md` (CLI options).
+
 ### Optional Dependency Flags
 
 The inversion module provides availability flags for optional features:
@@ -704,6 +707,35 @@ class BoltzmannPlotFitter:
     def _fit_ransac(self, data): ...
     def _fit_huber(self, data): ...
 ```
+
+### Line Detection and Matching (`line_detection.py`)
+
+Convert a measured spectrum into CF-LIBS line observations by detecting peaks
+and matching them to database transitions:
+
+See `docs/User_Guide.md` for the `analysis` configuration fields that control
+line detection and selection.
+
+```python
+from cflibs.inversion.line_detection import detect_line_observations
+
+result = detect_line_observations(
+    wavelength,
+    intensity,
+    atomic_db,
+    elements=["Fe", "Cu"],
+    wavelength_tolerance_nm=0.1,
+    min_peak_height=0.01,
+    peak_width_nm=0.2,
+)
+observations = result.observations
+resonance_lines = result.resonance_lines
+```
+
+The output provides:
+- `LineObservation` objects for each matched line
+- A `resonance_lines` set for exclusion in line selection
+- Diagnostics on total/matched/unmatched peaks
 
 ### Closure Equation (`closure.py`)
 
@@ -1779,8 +1811,13 @@ C_s = U_s(T) × exp(q_s) / F
          │
          ▼
 ┌─────────────────┐
-│ Line Selection  │  Identify optimal analysis lines
-│ & Peak Fitting  │
+│ Line Detection  │  Peak detection + DB matching
+│ & Matching      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Line Selection  │  Score, filter, exclude resonance
 └────────┬────────┘
          │
          ▼

@@ -26,6 +26,7 @@ from cflibs.inversion.line_selection import (
     LineSelector,
     identify_resonance_lines,
 )
+from cflibs.inversion.line_detection import LineDetectionResult, detect_line_observations
 from cflibs.inversion.self_absorption import (
     AbsorptionCorrectionResult,
     SelfAbsorptionResult,
@@ -72,17 +73,129 @@ from cflibs.inversion.matrix_effects import (
     InternalStandardizer,
     combine_corrections,
 )
+from cflibs.inversion.pca import (
+    PCAResult,
+    PCAPipeline,
+    fit_pca,
+    denoise_spectra,
+    explained_variance_curve,
+)
+from cflibs.inversion.pls import (
+    PLSAlgorithm,
+    PreprocessingMethod,
+    PLSComponents,
+    PLSResult,
+    CrossValidationResult,
+    PLSRegression,
+    PLSCrossValidator,
+    PLSCalibrationModel,
+    build_pls_calibration,
+)
+from cflibs.inversion.temporal import (
+    PlasmaPhase,
+    TemporalGateConfig,
+    TimeResolvedSpectrum,
+    PlasmaEvolutionPoint,
+    PlasmaEvolutionProfile,
+    GateOptimizationResult,
+    TemporalSelfAbsorptionResult,
+    TimeResolvedCFLIBSResult,
+    PlasmaEvolutionModel,
+    GateTimingOptimizer,
+    TemporalSelfAbsorptionCorrector,
+    TimeResolvedCFLIBSSolver,
+    create_default_evolution_model,
+    recommend_gate_timing,
+)
+from cflibs.inversion.interpretable import (
+    FeatureType,
+    SpectralFeature,
+    FeatureExtractionResult,
+    SpectralExplanation,
+    ValidationResult,
+    PhysicsGuidedFeatureExtractor,
+    SpectralExplainer,
+    ExplanationValidator,
+)
+from cflibs.inversion.transfer import (
+    # Domain adaptation
+    DomainAdapter,
+    DomainAdaptationMethod,
+    DomainAdaptationResult,
+    compute_mmd,
+    adapt_domains,
+    # Calibration transfer
+    CalibrationTransfer,
+    CalibrationMethod,
+    TransferResult,
+    transfer_calibration,
+    # Fine-tuning
+    FineTuner,
+    FineTuneResult,
+    # Pipeline
+    TransferLearningPipeline,
+)
+from cflibs.inversion.streaming import (
+    # Configuration
+    AnalysisMode,
+    StreamingConfig,
+    # Data structures
+    SpectrumPacket,
+    StreamingResult,
+    LatencyStats,
+    # Buffer and monitoring
+    SpectrumBuffer,
+    LatencyMonitor,
+    # Analyzers
+    BaseStreamingAnalyzer,
+    FastAnalyzer,
+    StandardAnalyzer,
+    StreamingAnalyzer,
+    # Edge deployment
+    EdgeOptimizedModel,
+    # Factory
+    create_streaming_pipeline,
+)
 
 # --- Optional availability flags ---
 HAS_HYBRID = False
+HAS_JOINT_OPTIMIZER = False
+HAS_PCA_JAX = False
 HAS_BAYESIAN = False
 HAS_NESTED = False
 HAS_UNCERTAINTIES = False
+HAS_INTERPRETABLE_ML = False
+HAS_PINN = False
 
 # --- Optional: Hybrid inversion (requires JAX) ---
 try:
     from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter
     HAS_HYBRID = True
+except ImportError:
+    pass
+
+# --- Optional: Joint optimization (requires JAX) ---
+try:
+    from cflibs.inversion.joint_optimizer import (
+        JointOptimizer,
+        JointOptimizationResult,
+        MultiStartJointOptimizer,
+        LossType as JointLossType,
+        ConvergenceStatus as JointConvergenceStatus,
+        create_simple_forward_model,
+    )
+    HAS_JOINT_OPTIMIZER = True
+except ImportError:
+    pass
+
+# --- Optional: PCA JAX functions (requires JAX) ---
+try:
+    from cflibs.inversion.pca import (
+        pca_transform_jax,
+        pca_inverse_transform_jax,
+        pca_reconstruction_error_jax,
+    )
+    HAS_PCA_JAX = True
 except ImportError:
     pass
 
@@ -150,6 +263,8 @@ __all__ = [
     "LineSelectionResult",
     "LineSelector",
     "identify_resonance_lines",
+    "LineDetectionResult",
+    "detect_line_observations",
     # Self-absorption
     "AbsorptionCorrectionResult",
     "SelfAbsorptionResult",
@@ -191,16 +306,92 @@ __all__ = [
     "InternalStandardResult",
     "InternalStandardizer",
     "combine_corrections",
+    # PCA
+    "PCAResult",
+    "PCAPipeline",
+    "fit_pca",
+    "denoise_spectra",
+    "explained_variance_curve",
+    # PLS
+    "PLSAlgorithm",
+    "PreprocessingMethod",
+    "PLSComponents",
+    "PLSResult",
+    "CrossValidationResult",
+    "PLSRegression",
+    "PLSCrossValidator",
+    "PLSCalibrationModel",
+    "build_pls_calibration",
+    # Temporal dynamics
+    "PlasmaPhase",
+    "TemporalGateConfig",
+    "TimeResolvedSpectrum",
+    "PlasmaEvolutionPoint",
+    "PlasmaEvolutionProfile",
+    "GateOptimizationResult",
+    "TemporalSelfAbsorptionResult",
+    "TimeResolvedCFLIBSResult",
+    "PlasmaEvolutionModel",
+    "GateTimingOptimizer",
+    "TemporalSelfAbsorptionCorrector",
+    "TimeResolvedCFLIBSSolver",
+    "create_default_evolution_model",
+    "recommend_gate_timing",
+    # Transfer learning
+    "DomainAdapter",
+    "DomainAdaptationMethod",
+    "DomainAdaptationResult",
+    "compute_mmd",
+    "adapt_domains",
+    "CalibrationTransfer",
+    "CalibrationMethod",
+    "TransferResult",
+    "transfer_calibration",
+    "FineTuner",
+    "FineTuneResult",
+    "TransferLearningPipeline",
+    # Interpretable ML
+    "FeatureType",
+    "SpectralFeature",
+    "FeatureExtractionResult",
+    "SpectralExplanation",
+    "ValidationResult",
+    "PhysicsGuidedFeatureExtractor",
+    "SpectralExplainer",
+    "ExplanationValidator",
+    # Real-time streaming
+    "AnalysisMode",
+    "StreamingConfig",
+    "SpectrumPacket",
+    "StreamingResult",
+    "LatencyStats",
+    "SpectrumBuffer",
+    "LatencyMonitor",
+    "BaseStreamingAnalyzer",
+    "FastAnalyzer",
+    "StandardAnalyzer",
+    "StreamingAnalyzer",
+    "EdgeOptimizedModel",
+    "create_streaming_pipeline",
     # Availability flags
     "HAS_HYBRID",
+    "HAS_JOINT_OPTIMIZER",
     "HAS_BAYESIAN",
     "HAS_NESTED",
     "HAS_UNCERTAINTIES",
+    "HAS_PCA_JAX",
+    "HAS_PINN",
 ]
 
 # Extend __all__ with optional exports
 if HAS_HYBRID:
     __all__.extend(["HybridInverter", "HybridInversionResult", "SpectralFitter"])
+
+if HAS_JOINT_OPTIMIZER:
+    __all__.extend([
+        "JointOptimizer", "JointOptimizationResult", "MultiStartJointOptimizer",
+        "JointLossType", "JointConvergenceStatus", "create_simple_forward_model",
+    ])
 
 if HAS_BAYESIAN:
     __all__.extend([
@@ -218,4 +409,59 @@ if HAS_UNCERTAINTIES:
         "create_boltzmann_uncertainties", "temperature_from_slope",
         "saha_factor_with_uncertainty", "propagate_through_closure_standard",
         "propagate_through_closure_matrix", "extract_values_and_uncertainties",
+    ])
+
+if HAS_PCA_JAX:
+    __all__.extend([
+        "pca_transform_jax", "pca_inverse_transform_jax", "pca_reconstruction_error_jax",
+    ])
+
+# --- Optional: Interpretable ML (requires sklearn) ---
+try:
+    from cflibs.inversion.interpretable import InterpretableModel
+
+    HAS_INTERPRETABLE_ML = True
+except ImportError:
+    pass
+
+if HAS_INTERPRETABLE_ML:
+    __all__.extend(["InterpretableModel", "HAS_INTERPRETABLE_ML"])
+
+# --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
+try:
+    from cflibs.inversion.pinn import (
+        ConstraintType,
+        PhysicsConstraintConfig,
+        PINNConfig,
+        PINNResult,
+        DifferentiableForwardModel,
+        PINNInverter,
+        boltzmann_residual,
+        saha_residual,
+        closure_residual,
+        positivity_penalty,
+        range_penalty,
+        create_pinn_from_database,
+        generate_synthetic_training_data,
+    )
+    HAS_PINN = True
+except ImportError:
+    pass
+
+if HAS_PINN:
+    __all__.extend([
+        "ConstraintType",
+        "PhysicsConstraintConfig",
+        "PINNConfig",
+        "PINNResult",
+        "DifferentiableForwardModel",
+        "PINNInverter",
+        "boltzmann_residual",
+        "saha_residual",
+        "closure_residual",
+        "positivity_penalty",
+        "range_penalty",
+        "create_pinn_from_database",
+        "generate_synthetic_training_data",
+        "HAS_PINN",
     ])

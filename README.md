@@ -107,6 +107,10 @@ wavelength, intensity = model.compute_spectrum()
 # Generate spectrum from config file
 cflibs forward examples/config_example.yaml --output spectrum.csv
 
+# Invert measured spectrum using classic CF-LIBS
+cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml \
+  --output inversion_results.json
+
 # Generate manifold for fast inference
 cflibs generate-manifold examples/manifold_config_example.yaml --progress
 ```

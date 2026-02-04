@@ -338,6 +338,47 @@ See `examples/config_example.yaml` and `examples/config_ti64.yaml` for complete 
 
 ## Advanced Usage
 
+## Inversion (Classic CF-LIBS)
+
+The CLI supports classic CF-LIBS inversion using detected spectral lines.
+Provide a spectrum file plus an inversion config.
+
+```bash
+cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml \
+  --output inversion_results.json
+```
+
+### Inversion Configuration
+
+Inversion settings live under the `analysis` section. Minimal schema:
+
+```yaml
+atomic_database: libs_production.db
+
+analysis:
+  elements: ["Fe", "Cu"]
+  closure_mode: standard  # standard | matrix | oxide
+  min_snr: 10.0
+  min_energy_spread_ev: 2.0
+  min_lines_per_element: 3
+  exclude_resonance: true
+  isolation_wavelength_nm: 0.1
+  max_lines_per_element: 20
+  wavelength_tolerance_nm: 0.1
+  min_peak_height: 0.01
+  peak_width_nm: 0.2
+  max_iterations: 20
+  t_tolerance_k: 100.0
+  ne_tolerance_frac: 0.1
+  pressure_pa: 101325.0
+  min_relative_intensity: null
+  # closure_kwargs:
+  #   matrix_element: Fe
+  #   oxide_elements: ["Si", "Al", "Ca"]
+```
+
+If you omit `--elements`, the CLI uses `analysis.elements`.
+
 ### Custom Partition Functions
 
 The Saha-Boltzmann solver automatically calculates partition functions from energy levels. If energy levels are not available, it uses approximations.
@@ -531,4 +572,3 @@ for al_conc in al_concentrations:
 - Read about [contributing](../CONTRIBUTING.md) if you want to help develop CF-LIBS
 
 For questions or issues, please open an issue on GitHub.
-
