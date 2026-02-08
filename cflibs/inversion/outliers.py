@@ -90,7 +90,7 @@ class SAMResult:
     def summary(self) -> str:
         """Generate a human-readable summary."""
         lines = [
-            f"SAM Outlier Detection Results:",
+            "SAM Outlier Detection Results:",
             f"  Total spectra: {len(self.angles)}",
             f"  Outliers: {self.n_outliers} ({self.outlier_fraction*100:.1f}%)",
             f"  Threshold: {np.degrees(self.threshold):.2f} degrees ({self.method})",

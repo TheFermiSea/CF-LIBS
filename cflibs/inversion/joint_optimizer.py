@@ -25,10 +25,10 @@ References:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Callable, Any
+from typing import Dict, List, Optional, Tuple, Callable
 import numpy as np
 
-from cflibs.core.constants import KB_EV, EV_TO_K, SAHA_CONST_CM3
+from cflibs.core.constants import EV_TO_K
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.result_base import ResultTableMixin, StatisticsMixin
 
@@ -37,14 +37,14 @@ logger = get_logger("inversion.joint_optimizer")
 try:
     import jax
     import jax.numpy as jnp
-    from jax import jit, grad, value_and_grad
+    from jax import jit
     from jax.scipy.optimize import minimize as jax_minimize
 
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+    def jit(f): return f  # noqa: E731
 
 
 class LossType(Enum):

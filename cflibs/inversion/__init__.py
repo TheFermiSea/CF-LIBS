@@ -159,7 +159,7 @@ HAS_PINN = False
 
 # --- Optional: Hybrid inversion (requires JAX) ---
 try:
-    from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter
+    from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter  # noqa: F401
     HAS_HYBRID = True
 except ImportError:
     pass
@@ -167,12 +167,12 @@ except ImportError:
 # --- Optional: Joint optimization (requires JAX) ---
 try:
     from cflibs.inversion.joint_optimizer import (
-        JointOptimizer,
-        JointOptimizationResult,
-        MultiStartJointOptimizer,
-        LossType as JointLossType,
-        ConvergenceStatus as JointConvergenceStatus,
-        create_simple_forward_model,
+        JointOptimizer,  # noqa: F401
+        JointOptimizationResult,  # noqa: F401
+        MultiStartJointOptimizer,  # noqa: F401
+        LossType as JointLossType,  # noqa: F401
+        ConvergenceStatus as JointConvergenceStatus,  # noqa: F401
+        create_simple_forward_model,  # noqa: F401
     )
     HAS_JOINT_OPTIMIZER = True
 except ImportError:
@@ -181,9 +181,9 @@ except ImportError:
 # --- Optional: PCA JAX functions (requires JAX) ---
 try:
     from cflibs.inversion.pca import (
-        pca_transform_jax,
-        pca_inverse_transform_jax,
-        pca_reconstruction_error_jax,
+        pca_transform_jax,  # noqa: F401
+        pca_inverse_transform_jax,  # noqa: F401
+        pca_reconstruction_error_jax,  # noqa: F401
     )
     HAS_PCA_JAX = True
 except ImportError:
@@ -192,19 +192,19 @@ except ImportError:
 # --- Optional: Bayesian inference (requires JAX + NumPyro) ---
 try:
     from cflibs.inversion.bayesian import (
-        BayesianForwardModel,
-        AtomicDataArrays,
-        NoiseParameters,
-        PriorConfig,
-        MCMCResult,
-        MCMCSampler,
-        ConvergenceStatus,
-        log_likelihood,
-        bayesian_model,
-        run_mcmc,
-        create_temperature_prior,
-        create_density_prior,
-        create_concentration_prior,
+        BayesianForwardModel,  # noqa: F401
+        AtomicDataArrays,  # noqa: F401
+        NoiseParameters,  # noqa: F401
+        PriorConfig,  # noqa: F401
+        MCMCResult,  # noqa: F401
+        MCMCSampler,  # noqa: F401
+        ConvergenceStatus,  # noqa: F401
+        log_likelihood,  # noqa: F401
+        bayesian_model,  # noqa: F401
+        run_mcmc,  # noqa: F401
+        create_temperature_prior,  # noqa: F401
+        create_density_prior,  # noqa: F401
+        create_concentration_prior,  # noqa: F401
     )
     HAS_BAYESIAN = True
 except ImportError:
@@ -212,7 +212,7 @@ except ImportError:
 
 # --- Optional: Nested sampling (requires dynesty) ---
 try:
-    from cflibs.inversion.bayesian import NestedSampler, NestedSamplingResult
+    from cflibs.inversion.bayesian import NestedSampler, NestedSamplingResult  # noqa: F401
     HAS_NESTED = True
 except ImportError:
     pass
@@ -220,20 +220,20 @@ except ImportError:
 # --- Optional: Uncertainty propagation (requires uncertainties package) ---
 try:
     from cflibs.inversion.uncertainty import (
-        HAS_UNCERTAINTIES,
-        create_boltzmann_uncertainties,
-        temperature_from_slope,
-        saha_factor_with_uncertainty,
-        propagate_through_closure_standard,
-        propagate_through_closure_matrix,
-        extract_values_and_uncertainties,
+        HAS_UNCERTAINTIES,  # noqa: F401
+        create_boltzmann_uncertainties,  # noqa: F401
+        temperature_from_slope,  # noqa: F401
+        saha_factor_with_uncertainty,  # noqa: F401
+        propagate_through_closure_standard,  # noqa: F401
+        propagate_through_closure_matrix,  # noqa: F401
+        extract_values_and_uncertainties,  # noqa: F401
     )
 except ImportError:
     pass
 
 # --- Optional: Interpretable ML (requires sklearn) ---
 try:
-    from cflibs.inversion.interpretable import InterpretableModel
+    from cflibs.inversion.interpretable import InterpretableModel  # noqa: F401
 
     HAS_INTERPRETABLE_ML = True
 except ImportError:
@@ -243,19 +243,19 @@ except ImportError:
 # --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
 try:
     from cflibs.inversion.pinn import (
-        ConstraintType,
-        PhysicsConstraintConfig,
-        PINNConfig,
-        PINNResult,
-        DifferentiableForwardModel,
-        PINNInverter,
-        boltzmann_residual,
-        saha_residual,
-        closure_residual,
-        positivity_penalty,
-        range_penalty,
-        create_pinn_from_database,
-        generate_synthetic_training_data,
+        ConstraintType,  # noqa: F401
+        PhysicsConstraintConfig,  # noqa: F401
+        PINNConfig,  # noqa: F401
+        PINNResult,  # noqa: F401
+        DifferentiableForwardModel,  # noqa: F401
+        PINNInverter,  # noqa: F401
+        boltzmann_residual,  # noqa: F401
+        saha_residual,  # noqa: F401
+        closure_residual,  # noqa: F401
+        positivity_penalty,  # noqa: F401
+        range_penalty,  # noqa: F401
+        create_pinn_from_database,  # noqa: F401
+        generate_synthetic_training_data,  # noqa: F401
     )
     HAS_PINN = True
 except ImportError:

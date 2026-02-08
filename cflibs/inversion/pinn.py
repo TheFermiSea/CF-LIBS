@@ -68,7 +68,9 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+
+    def jit(f): return f  # noqa: E731
+
     grad = None
     value_and_grad = None
     vmap = None

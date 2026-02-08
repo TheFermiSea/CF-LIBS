@@ -51,7 +51,6 @@ logger = get_logger("inversion.pca")
 
 # Check for JAX availability
 try:
-    import jax
     import jax.numpy as jnp
     from jax import jit
 
@@ -59,7 +58,8 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+
+    def jit(f): return f  # noqa: E731
 
 
 @dataclass
@@ -428,7 +428,6 @@ class PCAPipeline:
             raise ValueError(f"Need at least 2 samples, got {n_samples}")
 
         # Determine number of components
-        max_components = min(n_samples, n_features)
         n_components = self._resolve_n_components(
             self.n_components, n_samples, n_features
         )

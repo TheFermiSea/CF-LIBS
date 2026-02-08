@@ -99,14 +99,12 @@ from cflibs.core.constants import (
     C_LIGHT,
     EV_TO_K,
     EV_TO_J,
-    KB_EV,
 )
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("inversion.bayesian")
 
 try:
-    import jax
     import jax.numpy as jnp
     from jax import jit
 
@@ -116,13 +114,13 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+    def jit(f): return f  # noqa: E731
     _faddeeva_weideman_jax = None
 
 try:
     import numpyro
     import numpyro.distributions as dist
-    from numpyro.infer import MCMC, NUTS, init_to_value, init_to_median, init_to_uniform
+    from numpyro.infer import MCMC, NUTS, init_to_uniform
 
     HAS_NUMPYRO = True
 except ImportError:
@@ -141,7 +139,6 @@ except ImportError:
 try:
     import dynesty
     from dynesty import NestedSampler as DynestyNestedSampler
-    from dynesty import DynamicNestedSampler as DynestyDynamicSampler
 
     HAS_DYNESTY = True
 except ImportError:
@@ -452,7 +449,7 @@ class MCMCResult:
         ]
 
         # Header row
-        header = f"{'':>12}" + "".join(f"{l:>10}" for l in labels)
+        header = f"{'':>12}" + "".join(f"{lbl:>10}" for lbl in labels)
         lines.append(header)
         lines.append("-" * len(header))
 
@@ -1210,9 +1207,6 @@ class MCMCSampler:
 
         observed_jax = jnp.array(observed)
         n_elements = len(self.elements)
-
-        # Get initial values
-        init_values = self._get_init_values()
 
         # Create model function
         def model(obs):

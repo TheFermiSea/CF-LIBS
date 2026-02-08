@@ -415,7 +415,6 @@ class IterativeCFLIBSSolver:
 
         # Use converged T to get partition functions
         T_K = result.temperature_K
-        T_eV = T_K / EV_TO_K
 
         # Get intercepts with uncertainties by fitting each element
         intercepts_u = {}

@@ -75,7 +75,7 @@ import numpy as np
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation, BoltzmannPlotFitter
 from cflibs.inversion.solver import CFLIBSResult, IterativeCFLIBSSolver
-from cflibs.inversion.line_selection import LineSelector, LineSelectionResult
+from cflibs.inversion.line_selection import LineSelector
 
 logger = get_logger("inversion.streaming")
 
@@ -930,8 +930,6 @@ class StreamingAnalyzer:
         if packet is None:
             return
 
-        start_time = time.time()
-
         try:
             result = self._analyzer.analyze_spectrum(packet.wavelength, packet.intensity)
             quality_flag = self._assess_quality(result)
@@ -974,8 +972,6 @@ class StreamingAnalyzer:
         packets = self.buffer.pop_batch(self.config.batch_size, timeout=0.1)
         if not packets:
             return
-
-        start_time = time.time()
 
         wavelengths = [p.wavelength for p in packets]
         intensities = [p.intensity for p in packets]
