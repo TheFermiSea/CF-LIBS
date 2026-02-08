@@ -237,7 +237,7 @@ def test_submit_with_dependency_preserves_array_config():
         extra_sbatch={"dependency": "afterok:12345"},
     )
     script = manager.generate_sbatch_script(config_with_dep, "python process.py $SLURM_ARRAY_TASK_ID")
-    
+
     # Assert array directive is present
     assert "#SBATCH --array=0-49%10" in script
     # Assert dependency directive is present
@@ -407,7 +407,7 @@ def test_env_var_quoting():
 def test_env_var_key_validation():
     """Test that environment variable keys are validated."""
     manager = SlurmJobManager(dry_run=True)
-    
+
     # Invalid key with special characters
     config = SlurmJobConfig(env_vars={"INVALID;KEY": "value"})
     try:
@@ -415,6 +415,28 @@ def test_env_var_key_validation():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "Invalid environment variable name" in str(e)
+
+    # Invalid key starting with digit
+    config = SlurmJobConfig(env_vars={"9VAR": "value"})
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid environment variable name" in str(e)
+
+    # Invalid key with hyphen
+    config = SlurmJobConfig(env_vars={"INVALID-KEY": "value"})
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid environment variable name" in str(e)
+
+    # Valid keys should work
+    config = SlurmJobConfig(env_vars={"VALID_VAR": "value", "_UNDERSCORE": "value"})
+    script = manager.generate_sbatch_script(config, "echo test")
+    assert "export VALID_VAR=value" in script
+    assert "export _UNDERSCORE=value" in script
 
 
 def test_status_dry_run_non_dry_run_job():

@@ -194,8 +194,8 @@ class SlurmJobManager:
 
         # Environment variables
         for key, value in config.env_vars.items():
-            # Validate key to prevent shell syntax injection
-            if not key.replace("_", "").replace("-", "").isalnum():
+            # Validate key: must start with letter/underscore and contain only alphanumeric/underscore
+            if not key or not (key[0].isalpha() or key[0] == "_") or not key.replace("_", "").isalnum():
                 raise ValueError(f"Invalid environment variable name: {key}")
             # Quote value to handle spaces and special characters
             quoted_value = shlex.quote(str(value))
