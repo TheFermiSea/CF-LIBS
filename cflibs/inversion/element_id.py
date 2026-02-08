@@ -27,7 +27,8 @@ class IdentifiedLine:
     ionization_stage : int
         Ionization stage (1=neutral, 2=singly ionized)
     intensity_exp : float
-        Experimental intensity at peak (arbitrary units)
+        Experimental intensity at peak (peak height, arbitrary units).
+        Note: This is peak height, not integrated line area.
     emissivity_th : float
         Theoretical emissivity (0.0 default)
     transition : Transition
@@ -45,8 +46,8 @@ class IdentifiedLine:
     element: str
     ionization_stage: int
     intensity_exp: float
-    emissivity_th: float
-    transition: Transition
+    emissivity_th: float = 0.0
+    transition: Transition = field(default=None)
     correlation: float = 0.0
     is_interfered: bool = False
     interfering_elements: List[str] = field(default_factory=list)
@@ -163,11 +164,14 @@ def to_line_observations(result: ElementIdentificationResult) -> List[LineObserv
             seen.add(key)
 
             # Create LineObservation with 2% intensity uncertainty floor at 1e-6
+            # Note: IdentifiedLine.intensity_exp is peak height (not integrated area).
+            # For Boltzmann plots, peak height is used as a proxy for integrated intensity
+            # when line profiles are consistent or unknown. This is a documented limitation.
             intensity_uncertainty = max(line.intensity_exp * 0.02, 1e-6)
 
             obs = LineObservation(
                 wavelength_nm=line.wavelength_th_nm,
-                intensity=line.intensity_exp,
+                intensity=line.intensity_exp,  # Using peak height as proxy for integrated area
                 intensity_uncertainty=intensity_uncertainty,
                 element=line.element,
                 ionization_stage=line.ionization_stage,

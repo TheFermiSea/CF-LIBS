@@ -2,7 +2,6 @@
 Tests for ALIAS element identification algorithm.
 """
 
-import pytest
 import numpy as np
 from cflibs.inversion.alias_identifier import ALIASIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
@@ -18,7 +17,7 @@ def test_detect_peaks(atomic_db, synthetic_libs_spectrum):
     identifier = ALIASIdentifier(atomic_db)
     peaks = identifier._detect_peaks(spectrum["wavelength"], spectrum["intensity"])
 
-    # Should detect 3 peaks
+    # Should detect peaks
     assert len(peaks) > 0
     assert isinstance(peaks, list)
     assert all(isinstance(p, tuple) and len(p) == 2 for p in peaks)

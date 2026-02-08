@@ -25,7 +25,7 @@ class ALIASIdentifier:
     ALIAS algorithm for automated element identification in LIBS spectra.
 
     The algorithm operates in 7 steps:
-    1. Peak detection via 2nd derivative enhancement
+    1. Peak detection via noise-based threshold and scipy.signal.find_peaks
     2. Theoretical emissivity calculation over (T, n_e) grid
     3. Line fusion within resolution element
     4. Matching theoretical lines to experimental peaks
@@ -111,8 +111,7 @@ class ALIASIdentifier:
         # Get elements to search
         if self.elements is None:
             # Get all available elements from database
-            # For now, use common LIBS elements as default
-            search_elements = ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"]
+            search_elements = self.atomic_db.get_available_elements()
         else:
             search_elements = self.elements
 
@@ -250,7 +249,8 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> List[Tuple[int, float]]:
         """
-        Detect peaks using 2nd derivative enhancement.
+        Detect peaks in the raw intensity signal using a noise-based threshold
+        and scipy.signal.find_peaks.
 
         Parameters
         ----------
@@ -269,11 +269,19 @@ class ALIASIdentifier:
         mad = np.median(np.abs(intensity - median_intensity))
         noise_estimate = mad * 1.4826  # Scale factor for normal distribution
 
-        # Threshold
-        threshold = noise_estimate * self.intensity_threshold_factor
+        # Threshold (ensure a small positive floor to avoid zero-threshold instability)
+        min_positive_threshold = np.finfo(float).eps
+        threshold = max(noise_estimate * self.intensity_threshold_factor, min_positive_threshold)
+
+        # Floor prominence to avoid a zero value when threshold is zero
+        if threshold > min_positive_threshold:
+            prominence = threshold / 2.0
+        else:
+            # Fallback to a minimal positive value to prevent spurious peaks
+            prominence = min_positive_threshold
 
         # Find peaks
-        peak_indices, properties = find_peaks(intensity, height=threshold, prominence=threshold / 2)
+        peak_indices, properties = find_peaks(intensity, height=threshold, prominence=prominence)
 
         # Return as list of (index, wavelength) tuples
         peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
@@ -309,8 +317,8 @@ class ALIASIdentifier:
                 )
                 if trans_list:
                     transitions.extend(trans_list)
-            except Exception:
-                # No data for this ionization stage
+            except (ValueError, KeyError, LookupError):
+                # No data for this ionization stage in database
                 continue
 
         if not transitions:
@@ -320,34 +328,65 @@ class ALIASIdentifier:
         line_data = []
         total_density = 1e15  # Arbitrary reference density
 
+        # Precompute ionization balance and partition functions per grid point
+        # to avoid redundant calculations for each transition
+        grid_data = []
+        for T_K in self.T_grid_K:
+            for n_e in self.n_e_grid_cm3:
+                T_eV = T_K * KB_EV
+                try:
+                    stage_densities = self.solver.solve_ionization_balance(
+                        element, T_eV, n_e, total_density
+                    )
+                    # Precompute partition functions for both neutral and singly ionized
+                    partition_funcs = {}
+                    for ion_stage in [1, 2]:
+                        if ion_stage in stage_densities:
+                            try:
+                                partition_funcs[ion_stage] = self.solver.calculate_partition_function(
+                                    element, ion_stage, T_eV
+                                )
+                            except (ValueError, KeyError, ZeroDivisionError):
+                                # Missing partition function data for this stage
+                                continue
+                    
+                    grid_data.append({
+                        'T_eV': T_eV,
+                        'stage_densities': stage_densities,
+                        'partition_funcs': partition_funcs,
+                        'total_density': total_density
+                    })
+                except (ValueError, KeyError, ZeroDivisionError):
+                    # Failed to compute ionization balance for this grid point
+                    continue
+
+        if not grid_data:
+            return []
+
+        # Compute emissivities for each transition using precomputed grid data
         for transition in transitions:
             emissivities = []
-
-            for T_K in self.T_grid_K:
-                for n_e in self.n_e_grid_cm3:
-                    T_eV = T_K * KB_EV
-
-                    # Get ionization balance
-                    try:
-                        stage_densities = self.solver.solve_ionization_balance(
-                            element, T_eV, n_e, total_density
-                        )
-                        stage_density = stage_densities.get(transition.ionization_stage, 0.0)
-                        W_q = stage_density / total_density
-
-                        # Get partition function
-                        U_T = self.solver.calculate_partition_function(
-                            element, transition.ionization_stage, T_eV
-                        )
-
-                        # Emissivity: eps = W^q * A_ki * g_k * exp(-E_k/kT) / U(T)
-                        boltzmann_factor = np.exp(-transition.E_k_ev / T_eV)
-                        eps = W_q * transition.A_ki * transition.g_k * boltzmann_factor / U_T
-
-                        emissivities.append(eps)
-                    except Exception:
-                        # Failed for this grid point, skip
-                        continue
+            
+            for grid_point in grid_data:
+                stage_density = grid_point['stage_densities'].get(transition.ionization_stage, 0.0)
+                if stage_density == 0.0:
+                    continue
+                
+                U_T = grid_point['partition_funcs'].get(transition.ionization_stage)
+                if U_T is None or U_T == 0.0:
+                    continue
+                
+                W_q = stage_density / grid_point['total_density']
+                T_eV = grid_point['T_eV']
+                
+                # Emissivity: eps = W^q * A_ki * g_k * exp(-E_k/kT) / U(T)
+                try:
+                    boltzmann_factor = np.exp(-transition.E_k_ev / T_eV)
+                    eps = W_q * transition.A_ki * transition.g_k * boltzmann_factor / U_T
+                    emissivities.append(eps)
+                except (ValueError, OverflowError, ZeroDivisionError):
+                    # Numerical issue computing emissivity for this grid point
+                    continue
 
             if emissivities:
                 avg_emissivity = np.mean(emissivities)
