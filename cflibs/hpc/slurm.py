@@ -5,9 +5,10 @@ Provides classes and utilities for submitting, monitoring, and managing
 SLURM jobs for CF-LIBS model spectrum generation.
 """
 
+import shlex
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -169,6 +170,10 @@ class SlurmJobManager:
 
         # Array job directives
         if isinstance(config, ArrayJobConfig):
+            if config.array_size < 1:
+                raise ValueError(f"array_size must be >= 1, got {config.array_size}")
+            if config.max_concurrent < 0:
+                raise ValueError(f"max_concurrent must be >= 0, got {config.max_concurrent}")
             array_str = f"0-{config.array_size - 1}"
             if config.max_concurrent > 0:
                 array_str += f"%{config.max_concurrent}"
@@ -189,7 +194,12 @@ class SlurmJobManager:
 
         # Environment variables
         for key, value in config.env_vars.items():
-            lines.append(f"export {key}={value}")
+            # Validate key to prevent shell syntax injection
+            if not key.replace("_", "").replace("-", "").isalnum():
+                raise ValueError(f"Invalid environment variable name: {key}")
+            # Quote value to handle spaces and special characters
+            quoted_value = shlex.quote(str(value))
+            lines.append(f"export {key}={quoted_value}")
 
         if config.env_vars:
             lines.append("")
@@ -277,25 +287,18 @@ class SlurmJobManager:
         str
             Job ID (or "DRY_RUN_<jobname>" if dry_run=True)
         """
-        # Add dependency directive to extra_sbatch
-        config_copy = SlurmJobConfig(
-            job_name=config.job_name,
-            partition=config.partition,
-            nodes=config.nodes,
-            ntasks=config.ntasks,
-            cpus_per_task=config.cpus_per_task,
-            mem_gb=config.mem_gb,
-            time_limit=config.time_limit,
-            account=config.account,
-            output_path=config.output_path,
-            error_path=config.error_path,
-            extra_sbatch=config.extra_sbatch.copy(),
+        # Add dependency directive to extra_sbatch, preserving config type
+        extra_sbatch_copy = config.extra_sbatch.copy()
+        dependency_str = f"{dependency_type}:" + ":".join(depends_on)
+        extra_sbatch_copy["dependency"] = dependency_str
+
+        # Use dataclasses.replace to preserve the concrete config type
+        config_copy = replace(
+            config,
+            extra_sbatch=extra_sbatch_copy,
             env_vars=config.env_vars.copy(),
             modules=config.modules.copy(),
         )
-
-        dependency_str = f"{dependency_type}:" + ":".join(depends_on)
-        config_copy.extra_sbatch["dependency"] = dependency_str
 
         return self.submit(config_copy, script_content, work_dir)
 
@@ -313,8 +316,12 @@ class SlurmJobManager:
         SlurmJobStatus
             Job status information
         """
-        if self.dry_run and job_id.startswith("DRY_RUN_"):
-            return SlurmJobStatus(job_id=job_id, state=SlurmJobState.COMPLETED, exit_code=0)
+        # In dry-run mode, avoid executing external SLURM commands
+        if self.dry_run:
+            if job_id.startswith("DRY_RUN_"):
+                return SlurmJobStatus(job_id=job_id, state=SlurmJobState.COMPLETED, exit_code=0)
+            # For any other job ID in dry-run, return UNKNOWN without executing commands
+            return SlurmJobStatus(job_id=job_id, state=SlurmJobState.UNKNOWN)
 
         # Try squeue first (for running/pending jobs)
         cmd = ["squeue", "-j", job_id, "-h", "-o", "%T"]
@@ -396,6 +403,7 @@ class SlurmJobManager:
                 SlurmJobState.FAILED,
                 SlurmJobState.CANCELLED,
                 SlurmJobState.TIMEOUT,
+                SlurmJobState.UNKNOWN,  # Treat UNKNOWN as terminal to prevent infinite polling
             ]:
                 return status
             time.sleep(poll_interval)
@@ -482,5 +490,12 @@ class SlurmJobManager:
             return SlurmJobState.CANCELLED
         elif "TIMEOUT" in state_upper or "TO" == state_upper:
             return SlurmJobState.TIMEOUT
+        # Map additional terminal states to appropriate categories
+        elif "OUT_OF_MEMORY" in state_upper or "OOM" in state_upper:
+            return SlurmJobState.FAILED
+        elif "PREEMPTED" in state_upper:
+            return SlurmJobState.CANCELLED
+        elif "NODE_FAIL" in state_upper or "NODE_FAILURE" in state_upper:
+            return SlurmJobState.FAILED
         else:
             return SlurmJobState.UNKNOWN

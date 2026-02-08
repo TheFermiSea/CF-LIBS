@@ -5,16 +5,17 @@ Generate model spectrum library for CF-LIBS line identification.
 Supports three modes:
 - chunk: Generate spectra for a subset of parameter space
 - consolidate: Combine chunk files into single library
-- build-index: Build FAISS index for fast lookup
+- build-index: Build FAISS index for fast lookup (NOT IMPLEMENTED)
 - submit: Submit SLURM array job for parallel generation
+
+NOTE: This script currently generates placeholder data. Real spectrum
+generation using ManifoldGenerator is planned but not yet implemented.
 """
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
-
-import h5py
-import numpy as np
 
 
 def chunk_mode(
@@ -49,11 +50,26 @@ def chunk_mode(
     n_spectra_per_chunk : int
         Number of spectra to generate per chunk
     """
+    # Import h5py here with install hint if missing
+    try:
+        import h5py
+        import numpy as np
+    except ImportError as e:
+        print(f"ERROR: Required package not available: {e}")
+        print("Install with: pip install h5py numpy")
+        sys.exit(1)
+
     try:
         from cflibs.inversion.manifold import ManifoldGenerator  # noqa: F401
     except ImportError:
         print("ERROR: ManifoldGenerator not available. Install cflibs first.")
         sys.exit(1)
+
+    # Validate inputs
+    if n_chunks < 1:
+        raise ValueError(f"n_chunks must be >= 1, got {n_chunks}")
+    if not (0 <= chunk_id < n_chunks):
+        raise ValueError(f"chunk_id must be in range [0, {n_chunks}), got {chunk_id}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +90,7 @@ def chunk_mode(
 
     # TODO: Use ManifoldGenerator to generate spectra
     # For now, create placeholder data
+    print("WARNING: Generating placeholder spectra (zeros). Real spectrum generation not yet implemented.")
     wavelengths = np.linspace(200, 800, 6000)
     spectra = np.zeros((n_spectra_per_chunk, len(wavelengths)))
 
@@ -99,6 +116,15 @@ def consolidate_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing chunk files
     """
+    # Import h5py here with install hint if missing
+    try:
+        import h5py
+        import numpy as np
+    except ImportError as e:
+        print(f"ERROR: Required package not available: {e}")
+        print("Install with: pip install h5py numpy")
+        sys.exit(1)
+
     chunk_files = sorted(output_dir.glob("chunk_*.h5"))
     if not chunk_files:
         print(f"ERROR: No chunk files found in {output_dir}")
@@ -155,20 +181,14 @@ def build_index_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing model_library.h5
     """
-    print("Building FAISS index...")
-    print("NOTE: Index building not yet implemented.")
-    print("This is a placeholder for future FAISS integration.")
-
-    library_file = output_dir / "model_library.h5"
-    if not library_file.exists():
-        print(f"ERROR: Library file not found: {library_file}")
-        sys.exit(1)
-
-    # TODO: Implement FAISS index building
-    # 1. Load spectra from model_library.h5
-    # 2. Optionally apply dimensionality reduction (PCA, wavelength subset)
-    # 3. Build FAISS index (IVF or HNSW)
-    # 4. Save index to disk
+    print("ERROR: FAISS index building is not yet implemented.")
+    print("This mode is a placeholder for future FAISS integration.")
+    print("Required steps:")
+    print("  1. Load spectra from model_library.h5")
+    print("  2. Apply dimensionality reduction (PCA, wavelength subset)")
+    print("  3. Build FAISS index (IVF or HNSW)")
+    print("  4. Save index to disk")
+    sys.exit(1)
 
 
 def submit_mode(
@@ -198,7 +218,7 @@ def submit_mode(
         Max concurrent array tasks (default: 20)
     """
     try:
-        from cflibs.hpc import ArrayJobConfig, SlurmJobManager
+        from cflibs.hpc import ArrayJobConfig, SlurmJobConfig, SlurmJobManager
     except ImportError:
         print("ERROR: cflibs.hpc not available. Install cflibs first.")
         sys.exit(1)
@@ -220,19 +240,23 @@ def submit_mode(
     )
 
     script_path = Path(__file__).resolve()
+    # Quote paths to handle spaces and special characters
+    script_path_quoted = shlex.quote(str(script_path))
+    output_dir_quoted = shlex.quote(str(output_dir))
+    
     chunk_script = f"""
-python {script_path} chunk \\
+python {script_path_quoted} chunk \\
     --chunk-id $SLURM_ARRAY_TASK_ID \\
     --n-chunks {n_chunks} \\
-    --output-dir {output_dir}
+    --output-dir {output_dir_quoted}
 """
 
     print("Submitting chunk generation array job...")
     chunk_job_id = manager.submit(chunk_config, chunk_script)
     print(f"Submitted chunk job: {chunk_job_id}")
 
-    # Consolidation job with dependency
-    consolidate_config = ArrayJobConfig(
+    # Consolidation job with dependency (use SlurmJobConfig, not ArrayJobConfig)
+    consolidate_config = SlurmJobConfig(
         job_name="cflibs_consolidate",
         partition=partition,
         cpus_per_task=1,
@@ -243,7 +267,7 @@ python {script_path} chunk \\
     )
 
     consolidate_script = f"""
-python {script_path} consolidate --output-dir {output_dir}
+python {script_path_quoted} consolidate --output-dir {output_dir_quoted}
 """
 
     print("Submitting consolidation job (depends on chunk completion)...")

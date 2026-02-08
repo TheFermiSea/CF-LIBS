@@ -200,14 +200,48 @@ def test_submit_with_dependency_dry_run():
     assert job_id == "DRY_RUN_dependent_job"
 
     # Verify dependency directive would be added
-    script = manager.generate_sbatch_script(config, "echo test")
-    # Note: dependency is added in submit_with_dependency via extra_sbatch
-    # We test the mechanism separately
     config_with_dep = SlurmJobConfig(
         job_name="test", extra_sbatch={"dependency": "afterok:12345:67890"}
     )
     script = manager.generate_sbatch_script(config_with_dep, "echo test")
     assert "#SBATCH --dependency=afterok:12345:67890" in script
+
+
+def test_submit_with_dependency_preserves_array_config():
+    """Test that submit_with_dependency preserves ArrayJobConfig fields."""
+    manager = SlurmJobManager(dry_run=True)
+    array_config = ArrayJobConfig(
+        job_name="dependent_array",
+        array_size=50,
+        max_concurrent=10,
+        partition="compute",
+    )
+
+    # Submit with dependencies
+    job_id = manager.submit_with_dependency(
+        array_config,
+        "python process.py $SLURM_ARRAY_TASK_ID",
+        depends_on=["12345"],
+        dependency_type="afterok",
+    )
+
+    assert job_id == "DRY_RUN_dependent_array"
+
+    # Verify the generated script still contains array directive
+    # We need to manually build the config with dependency to check the script
+    config_with_dep = ArrayJobConfig(
+        job_name="dependent_array",
+        array_size=50,
+        max_concurrent=10,
+        partition="compute",
+        extra_sbatch={"dependency": "afterok:12345"},
+    )
+    script = manager.generate_sbatch_script(config_with_dep, "python process.py $SLURM_ARRAY_TASK_ID")
+    
+    # Assert array directive is present
+    assert "#SBATCH --array=0-49%10" in script
+    # Assert dependency directive is present
+    assert "#SBATCH --dependency=afterok:12345" in script
 
 
 def test_slurm_job_state_enum():
@@ -274,6 +308,13 @@ def test_parse_state():
     # Test case insensitivity
     assert SlurmJobManager._parse_state("pending") == SlurmJobState.PENDING
     assert SlurmJobManager._parse_state("running") == SlurmJobState.RUNNING
+    
+    # Test terminal states that should map to FAILED/CANCELLED
+    assert SlurmJobManager._parse_state("OUT_OF_MEMORY") == SlurmJobState.FAILED
+    assert SlurmJobManager._parse_state("OOM") == SlurmJobState.FAILED
+    assert SlurmJobManager._parse_state("NODE_FAIL") == SlurmJobState.FAILED
+    assert SlurmJobManager._parse_state("NODE_FAILURE") == SlurmJobState.FAILED
+    assert SlurmJobManager._parse_state("PREEMPTED") == SlurmJobState.CANCELLED
 
 
 def test_full_workflow_dry_run():
@@ -307,3 +348,90 @@ def test_full_workflow_dry_run():
     # Check status
     status = manager.status(consolidate_job_id)
     assert status.state == SlurmJobState.COMPLETED
+
+
+def test_array_size_validation():
+    """Test that array_size is validated."""
+    manager = SlurmJobManager(dry_run=True)
+    
+    # Invalid array_size < 1
+    config = ArrayJobConfig(job_name="test", array_size=0)
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "array_size must be >= 1" in str(e)
+    
+    # Invalid array_size < 0
+    config = ArrayJobConfig(job_name="test", array_size=-5)
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "array_size must be >= 1" in str(e)
+
+
+def test_max_concurrent_validation():
+    """Test that max_concurrent is validated."""
+    manager = SlurmJobManager(dry_run=True)
+    
+    # Invalid max_concurrent < 0
+    config = ArrayJobConfig(job_name="test", array_size=10, max_concurrent=-1)
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "max_concurrent must be >= 0" in str(e)
+
+
+def test_env_var_quoting():
+    """Test that environment variable values are properly quoted."""
+    manager = SlurmJobManager(dry_run=True)
+    config = SlurmJobConfig(
+        env_vars={
+            "SIMPLE": "value",
+            "WITH_SPACES": "value with spaces",
+            "WITH_SPECIAL": "value$with'special\"chars",
+        }
+    )
+    
+    script = manager.generate_sbatch_script(config, "echo test")
+    
+    # Values should be quoted
+    assert "export SIMPLE=value" in script
+    assert "export WITH_SPACES='value with spaces'" in script
+    # Special characters should be escaped or quoted
+    assert "WITH_SPECIAL=" in script
+
+
+def test_env_var_key_validation():
+    """Test that environment variable keys are validated."""
+    manager = SlurmJobManager(dry_run=True)
+    
+    # Invalid key with special characters
+    config = SlurmJobConfig(env_vars={"INVALID;KEY": "value"})
+    try:
+        manager.generate_sbatch_script(config, "echo test")
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "Invalid environment variable name" in str(e)
+
+
+def test_status_dry_run_non_dry_run_job():
+    """Test status query in dry-run mode for non-DRY_RUN job IDs."""
+    manager = SlurmJobManager(dry_run=True)
+    
+    # Non-DRY_RUN job ID should return UNKNOWN without executing commands
+    status = manager.status("12345")
+    assert status.job_id == "12345"
+    assert status.state == SlurmJobState.UNKNOWN
+
+
+def test_wait_terminates_on_unknown():
+    """Test that wait() treats UNKNOWN as terminal state."""
+    manager = SlurmJobManager(dry_run=True)
+    
+    # In dry-run mode, non-DRY_RUN job IDs return UNKNOWN
+    # This should cause wait() to return immediately instead of timing out
+    status = manager.wait("12345", poll_interval=0.1, timeout=1.0)
+    assert status.state == SlurmJobState.UNKNOWN
