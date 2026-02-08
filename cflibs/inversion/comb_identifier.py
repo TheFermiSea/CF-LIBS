@@ -134,6 +134,9 @@ class CombIdentifier:
         element_teeth: Dict[str, List[dict]] = {}
         element_identifications = []
 
+        # Compute wavelength spacing once for all elements
+        wavelength_spacing = np.median(np.diff(wavelength))
+
         for element in elements_to_search:
             # Get transitions for this element in wavelength range
             transitions = self._get_element_lines(element, wavelength[0], wavelength[-1])
@@ -156,9 +159,7 @@ class CombIdentifier:
 
                 if tooth_result["active"]:
                     # Create IdentifiedLine for active tooth
-                    shifted_center_nm = tooth_result["center_nm"] + tooth_result["best_shift"] * np.median(
-                        np.diff(wavelength)
-                    )
+                    shifted_center_nm = tooth_result["center_nm"] + tooth_result["best_shift"] * wavelength_spacing
                     matched_lines.append(
                         IdentifiedLine(
                             wavelength_exp_nm=shifted_center_nm,

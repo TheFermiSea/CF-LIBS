@@ -242,6 +242,7 @@ class CorrelationIdentifier:
             # Compute correlations for each (T, n_e) point
             correlations = []
             for T_K in T_grid:
+                # Convert temperature from Kelvin to eV using Boltzmann constant (KB_EV = 8.617e-5 eV/K)
                 T_eV = T_K * KB_EV
                 for n_e in n_e_grid:
                     model_spectrum = self._generate_model_spectrum(intensity, 
