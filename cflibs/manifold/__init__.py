@@ -16,10 +16,11 @@ from cflibs.manifold.loader import ManifoldLoader
 from cflibs.manifold.vector_index import SpectralEmbedder
 
 # VectorIndex requires faiss (optional)
-try:
+from cflibs.manifold import vector_index as _vector_index
+if getattr(_vector_index, "HAS_FAISS", False):
     from cflibs.manifold.vector_index import VectorIndex, VectorIndexConfig
     HAS_VECTOR_INDEX = True
-except ImportError:
+else:
     HAS_VECTOR_INDEX = False
 
 __all__ = [

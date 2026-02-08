@@ -241,7 +241,7 @@ class VectorIndex:
     >>> config = VectorIndexConfig(index_type="flat")
     >>> index = VectorIndex(dimension=30, config=config)
     >>> index.build(embeddings)
-    >>> indices, distances = index.search(query_embeddings, k=10)
+    >>> distances, indices = index.search(query_embeddings, k=10)
     """
 
     def __init__(self, dimension: int, config: VectorIndexConfig = VectorIndexConfig()):

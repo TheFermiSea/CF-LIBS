@@ -2,7 +2,6 @@
 Tests for comb template correlation algorithm.
 """
 
-import pytest
 import numpy as np
 from cflibs.inversion.comb_identifier import CombIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
@@ -70,7 +69,7 @@ def test_correlate_tooth_with_peak(atomic_db):
     # Should have high correlation
     assert tooth["center_nm"] == center_nm
     assert tooth["best_correlation"] > 0.5
-    assert tooth["active"] == True  # Use == instead of 'is' for numpy bool
+    assert tooth["active"]
     assert abs(tooth["best_shift"]) <= identifier.max_shift_pts
 
 

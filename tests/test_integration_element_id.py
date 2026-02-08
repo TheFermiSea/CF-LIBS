@@ -300,14 +300,8 @@ def test_comparative_line_counts(atomic_db, synthetic_libs_spectrum):
 
     # Convert to observations
     alias_obs = to_line_observations(alias_result)
-    comb_obs = to_line_observations(comb_result)
-    corr_obs = to_line_observations(corr_result)
+    _ = to_line_observations(comb_result)  # Verify comb can convert
+    _ = to_line_observations(corr_result)  # Verify correlation can convert
 
     # ALIAS should find at least some lines
     assert len(alias_obs) > 0, "ALIAS should detect at least some lines"
-
-    # Log counts for comparison (useful for debugging)
-    print("\nLine counts:")
-    print(f"  ALIAS: {len(alias_obs)}")
-    print(f"  Comb: {len(comb_obs)}")
-    print(f"  Correlation: {len(corr_obs)}")

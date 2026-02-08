@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 import numpy as np
 from scipy.ndimage import median_filter
 from scipy.stats import pearsonr
+from scipy.signal import find_peaks
 
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.atomic.structures import Transition
@@ -124,9 +125,8 @@ class CombIdentifier:
 
         # Step 2: Determine elements to search
         if self.elements is None:
-            # TODO: Get all elements from database
-            # For now, use common LIBS elements
-            elements_to_search = ["Fe", "Cu", "Al", "Ca", "Mg", "Ti", "H"]
+            # Use all elements available in the atomic database
+            elements_to_search = list(self.atomic_db.get_available_elements())
         else:
             elements_to_search = self.elements
 
@@ -156,15 +156,17 @@ class CombIdentifier:
 
                 if tooth_result["active"]:
                     # Create IdentifiedLine for active tooth
+                    shifted_center_nm = tooth_result["center_nm"] + tooth_result["best_shift"] * np.median(
+                        np.diff(wavelength)
+                    )
                     matched_lines.append(
                         IdentifiedLine(
-                            wavelength_exp_nm=tooth_result["center_nm"]
-                            + tooth_result["best_shift"] * np.median(np.diff(wavelength)),
+                            wavelength_exp_nm=shifted_center_nm,
                             wavelength_th_nm=trans.wavelength_nm,
                             element=element,
                             ionization_stage=trans.ionization_stage,
                             intensity_exp=intensity[
-                                int(np.argmin(np.abs(wavelength - tooth_result["center_nm"])))
+                                int(np.argmin(np.abs(wavelength - shifted_center_nm)))
                             ],
                             emissivity_th=0.0,
                             transition=trans,
@@ -211,19 +213,20 @@ class CombIdentifier:
                     for tooth in element_teeth[element]:
                         if (
                             abs(tooth["center_nm"] - line.wavelength_th_nm) < 0.01
-                            and "interfering_elements" in tooth
+                            and tooth.get("is_interfered")
                         ):
                             line.is_interfered = True
-                            line.interfering_elements = tooth["interfering_elements"]
+                            line.interfering_elements = tooth.get("interfering_elements", [])
 
         # Step 5: Split into detected and rejected
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
-        # Step 6: Identify experimental peaks (simple threshold-based for now)
+        # Step 6: Identify experimental peaks using peak finder
         residual = intensity - baseline
-        peak_mask = residual > threshold
-        peak_indices = np.where(peak_mask)[0]
+        peak_indices, _ = find_peaks(
+            residual, height=threshold, distance=5
+        )
         experimental_peaks = [(i, wavelength[i]) for i in peak_indices]
 
         # Count matched peaks (peaks that have at least one identified line)
