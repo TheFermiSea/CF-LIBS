@@ -148,14 +148,17 @@ def validate_instrument_config(config: Dict[str, Any]) -> bool:
 
 def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
     """
-    Save configuration to YAML or JSON file.
-
-    Parameters
-    ----------
-    config : dict
-        Configuration dictionary
-    config_path : str or Path
-        Path to output file
+    Write a configuration dictionary to a YAML or JSON file.
+    
+    The output format is selected from the file extension of `config_path` (".yaml", ".yml", or ".json"). YAML output requires PyYAML to be installed.
+    
+    Parameters:
+        config (dict): Configuration data to write.
+        config_path (str | Path): Destination file path; extension determines the format.
+    
+    Raises:
+        ImportError: If a YAML extension is used but PyYAML is not available.
+        ValueError: If `config_path` has an unsupported file extension.
     """
     config_path = Path(config_path)
     suffix = config_path.suffix.lower()

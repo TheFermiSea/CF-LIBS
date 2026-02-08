@@ -12,7 +12,17 @@ logger = get_logger("cli.main")
 
 
 def forward_model_cmd(args):
-    """Forward modeling command."""
+    """
+    Compute a synthetic spectrum from the CLI configuration and emit or save the results.
+    
+    Loads configuration from args.config, validates plasma and instrument sections, constructs the atomic database, plasma state, instrument model, and spectrum model, then computes the spectrum. If args.output is provided the spectrum is saved as a CSV file with columns `wavelength_nm,intensity_W_m2_nm_sr`; otherwise a sampled CSV-style listing is printed to stdout.
+    
+    Parameters:
+        args: Namespace
+            CLI arguments object with at least:
+            - config (str or Path): Path to the configuration file to load.
+            - output (str or Path, optional): Path to write the CSV output. If omitted, results are printed to stdout.
+    """
     from cflibs.core.config import load_config, validate_plasma_config, validate_instrument_config
     from cflibs.atomic.database import AtomicDatabase
     from cflibs.plasma.state import SingleZoneLTEPlasma

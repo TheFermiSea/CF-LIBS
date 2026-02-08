@@ -250,6 +250,15 @@ class SpectrumBuffer:
     """
 
     def __init__(self, max_size: int = 100, drop_old: bool = True):
+        """
+        Initialize a thread-safe ring buffer for SpectrumPacket objects.
+        
+        Creates internal synchronization primitives and counters; the buffer will hold at most `max_size` packets. If `drop_old` is True the buffer is bounded and will discard the oldest packet when capacity is exceeded; if False the buffer is unbounded and producers will block when full until space becomes available.
+        
+        Parameters:
+            max_size (int): Maximum number of packets the buffer will hold.
+            drop_old (bool): If True, drop the oldest packet when the buffer is full; if False, block producers instead.
+        """
         self.max_size = max_size
         self.drop_old = drop_old
         self._buffer: deque[SpectrumPacket] = deque(maxlen=max_size if drop_old else None)
@@ -333,17 +342,14 @@ class SpectrumBuffer:
                 return True
 
     def pop(self, timeout: Optional[float] = None) -> Optional[SpectrumPacket]:
-        """Pop a spectrum from the buffer.
-
-        Parameters
-        ----------
-        timeout : float, optional
-            Timeout in seconds to wait for a spectrum
-
-        Returns
-        -------
-        SpectrumPacket or None
-            The spectrum packet, or None if timeout/closed
+        """
+        Retrieve and remove the oldest SpectrumPacket from the buffer, optionally waiting up to a timeout.
+        
+        Parameters:
+            timeout (float | None): Maximum time in seconds to wait for a packet when the buffer is empty. If None, wait indefinitely.
+        
+        Returns:
+            SpectrumPacket or None: The oldest packet if available; `None` if the timeout elapses or the buffer is closed and empty.
         """
         with self._not_empty:
             if timeout is not None:
@@ -365,19 +371,20 @@ class SpectrumBuffer:
             return packet
 
     def pop_batch(self, max_count: int, timeout: Optional[float] = None) -> List[SpectrumPacket]:
-        """Pop up to max_count spectra from the buffer.
-
+        """
+        Remove and return up to `max_count` spectrum packets from the buffer, blocking until at least one packet is available or the optional timeout elapses.
+        
         Parameters
         ----------
         max_count : int
-            Maximum number of spectra to pop
+            Maximum number of spectra to remove from the buffer.
         timeout : float, optional
-            Timeout to wait for at least one spectrum
-
+            Maximum seconds to wait for at least one spectrum; if omitted, wait indefinitely.
+        
         Returns
         -------
         List[SpectrumPacket]
-            List of spectrum packets (may be empty if timeout)
+            A list of removed SpectrumPacket objects (may contain fewer than `max_count`). Returns an empty list if the timeout elapses before any packet is available or if the buffer is closed.
         """
         with self._not_empty:
             # Wait for at least one spectrum
@@ -453,13 +460,27 @@ class LatencyMonitor:
     """
 
     def __init__(self, window_size: int = 1000, target_ms: float = 500.0):
+        """
+        Create a thread-safe latency monitor that records the most recent latency measurements and evaluates them against a target threshold.
+        
+        Parameters:
+            window_size (int): Maximum number of recent latency samples to retain for statistics.
+            target_ms (float): Target latency in milliseconds used to compute the fraction of samples meeting the goal.
+        """
         self.window_size = window_size
         self.target_ms = target_ms
         self._latencies: deque[float] = deque(maxlen=window_size)
         self._lock = threading.Lock()
 
     def record(self, latency_ms: float) -> None:
-        """Record a latency measurement."""
+        """
+        Append a latency measurement (in milliseconds) to the monitor's sliding window.
+        
+        This method is thread-safe and stores the provided latency value for subsequent statistics computation.
+        
+        Parameters:
+            latency_ms (float): Latency value in milliseconds to record.
+        """
         with self._lock:
             self._latencies.append(latency_ms)
 
@@ -612,23 +633,24 @@ class FastAnalyzer(BaseStreamingAnalyzer):
         line_observations: Optional[List[LineObservation]] = None,
         **kwargs: Any,
     ) -> CFLIBSResult:
-        """Perform fast analysis on a spectrum.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array in nm
-        intensity : np.ndarray
-            Intensity array
-        line_observations : List[LineObservation], optional
-            Pre-identified line observations (faster than re-detecting)
-        **kwargs
-            Additional parameters
-
-        Returns
-        -------
-        CFLIBSResult
-            Analysis result with estimated uncertainties
+        """
+        Perform a fast, single-pass CF-LIBS analysis of one spectrum.
+        
+        If `line_observations` is None a placeholder result with nominal values is returned. When provided, the method optionally downsamples the input (per configuration), selects a small set of spectral lines, fits a single Boltzmann slope to estimate temperature, and produces simplified concentration fractions with relative uncertainties.
+        
+        Parameters:
+            wavelength (np.ndarray): Wavelength array in nanometers.
+            intensity (np.ndarray): Intensity array aligned with `wavelength`.
+            line_observations (Optional[List[LineObservation]]): Pre-identified line observations to use for analysis; if omitted a placeholder result is returned.
+            **kwargs: Additional analyzer-specific options (ignored by the fast analyzer).
+        
+        Returns:
+            CFLIBSResult: Analysis outcome containing:
+                - temperature_K and temperature_uncertainty_K from a single Boltzmann fit,
+                - concentrations (normalized fractions) and concentration_uncertainties (approx. 20% relative),
+                - electron_density_cm3 set to a nominal value (not precisely estimated in fast mode),
+                - `converged` set to False and a `"insufficient_lines"` warning if fewer than three selected lines,
+                - `quality_metrics` with mode="fast" and fit diagnostics (e.g., `n_lines`, `r_squared`).
         """
         if line_observations is None:
             # In production, would use line detection here
@@ -850,6 +872,18 @@ class StreamingAnalyzer:
         result_callback: Optional[Callable[[StreamingResult], None]] = None,
         elements: Optional[List[str]] = None,
     ):
+        """
+        Initialize the streaming analyzer and its runtime components.
+        
+        Sets up the chosen analysis backend (fast or standard) according to `config.mode`, creates a latency monitor tuned to `config.max_latency_ms`, and prepares thread and result-buffering primitives plus processing/error counters.
+        
+        Parameters:
+            atomic_db: Database or provider of atomic data required by analyzers.
+            buffer (SpectrumBuffer): Thread-safe input buffer for incoming spectra.
+            config (StreamingConfig, optional): Runtime configuration; defaults to a StreamingConfig with standard defaults when omitted.
+            result_callback (Callable[[StreamingResult], None], optional): Optional callable invoked for each produced StreamingResult.
+            elements (List[str], optional): List of element symbols to focus analysis on; defaults to an empty list.
+        """
         self.atomic_db = atomic_db
         self.buffer = buffer
         self.config = config or StreamingConfig()
@@ -925,7 +959,15 @@ class StreamingAnalyzer:
                 self._error_count += 1
 
     def _process_single(self) -> None:
-        """Process a single spectrum."""
+        """
+        Process one spectrum from the input buffer, analyze it, and emit a StreamingResult.
+        
+        If a spectrum packet is available, runs the configured analyzer to produce a CFLIBSResult,
+        assembles a StreamingResult that includes computed latency, quality flag, warnings, and
+        the packet metadata, then stores the result and records the latency. If analysis raises
+        an exception, a degraded CFLIBSResult with `converged=False` is created, the quality flag
+        is set to `"poor"`, and an error warning is attached before storing and recording.
+        """
         packet = self.buffer.pop(timeout=0.1)
         if packet is None:
             return
@@ -1135,7 +1177,11 @@ class EdgeOptimizedModel:
             self._compile_functions()
 
     def _build_pruned_model(self) -> None:
-        """Build pruned atomic data model."""
+        """
+        Populate the analyzer's compact edge model with pruned atomic data for the configured elements.
+        
+        Builds and stores per-element data used by the edge-optimized model: partition-function coefficient arrays for ionization stages 1 and 2 (when available), the stage-1 ionization potential, and a pruned list of the strongest transitions (top 50 by Einstein A coefficient). The stored structures are assigned to self._partition_coeffs, self._ionization_potentials, and self._transitions. The numeric dtype used for coefficient arrays is float16 when quantization is enabled, otherwise float32.
+        """
         dtype = np.float16 if self.quantize else np.float32
 
         for el in self.elements:
@@ -1171,7 +1217,13 @@ class EdgeOptimizedModel:
         )
 
     def _compile_functions(self) -> None:
-        """Pre-compile JAX functions."""
+        """
+        Compile and register JAX-accelerated numerical functions for the edge model.
+        
+        Specifically, compiles a JAX-jitted Boltzmann-slope function and stores it under
+        the key "boltzmann_slope" in self._compiled_functions. If JAX is not available,
+        the method leaves compiled functions unchanged and records a warning.
+        """
         try:
             import jax
             import jax.numpy as jnp
@@ -1220,16 +1272,28 @@ class EdgeOptimizedModel:
         return 10.0**log_U
 
     def get_ionization_potential(self, element: str) -> float:
-        """Get ionization potential in eV."""
+        """
+        Return the first ionization potential for the given element in electron volts (eV).
+        
+        Parameters:
+            element (str): Chemical element symbol or name (e.g., "Fe" or "Iron").
+        
+        Returns:
+            float: Ionization potential in eV for the element, or 10.0 if the element is not present in the model.
+        """
         return self._ionization_potentials.get(element, 10.0)
 
     def get_transitions(self, element: str) -> List[Tuple[float, float, float, float]]:
-        """Get pruned transitions for element.
-
-        Returns
-        -------
-        List[Tuple[float, float, float, float]]
-            List of (wavelength_nm, E_upper_eV, g_upper, A_ki)
+        """
+        Return the pruned transition list for the given element.
+        
+        Parameters:
+            element (str): Element symbol (e.g., "Fe") or name used as the lookup key.
+        
+        Returns:
+            List[Tuple[float, float, float, float]]: A list of transitions as tuples
+            (wavelength_nm, E_upper_eV, g_upper, A_ki). Returns an empty list if no
+            transitions are available for the element.
         """
         return self._transitions.get(element, [])
 

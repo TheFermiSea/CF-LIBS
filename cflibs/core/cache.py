@@ -139,9 +139,26 @@ _ionization_cache = LRUCache(max_size=128, ttl_seconds=1800)  # 30 min TTL
 
 
 def _make_cache_decorator(cache: LRUCache) -> Callable:
-    """Create a caching decorator backed by the given LRUCache instance."""
+    """
+    Create a decorator that caches a function's results using the provided LRUCache.
+    
+    Parameters:
+        cache (LRUCache): Cache instance used to generate keys from the wrapped function's arguments and to store/retrieve cached results.
+    
+    Returns:
+        Callable: A decorator that wraps a function and caches its return values keyed by the function's arguments; when a cached entry exists it will be returned instead of calling the wrapped function.
+    """
 
     def decorator(func: Callable) -> Callable:
+        """
+        Create a cached wrapper for `func` that uses the surrounding `cache` instance to store and retrieve results.
+        
+        Parameters:
+            func (Callable): The function to wrap; its arguments are used to build the cache key.
+        
+        Returns:
+            Callable: A wrapper that returns a cached result when available, otherwise calls `func`, stores its result in `cache`, and returns it.
+        """
         @wraps(func)
         def wrapper(*args, **kwargs):
             cache_key = cache._make_key(*args, **kwargs)
@@ -170,12 +187,15 @@ cached_ionization = _make_cache_decorator(_ionization_cache)
 
 def get_cache_stats() -> Dict[str, Dict[str, Any]]:
     """
-    Get statistics for all caches.
-
-    Returns
-    -------
-    dict
-        Dictionary mapping cache name to statistics
+    Collect statistics for the module's caches.
+    
+    Returns:
+        dict: Mapping of logical cache names to their statistics dictionaries. Each statistics dictionary contains:
+            - size: current number of entries
+            - max_size: configured maximum entries
+            - hits: number of cache hits
+            - misses: number of cache misses
+            - hit_rate: hits divided by total accesses (hits / (hits + misses)), or 0.0 if no accesses
     """
     return {
         "partition_function": _partition_function_cache.stats(),

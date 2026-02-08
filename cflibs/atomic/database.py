@@ -30,12 +30,17 @@ class AtomicDatabase(AtomicDataSource):
 
     def __init__(self, db_path: str):
         """
-        Initialize database connection and verify schema.
-
-        Parameters
-        ----------
-        db_path : str
-            Path to SQLite database file
+        Initialize the AtomicDatabase by opening the SQLite file, establishing a connection (preferably pooled), and ensuring the database schema is up-to-date.
+        
+        Parameters:
+            db_path (str): Path to the SQLite database file.
+        
+        Raises:
+            FileNotFoundError: If the specified database file does not exist.
+        
+        Notes:
+            - Attempts to create a connection pool; if pool creation fails, a direct sqlite3 connection is used.
+            - Performs schema checks and migrations as needed before returning.
         """
         db_path = Path(db_path)
         if not db_path.exists():
@@ -58,7 +63,12 @@ class AtomicDatabase(AtomicDataSource):
 
     @contextmanager
     def _get_connection(self):
-        """Yield a database connection from the pool or the direct connection."""
+        """
+        Provide a database connection for executing queries.
+        
+        Returns:
+            sqlite3.Connection: A connection obtained from the pool when pooling is enabled; otherwise the persistent direct connection.
+        """
         if self._use_pool:
             with self._pool.get_connection() as conn:
                 yield conn
@@ -66,7 +76,14 @@ class AtomicDatabase(AtomicDataSource):
             yield self.conn
 
     def _check_and_migrate_schema(self):
-        """Check database schema and migrate if necessary."""
+        """
+        Ensure the database schema matches expectations and apply migrations when needed.
+        
+        Attempts to perform required schema migration using an internal database connection and re-raises any exception encountered.
+        
+        Raises:
+            Exception: If schema migration fails.
+        """
         try:
             with self._get_connection() as conn:
                 self._perform_migration(conn)
@@ -148,25 +165,17 @@ class AtomicDatabase(AtomicDataSource):
         min_relative_intensity: Optional[float] = None,
     ) -> List[Transition]:
         """
-        Get transitions for an element.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        ionization_stage : int, optional
-            Filter by ionization stage (1=neutral, 2=singly ionized, etc.)
-        wavelength_min : float, optional
-            Minimum wavelength in nm
-        wavelength_max : float, optional
-            Maximum wavelength in nm
-        min_relative_intensity : float, optional
-            Minimum relative intensity threshold
-
-        Returns
-        -------
-        List[Transition]
-            List of transition objects
+        Retrieve spectral transitions for a given element, optionally filtered by ionization stage, wavelength range, and minimum relative intensity.
+        
+        Parameters:
+            element (str): Element symbol.
+            ionization_stage (int, optional): Ionization stage where 1 = neutral, 2 = singly ionized, etc.
+            wavelength_min (float, optional): Minimum wavelength in nanometers (inclusive).
+            wavelength_max (float, optional): Maximum wavelength in nanometers (inclusive).
+            min_relative_intensity (float, optional): Minimum relative intensity threshold; rows with `rel_int` below this value are excluded.
+        
+        Returns:
+            List[Transition]: List of Transition objects matching the provided filters. Missing numeric fields are converted to sensible defaults or `None` where applicable.
         """
         # Check if new columns exist in the actual query execution (though schema check should have fixed it)
         # We select all relevant columns.
@@ -253,19 +262,14 @@ class AtomicDatabase(AtomicDataSource):
 
     def get_energy_levels(self, element: str, ionization_stage: int) -> List[EnergyLevel]:
         """
-        Get energy levels for a species.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        ionization_stage : int
-            Ionization stage
-
-        Returns
-        -------
-        List[EnergyLevel]
-            List of energy level objects
+        Retrieve energy levels for the specified element and ionization stage.
+        
+        Parameters:
+            element (str): Element symbol (e.g., "Fe").
+            ionization_stage (int): Ionization stage number (sp_num in the database).
+        
+        Returns:
+            List[EnergyLevel]: EnergyLevel objects ordered by increasing energy_ev.
         """
         query = """
             SELECT g_level, energy_ev
@@ -319,17 +323,13 @@ class AtomicDatabase(AtomicDataSource):
 
     def get_atomic_mass(self, element: str) -> Optional[float]:
         """
-        Get atomic mass for an element.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-
-        Returns
-        -------
-        float or None
-            Atomic mass in amu, or None if not found
+        Return the atomic mass for the given element in atomic mass units.
+        
+        Parameters:
+            element (str): Element symbol (e.g., 'Fe').
+        
+        Returns:
+            float or None: Atomic mass in amu if present in the database, otherwise None.
         """
         # Usually atomic mass is per element, not per species, but stored in species_physics which is (element, sp_num).
         # We can grab it from any sp_num or specifically sp_num=0 or 1.
@@ -350,18 +350,14 @@ class AtomicDatabase(AtomicDataSource):
         self, element: str, ionization_stage: int
     ) -> Optional[PartitionFunction]:
         """
-        Get partition function coefficients for a species.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        ionization_stage : int
-            Ionization stage
-
-        Returns
-        -------
-        PartitionFunction or None
+        Retrieve the partition function coefficients, valid temperature range, and source for a given species.
+        
+        Parameters:
+        	element (str): Element symbol (e.g., "Fe").
+        	ionization_stage (int): Ionization stage (sp_num) for the species.
+        
+        Returns:
+        	PartitionFunction or None: A PartitionFunction with coefficients [a0, a1, a2, a3, a4], t_min, t_max, and source if an entry exists; `None` if no partition function is found for the given element and ionization stage.
         """
         query = """
             SELECT a0, a1, a2, a3, a4, t_min, t_max, source
@@ -387,19 +383,10 @@ class AtomicDatabase(AtomicDataSource):
 
     def get_species_physics(self, element: str, ionization_stage: int) -> Optional[SpeciesPhysics]:
         """
-        Get physical properties for a species.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        ionization_stage : int
-            Ionization stage
-
-        Returns
-        -------
-        SpeciesPhysics or None
-            Species physics object, or None if not found
+        Retrieve the ionization potential and atomic mass for a species.
+        
+        Returns:
+            A SpeciesPhysics containing the species' ionization potential (in eV) and atomic mass, or `None` if no record is found.
         """
         query = """
             SELECT ip_ev, atomic_mass
@@ -428,23 +415,16 @@ class AtomicDatabase(AtomicDataSource):
         self, element: str, ionization_stage: int, wavelength_nm: float, tolerance_nm: float = 0.01
     ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         """
-        Get Stark broadening parameters for a specific line.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        ionization_stage : int
-            Ionization stage
-        wavelength_nm : float
-            Target wavelength
-        tolerance_nm : float
-            Wavelength matching tolerance
-
-        Returns
-        -------
-        Tuple[float, float, float]
-            (stark_w, stark_alpha, stark_shift) or (None, None, None)
+        Return Stark broadening parameters for the line nearest the target wavelength within a tolerance.
+        
+        Parameters:
+            element (str): Chemical element symbol to search.
+            ionization_stage (int): Ionization stage (sp_num) of the element.
+            wavelength_nm (float): Target wavelength in nanometers.
+            tolerance_nm (float): Maximum allowed absolute difference (nm) between stored line wavelength and the target.
+        
+        Returns:
+            tuple: (stark_w, stark_alpha, stark_shift) where each value is a float if present in the database, `None` if that parameter is missing, or `(None, None, None)` if no matching line is found.
         """
         query = """
             SELECT stark_w, stark_alpha, stark_shift
@@ -471,14 +451,23 @@ class AtomicDatabase(AtomicDataSource):
         return (stark_w, stark_alpha, stark_shift)
 
     def get_available_elements(self) -> List[str]:
-        """Get list of elements available in the database."""
+        """
+        Return the distinct element symbols present in the database, ordered alphabetically.
+        
+        Returns:
+            A list of element symbols (strings) available in the `lines` table, sorted by element name.
+        """
         query = "SELECT DISTINCT element FROM lines ORDER BY element"
         with self._get_connection() as conn:
             df = pd.read_sql_query(query, conn)
             return df["element"].tolist()
 
     def close(self):
-        """Close database connection."""
+        """
+        Close the database connection held by this AtomicDatabase instance.
+        
+        If the instance was created with a connection pool, this method does not close the shared pool; it only releases the instance's reference. If the instance uses a direct sqlite3 connection, that connection is closed.
+        """
         if self._use_pool:
             # Note: Pool is shared, so we don't close it here
             # Use close_all_pools() if needed

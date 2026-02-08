@@ -370,19 +370,24 @@ class PLSRegression:
         self, X: np.ndarray, Y: np.ndarray
     ) -> PLSComponents:
         """
-        NIPALS algorithm for PLS regression.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Preprocessed X matrix (n_samples x n_features)
-        Y : np.ndarray
-            Preprocessed Y matrix (n_samples x n_targets)
-
-        Returns
-        -------
-        PLSComponents
-            Fitted PLS decomposition
+        Compute a PLS decomposition from preprocessed predictors and responses using the NIPALS algorithm.
+        
+        Fits up to self.n_components latent components from the provided preprocessed predictor matrix X and response matrix Y and returns their scores, loadings, weights, regression coefficients, and per-component explained variance.
+        
+        Parameters:
+            X (np.ndarray): Preprocessed predictor matrix of shape (n_samples, n_features).
+            Y (np.ndarray): Preprocessed response matrix of shape (n_samples, n_targets).
+        
+        Returns:
+            PLSComponents: Decomposition containing:
+                - n_components: number of extracted components
+                - x_scores (T): X scores matrix
+                - x_loadings (P): X loadings matrix
+                - y_loadings (Q): Y loadings matrix
+                - x_weights (W): X weight vectors
+                - coefficients (B): regression coefficients mapping X to Y
+                - x_explained_variance: per-component explained variance in X
+                - y_explained_variance: per-component explained variance in Y
         """
         n_samples, n_features = X.shape
         n_targets = Y.shape[1]
@@ -704,20 +709,20 @@ class PLSRegression:
 
     def vip_scores(self) -> np.ndarray:
         """
-        Compute Variable Importance in Projection (VIP) scores.
-
-        VIP scores indicate the importance of each wavelength in the PLS model.
-        Variables with VIP > 1 are considered important.
-
-        Returns
-        -------
-        np.ndarray
-            VIP scores (n_features,)
-
-        References
-        ----------
-        Wold, S. (1994). PLS for multivariate linear modeling. In QSAR: chemometric
-        methods in molecular design. VCH.
+        Compute Variable Importance in Projection (VIP) scores for each input feature.
+        
+        VIP scores quantify each feature's overall contribution to explaining variance in the response(s);
+        values greater than 1 are commonly interpreted as important. If the model explains effectively
+        no variance in Y, the returned VIP values will be all zeros.
+        
+        Returns:
+            vip (np.ndarray): VIP scores with shape (n_features,).
+        
+        Raises:
+            RuntimeError: If the model has not been fitted.
+        
+        References:
+            Wold, S. (1994). PLS for multivariate linear modeling. In QSAR: chemometric methods in molecular design. VCH.
         """
         if not self._is_fitted or self._components is None:
             raise RuntimeError("Model must be fitted to compute VIP")
@@ -748,17 +753,17 @@ class PLSRegression:
 
     def get_loadings_spectrum(self, component: int = 0) -> np.ndarray:
         """
-        Get X loadings for a specific component (interpretable as spectral pattern).
-
-        Parameters
-        ----------
-        component : int
-            Component index (0-indexed)
-
-        Returns
-        -------
-        np.ndarray
-            Loading vector (n_features,)
+        Return the X-loadings (spectral weights) for a specified latent component.
+        
+        Parameters:
+            component (int): Zero-based index of the component to retrieve.
+        
+        Returns:
+            np.ndarray: Loading vector of shape (n_features,) for the requested component.
+        
+        Raises:
+            RuntimeError: If the model is not fitted.
+            ValueError: If the requested component index is out of range.
         """
         if not self._is_fitted or self._components is None:
             raise RuntimeError("Model must be fitted")
@@ -771,19 +776,14 @@ class PLSRegression:
     @staticmethod
     def _safe_pw_inverse(P: np.ndarray, W: np.ndarray) -> np.ndarray:
         """
-        Compute (P.T @ W)^-1 with fallback to pseudoinverse.
-
-        Parameters
-        ----------
-        P : np.ndarray
-            X loadings (n_features x n_components)
-        W : np.ndarray
-            X weights (n_features x n_components)
-
-        Returns
-        -------
-        np.ndarray
-            Inverse or pseudoinverse of (P.T @ W)
+        Compute the inverse of P.T @ W, falling back to the Moore–Penrose pseudoinverse if the matrix is singular.
+        
+        Parameters:
+            P (np.ndarray): X loadings with shape (n_features, n_components).
+            W (np.ndarray): X weights with shape (n_features, n_components).
+        
+        Returns:
+            np.ndarray: Inverse (or pseudoinverse) of P.T @ W with shape (n_components, n_components).
         """
         PW = P.T @ W
         try:

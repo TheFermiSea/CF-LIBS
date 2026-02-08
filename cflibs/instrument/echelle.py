@@ -200,38 +200,26 @@ class EchelleExtractor:
         min_valid_pixels: int = 10,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Extract complete 1D spectrum from 2D echellogram.
-
-        This method:
-        1. Extracts flux from each order
-        2. Interpolates all orders onto a common wavelength grid
-        3. Merges overlapping regions
-
-        Parameters
-        ----------
-        image_2d : array
-            2D echellogram image (height, width)
-        wavelength_step_nm : float
-            Wavelength step for output grid in nm (default: 0.05)
-        merge_method : str
-            Method for merging overlapping orders:
-            - 'weighted_average': Weight by number of contributing orders
-            - 'simple_average': Simple average
-            - 'max': Take maximum value
-        min_valid_pixels : int
-            Minimum number of valid pixels required for an order to be included
-
-        Returns
-        -------
-        wavelengths : array
-            Wavelength grid in nm
-        intensity : array
-            Merged intensity spectrum
-
-        Raises
-        ------
-        ValueError
-            If no orders are calibrated or merge_method is invalid
+        Extract a merged 1D spectrum from a 2D echellogram image.
+        
+        Processes each calibrated order, resamples them onto a common wavelength grid with step `wavelength_step_nm`,
+        and merges overlapping contributions using `merge_method`.
+        
+        Parameters:
+            image_2d (np.ndarray): 2D echellogram image (height, width).
+            wavelength_step_nm (float): Step size in nanometers for the output wavelength grid.
+            merge_method (str): How to combine overlapping orders; one of:
+                - "weighted_average": sum contributions and divide by number of contributing orders per pixel
+                - "simple_average": equivalent to "weighted_average"
+                - "max": take the maximum value among contributing orders per pixel
+            min_valid_pixels (int): Minimum number of positive (valid) pixels required for an order to be included.
+        
+        Returns:
+            wavelengths (np.ndarray): Master wavelength grid in nanometers.
+            intensity (np.ndarray): Merged intensity spectrum on the master grid.
+        
+        Raises:
+            ValueError: If no orders are calibrated, if `merge_method` is invalid, or if no orders could be extracted.
         """
         if not self.orders:
             raise ValueError("No orders calibrated. Load calibration first.")

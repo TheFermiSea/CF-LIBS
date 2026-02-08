@@ -171,7 +171,17 @@ class JointOptimizationResult(ResultTableMixin, StatisticsMixin):
             return "poor fit (model inadequate or uncertainties underestimated)"
 
     def summary(self) -> str:
-        """Generate human-readable summary."""
+        """
+        Build a human-readable multi-line summary of the optimization result.
+        
+        Includes optimized and initial values for temperature and electron density, element
+        concentrations (with available uncertainties), and fit diagnostics such as final
+        loss, chi-squared, reduced chi-squared with qualitative goodness, degrees of
+        freedom, and gradient norm.
+        
+        Returns:
+            summary (str): A formatted multi-line string suitable for console display.
+        """
         lines = [
             "=" * 70,
             "Joint Optimization Result",
@@ -270,6 +280,22 @@ class JointOptimizer:
         tolerance: float = 1e-8,
         gradient_tolerance: float = 1e-6,
     ):
+        """
+        Initialize the joint optimizer for simultaneous fitting of temperature, electron density, and element concentrations.
+        
+        Parameters:
+            forward_model (Callable): Function that maps (T_eV, n_e, concentrations, wavelength) to a predicted spectrum.
+            elements (List[str]): List of element symbols to include in the concentration simplex.
+            wavelength (np.ndarray): 1D array of wavelength grid used by the forward model and measured spectra.
+            loss_type (LossType | str): Loss function to use; one of LossType enum values or its string name.
+            regularization (float): Entropy-based regularization weight applied to the concentration simplex (>= 0).
+            max_iterations (int): Maximum number of iterations allowed for the optimizer.
+            tolerance (float): Absolute tolerance for optimizer convergence criteria.
+            gradient_tolerance (float): Threshold for gradient norm used to determine convergence.
+        
+        Raises:
+            ImportError: If JAX is not available (the optimizer requires JAX).
+        """
         if not HAS_JAX:
             raise ImportError(
                 "JAX is required for joint optimization. " "Install with: pip install jax jaxlib"
@@ -501,12 +527,20 @@ class JointOptimizer:
         self, T_eV: float, n_e: float, concentrations: Dict[str, float]
     ) -> jnp.ndarray:
         """
-        Pack parameters into optimization vector.
-
-        Parameterization:
-        - x[0] = log(T_eV) for positivity
-        - x[1] = log10(n_e) for wide dynamic range
-        - x[2:] = softmax logits for concentrations (sum to 1)
+        Pack physical parameters into the 1D optimization vector used by the optimizer.
+        
+        Parameterization (packed vector layout):
+        - x[0] = log(T_eV) (natural log of temperature in eV, floor applied)
+        - x[1] = log10(n_e) (base-10 log of electron density in cm^-3, floor applied)
+        - x[2:] = logits for element concentrations such that softmax(logits) yields concentrations that sum to 1
+        
+        Parameters:
+            T_eV (float): Temperature in electron volts.
+            n_e (float): Electron density in cm^-3.
+            concentrations (Dict[str, float]): Mapping from element symbol to concentration fraction; missing elements are treated as a small positive default and values are clipped to avoid log(0).
+        
+        Returns:
+            jnp.ndarray: 1D array [log_T, log_ne, theta_0, ..., theta_{n-1}] suitable for optimization.
         """
         log_T = jnp.log(max(T_eV, 0.1))
         log_ne = jnp.log10(max(n_e, 1e10))
@@ -522,16 +556,15 @@ class JointOptimizer:
 
     def _unpack_params(self, x: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
-        Unpack optimization vector to physical parameters.
-
-        Returns
-        -------
-        T_eV : float
-            Temperature in eV
-        n_e : float
-            Electron density in cm^-3
-        concentrations : array
-            Element concentrations (sum to 1 via softmax)
+        Unpack the optimizer parameter vector into temperature, electron density, and element concentrations.
+        
+        Parameters:
+            x (jnp.ndarray): 1D parameter vector [log_T, log_ne, theta_...].
+        
+        Returns:
+            T_eV (jnp.ndarray): Temperature in electronvolts.
+            n_e (jnp.ndarray): Electron density in cm^-3.
+            concentrations (jnp.ndarray): Element concentrations that sum to 1 (softmax-normalized).
         """
         log_T = x[0]
         log_ne = x[1]
@@ -551,15 +584,33 @@ class JointOptimizer:
         uncertainties: jnp.ndarray,
     ) -> Callable[[jnp.ndarray], float]:
         """
-        Create the loss function for optimization.
-
-        The loss function depends on loss_type:
-        - CHI_SQUARED: sum((y - f(x))^2 / sigma^2) / n
-        - LEAST_SQUARES: sum((y - f(x))^2)
-        - HUBER: Huber loss for robustness to outliers
+        Builds and returns a scalar loss function over the optimizer's packed parameters.
+        
+        The returned function evaluates model misfit between `measured` and the forward model prediction for a packed parameter vector x = [log_T, log_ne, logits...], applying the optimizer's configured loss type (CHI_SQUARED, LEAST_SQUARES, or HUBER) and optional entropy regularization on the concentration simplex.
+        
+        Parameters:
+            measured: Observed spectrum sampled on self.wavelength; must align with the optimizer's wavelength grid.
+            uncertainties: Per-wavelength 1-sigma uncertainties used to normalize residuals for CHI_SQUARED and HUBER losses; values should be positive and nonzero to avoid division by zero.
+        
+        Returns:
+            A callable loss(x) that maps a packed parameter vector `x` to a scalar loss value. For CHI_SQUARED the value is the mean of squared residuals normalized by `uncertainties^2`; for LEAST_SQUARES it is the sum of squared residuals; for HUBER it is the mean Huber loss (with delta=1.0). In all cases, if `self.regularization > 0` an entropy-based regularization term (−regularization * entropy(concentrations)) is subtracted from the loss.
         """
 
         def _apply_reg(loss, conc):
+            """
+            Apply entropy-based regularization to a loss value using the concentration simplex.
+            
+            If the instance's `regularization` weight is greater than zero, the function computes the Shannon entropy
+            of `conc` (with a small floor to avoid log(0)) and subtracts `regularization * entropy` from `loss`.
+            If `regularization` is zero or negative, the original `loss` is returned unchanged.
+            
+            Parameters:
+                loss (float or array-like): Original loss value(s).
+                conc (array-like): Concentration vector on the simplex (values >= 0 that sum to 1).
+            
+            Returns:
+                float or array-like: Regularized loss (original loss minus regularization * entropy when applied).
+            """
             if self.regularization > 0:
                 entropy = -jnp.sum(conc * jnp.log(conc + 1e-10))
                 loss = loss - self.regularization * entropy
@@ -567,6 +618,15 @@ class JointOptimizer:
 
         @jit
         def chi_squared_loss(x: jnp.ndarray) -> float:
+            """
+            Compute the chi-squared loss for a packed parameter vector.
+            
+            Parameters:
+                x (jnp.ndarray): Packed optimization vector containing log(T_eV), log10(n_e), and concentration logits.
+            
+            Returns:
+                float: Mean of squared residuals ( (measured - predicted) / uncertainties ) across the wavelength grid, with entropy-based concentration regularization applied.
+            """
             T_eV, n_e, conc = self._unpack_params(x)
             predicted = self.forward_model(T_eV, n_e, conc, self.wavelength)
 
@@ -577,6 +637,15 @@ class JointOptimizer:
 
         @jit
         def least_squares_loss(x: jnp.ndarray) -> float:
+            """
+            Compute the sum of squared residuals between the measured spectrum and the model-predicted spectrum, with optional entropy-based regularization applied to the concentration simplex.
+            
+            Parameters:
+                x (jnp.ndarray): Packed parameter vector (log T_eV, log10 n_e, and concentration logits).
+            
+            Returns:
+                float: Loss value equal to the sum of squared residuals, plus any applied regularization term.
+            """
             T_eV, n_e, conc = self._unpack_params(x)
             predicted = self.forward_model(T_eV, n_e, conc, self.wavelength)
 
@@ -587,6 +656,15 @@ class JointOptimizer:
 
         @jit
         def huber_loss(x: jnp.ndarray) -> float:
+            """
+            Compute the mean Huber loss for a packed parameter vector, including concentration regularization.
+            
+            Parameters:
+                x (jnp.ndarray): Packed optimization vector containing log-temperature, log-electron-density, and concentration logits.
+            
+            Returns:
+                float: Mean Huber loss computed on residuals (measured − predicted divided by uncertainties), where residuals with absolute value <= 1.0 use a 0.5*r^2 term and larger residuals use a linear term; the returned loss includes any configured entropy-based regularization on the concentration simplex.
+            """
             T_eV, n_e, conc = self._unpack_params(x)
             predicted = self.forward_model(T_eV, n_e, conc, self.wavelength)
 
@@ -618,32 +696,27 @@ class JointOptimizer:
         sigma_range: float = 3.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute profile likelihood for a parameter.
-
-        Profile likelihood fixes one parameter and re-optimizes the others,
-        giving a more accurate uncertainty estimate for correlated parameters.
-
-        Parameters
-        ----------
-        result : JointOptimizationResult
-            Previous optimization result
-        parameter : str
-            Parameter name: 'T_eV', 'log_ne', or 'C_<element>'
-        measured : np.ndarray
-            Measured spectrum
-        uncertainties : np.ndarray, optional
-            Spectral uncertainties
-        n_points : int
-            Number of profile points
-        sigma_range : float
-            Range in standard deviations around optimum
-
-        Returns
-        -------
-        param_values : np.ndarray
-            Parameter values
-        profile_loss : np.ndarray
-            Profile likelihood values (delta chi-squared)
+        Compute a profile likelihood for a single parameter by evaluating the loss across a grid of fixed parameter values.
+        
+        This function builds a grid centered on the optimized parameter value and, for each grid point, evaluates the current loss with that parameter held fixed while other parameters remain at the optimized values. The returned profile values are delta chi-squared values scaled by the number of wavelength points. Note: this implementation does not re-optimize the remaining parameters for each fixed value.
+        
+        Parameters:
+            result (JointOptimizationResult): Result containing the optimized parameters and diagnostics.
+            parameter (str): Parameter identifier to profile. Accepted forms are:
+                - "T_eV" for electron temperature (eV),
+                - "log_ne" for base-10 logarithm of electron density,
+                - "C_<element>" for an element concentration (e.g., "C_Fe").
+            measured (np.ndarray): Measured spectrum (one-dimensional array) evaluated on the optimizer's wavelength grid.
+            uncertainties (Optional[np.ndarray]): Per-wavelength uncertainties. If None, a default sqrt(max(measured, 1.0)) is used.
+            n_points (int): Number of points in the profile grid.
+            sigma_range (float): Half-width of the grid in units of the parameter's estimated standard deviation (i.e., +/- sigma_range * sigma).
+        
+        Returns:
+            param_values (np.ndarray): Grid of parameter values that were evaluated.
+            profile_loss (np.ndarray): Delta chi-squared values for each grid point (loss - optimized loss) * n_wavelength.
+        
+        Raises:
+            ValueError: If `parameter` is not one of the accepted identifiers.
         """
         measured = jnp.array(measured)
         if uncertainties is None:

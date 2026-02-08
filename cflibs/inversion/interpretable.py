@@ -242,23 +242,16 @@ def _load_lines_from_db(
     min_rel_int: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Load known emission lines from atomic database.
-
-    Parameters
-    ----------
-    db_path : str
-        Path to SQLite database
-    elements : List[str]
-        Elements to load
-    columns : List[str]
-        Columns to select
-    min_rel_int : float, optional
-        Minimum relative intensity filter
-
-    Returns
-    -------
-    List[Dict[str, Any]]
-        List of line data dictionaries
+    Load emission line records for the specified elements from the SQLite atomic database and return them as a list of dictionaries keyed by the requested columns.
+    
+    Parameters:
+        db_path (str): Filesystem path to the SQLite database.
+        elements (List[str]): Element symbols to include in the query (matched against the `element` column).
+        columns (List[str]): Column names to select for each line record.
+        min_rel_int (Optional[float]): If provided, only lines with `rel_int` greater than this value are returned.
+    
+    Returns:
+        List[Dict[str, Any]]: List of line records where each record is a dict mapping each requested column name to its value. Records are ordered by `rel_int` descending. If a `rel_int` value in the database is NULL, it is returned as 0.0.
     """
     import sqlite3
 
@@ -348,7 +341,13 @@ class PhysicsGuidedFeatureExtractor:
         )
 
     def _load_known_lines(self) -> List[Dict[str, Any]]:
-        """Load known emission lines from atomic database."""
+        """
+        Load known emission lines for the extractor's configured elements from the atomic database.
+        
+        Returns:
+            List[dict]: A list of emission-line records, each dictionary containing the keys
+                'element', 'sp_num', 'wavelength_nm', 'aki', 'ek_ev', 'gk', and 'rel_int'.
+        """
         columns = ["element", "sp_num", "wavelength_nm", "aki", "ek_ev", "gk", "rel_int"]
         return _load_lines_from_db(self.db_path, self.elements, columns)
 
@@ -359,21 +358,17 @@ class PhysicsGuidedFeatureExtractor:
         uncertainty: Optional[np.ndarray] = None,
     ) -> FeatureExtractionResult:
         """
-        Extract physics-guided features from a spectrum.
-
-        Parameters
-        ----------
-        wavelengths : np.ndarray
-            Wavelength axis [nm]
-        spectrum : np.ndarray
-            Spectral intensity
-        uncertainty : np.ndarray, optional
-            Uncertainty in spectral intensity
-
-        Returns
-        -------
-        FeatureExtractionResult
-            Extracted features with physical attribution
+        Extract physics-guided spectral features from a single spectrum.
+        
+        If `uncertainty` is not provided, per-sample uncertainty is estimated as sqrt(max(spectrum, 1.0)). Peaks are detected, each peak is matched to known emission lines (when possible) and peak-level features (e.g., peak intensity, peak area) are extracted. Additional ratio features between strong lines of different elements are computed and all features are assembled into a feature matrix.
+        
+        Parameters:
+            wavelengths (np.ndarray): Wavelength axis in nanometers.
+            spectrum (np.ndarray): Spectral intensity values aligned with `wavelengths`.
+            uncertainty (Optional[np.ndarray]): Per-sample intensity uncertainties. If omitted, uncertainties are estimated.
+        
+        Returns:
+            FeatureExtractionResult: Contains `features` (list of SpectralFeature), `feature_matrix` (1 x n_features array), `feature_names` (list of names), `wavelengths_used` (list of peak wavelengths that were matched to known lines), and `elements_detected` (list of detected element symbols).
         """
         if uncertainty is None:
             # Estimate uncertainty as sqrt(counts) for Poisson noise
@@ -693,6 +688,14 @@ class SpectralExplainer:
         wavelengths: np.ndarray,
         feature_names: Optional[List[str]] = None,
     ):
+        """
+        Initialize the SpectralExplainer with a prediction model and wavelength grid.
+        
+        Parameters:
+            model (Callable): Prediction function or estimator used for generating explanations. May be a fitted scikit-learn estimator (supports .predict) or any callable that accepts feature matrices of shape (n_samples, n_features).
+            wavelengths (np.ndarray): 1D array of wavelength coordinates (in nanometers) defining the spectral grid the model expects.
+            feature_names (Optional[List[str]]): Optional list of feature names corresponding to `wavelengths`. If omitted, names are generated from `wavelengths` as strings formatted like "123.45nm".
+        """
         self.model = model
         self.wavelengths = wavelengths
         self.feature_names = feature_names or [f"{w:.2f}nm" for w in wavelengths]
@@ -700,7 +703,15 @@ class SpectralExplainer:
         logger.info(f"SpectralExplainer initialized with {len(wavelengths)} wavelengths")
 
     def _call_model(self, X: np.ndarray) -> np.ndarray:
-        """Helper to call model's predict method or the model itself."""
+        """
+        Invoke the wrapped model on the given feature matrix and return its predictions.
+        
+        Parameters:
+            X (np.ndarray): Input feature matrix with shape (n_samples, n_features).
+        
+        Returns:
+            np.ndarray: Model predictions. Shape is typically (n_samples,) for single-output models or (n_samples, n_outputs) for multi-output models.
+        """
         if hasattr(self.model, "predict"):
             return self.model.predict(X)
         return self.model(X)
@@ -712,24 +723,23 @@ class SpectralExplainer:
         n_samples: int = 100,
     ) -> SpectralExplanation:
         """
-        Generate SHAP explanation for a spectrum.
-
-        SHAP values indicate how each feature contributes to the model's
-        prediction relative to a baseline (expected value).
-
-        Parameters
-        ----------
-        spectrum : np.ndarray
-            Input spectrum to explain
-        background : np.ndarray, optional
-            Background samples for SHAP (default: zeros)
-        n_samples : int
-            Number of samples for SHAP estimation
-
-        Returns
-        -------
-        SpectralExplanation
-            SHAP-based explanation
+        Explain a spectrum's prediction by computing SHAP feature importances.
+        
+        Computes SHAP values for the provided spectrum using a Kernel SHAP explainer and returns a SpectralExplanation containing per-feature importances, wavelength-aligned importances, top features, the explainer baseline (expected value), and the model prediction. If `spectrum` is one-dimensional it will be treated as a single sample. If `background` is not provided, a zero-valued background of size `n_samples` is used. If the SHAP library is unavailable or SHAP computation fails, the method falls back to a permutation-based explanation.
+        
+        Parameters:
+            spectrum (np.ndarray): 1D or 2D array representing the input spectrum(s); a 1D array is interpreted as a single sample.
+            background (Optional[np.ndarray]): Background samples for SHAP KernelExplainer; must have shape (n_background, n_wavelengths). If omitted, a zero background of shape (n_samples, n_wavelengths) is used.
+            n_samples (int): Number of background/estimation samples to use for SHAP or fallback sampling.
+        
+        Returns:
+            SpectralExplanation: Explanation object with fields:
+                - method: "shap" (or fallback method if SHAP unavailable)
+                - feature_importances: mapping from feature name to SHAP value
+                - wavelength_importances: 1D array of SHAP values aligned to wavelengths
+                - top_features: list of top (feature_name, importance) tuples sorted by absolute importance
+                - base_value: explainer baseline (expected value) used by SHAP (0.0 if unavailable)
+                - prediction: model prediction for the provided spectrum
         """
         if not HAS_SHAP:
             logger.warning("SHAP not available, using permutation importance fallback")
@@ -792,10 +802,20 @@ class SpectralExplainer:
         n_samples: int = 100,
     ) -> SpectralExplanation:
         """
-        Fallback permutation importance explanation.
-
-        Measures importance by permuting each feature and measuring
-        change in prediction.
+        Estimate feature importances by measuring how random perturbations of each wavelength affect the model prediction.
+        
+        Parameters:
+            spectrum (np.ndarray): 1D or 2D array of spectral intensities aligned to self.wavelengths. If 1D, it is treated as a single sample.
+            n_samples (int): Number of random perturbations to apply per wavelength when estimating importance; larger values produce more stable estimates.
+        
+        Returns:
+            SpectralExplanation: Explanation object containing:
+                - method: "permutation"
+                - feature_importances: mapping from feature name to normalized importance (sum to 1.0 when non-zero)
+                - wavelength_importances: 1D array of importances aligned to self.wavelengths
+                - top_features: list of the top 20 features by absolute importance
+                - base_value: set to 0.0
+                - prediction: model prediction for the provided spectrum
         """
         if spectrum.ndim == 1:
             spectrum_2d = spectrum.reshape(1, -1)
@@ -852,26 +872,18 @@ class SpectralExplainer:
         kernel_width: float = 0.25,
     ) -> SpectralExplanation:
         """
-        Generate LIME explanation for a spectrum.
-
-        LIME fits a local linear model around the prediction to identify
-        which features are most important for this specific prediction.
-
-        Parameters
-        ----------
-        spectrum : np.ndarray
-            Input spectrum to explain
-        n_samples : int
-            Number of perturbed samples
-        n_features : int
-            Number of features in local model
-        kernel_width : float
-            Width of kernel for weighting samples
-
-        Returns
-        -------
-        SpectralExplanation
-            LIME-based explanation
+        Explain a spectrum using a LIME-style local linear surrogate to identify locally important wavelengths.
+        
+        If scikit-learn is unavailable, falls back to a permutation-based explanation. The function perturbs the input spectrum, weights perturbed samples by distance to the original using a Gaussian-like kernel, fits a weighted linear (Ridge) model on binary masks of perturbed features, and returns importances derived from that local model.
+        
+        Parameters:
+            spectrum (np.ndarray): 1D or 2D array representing the spectrum to explain (if 2D, the first row is used).
+            n_samples (int): Number of perturbed samples to generate.
+            n_features (int): Target number of features for the local linear model (kept for API compatibility).
+            kernel_width (float): Kernel width used to convert distances into sample weights.
+        
+        Returns:
+            SpectralExplanation: Explanation containing per-feature importances, wavelength importances array, sorted top features, base_value (set to 0.0), and the model prediction for the input spectrum.
         """
         if not HAS_SKLEARN:
             logger.warning("sklearn not available for LIME")
@@ -943,24 +955,17 @@ class SpectralExplainer:
         smooth_sigma: float = 5.0,
     ) -> np.ndarray:
         """
-        Compute saliency map showing influential wavelength regions.
-
-        Uses gradient-based attribution if model supports gradients,
-        otherwise falls back to finite differences.
-
-        Parameters
-        ----------
-        spectrum : np.ndarray
-            Input spectrum
-        target_output : int
-            Target output index (for multi-output models)
-        smooth_sigma : float
-            Gaussian smoothing sigma for saliency map
-
-        Returns
-        -------
-        np.ndarray
-            Saliency map (same shape as spectrum)
+        Compute a saliency map that highlights which wavelengths most influence the model's output.
+        
+        The saliency at each wavelength is an importance score (normalized to a maximum of 1.0) aligned with self.wavelengths. Importance is derived from the change in the model's prediction with respect to small perturbations of the input at each wavelength and is multiplied by the local spectrum intensity. Optionally applies Gaussian smoothing to the saliency curve.
+        
+        Parameters:
+            spectrum (np.ndarray): 1D or 2D spectrum; if 1D it is treated as a single sample.
+            target_output (int): Index of the output to attribute for multi-output models.
+            smooth_sigma (float): Standard deviation for optional Gaussian smoothing; values <= 0 disable smoothing.
+        
+        Returns:
+            np.ndarray: 1D saliency map aligned to self.wavelengths with values in [0, 1].
         """
         if spectrum.ndim == 1:
             spectrum_2d = spectrum.reshape(1, -1)
@@ -1049,7 +1054,13 @@ class ExplanationValidator:
         )
 
     def _load_known_lines(self) -> List[Dict[str, Any]]:
-        """Load known emission lines from atomic database."""
+        """
+        Retrieve known emission lines for the extractor's configured elements from the atomic database.
+        
+        Returns:
+            lines (List[Dict[str, Any]]): List of line records sorted by `rel_int` descending. Each record contains the keys
+            `element`, `sp_num`, `wavelength_nm`, and `rel_int`. Only lines with `rel_int` >= 100 are included.
+        """
         columns = ["element", "sp_num", "wavelength_nm", "rel_int"]
         return _load_lines_from_db(self.db_path, self.elements, columns, min_rel_int=100)
 
@@ -1059,19 +1070,22 @@ class ExplanationValidator:
         wavelengths: np.ndarray,
     ) -> ValidationResult:
         """
-        Validate an explanation against spectroscopic knowledge.
-
-        Parameters
-        ----------
-        explanation : SpectralExplanation
-            Model explanation to validate
-        wavelengths : np.ndarray
-            Wavelength axis [nm]
-
-        Returns
-        -------
-        ValidationResult
-            Validation results with matched/unmatched features
+        Assess whether an explanation's important features align with known emission lines.
+        
+        Examines features in `explanation.feature_importances` whose absolute importance meets the validator's threshold, attempts to map each feature to a known emission line (using the provided `wavelengths` axis), and computes a validation score equal to the sum of absolute importance for matched features divided by total absolute importance. Also collects matched and unmatched features, flags potential spurious correlations when a single unmatched feature contributes a large fraction of total importance, and produces compact recommendations. A result is considered valid when the validation score is at least 0.5 and fewer than five spurious correlations are detected.
+        
+        Parameters:
+            explanation (SpectralExplanation): Explanation containing feature importances to validate.
+            wavelengths (np.ndarray): Wavelength axis in nanometers used to resolve feature names to numeric wavelengths.
+        
+        Returns:
+            ValidationResult: Validation outcome including:
+                - is_valid: whether the explanation passes the validator's criteria,
+                - score: fraction of total importance that matches known emission lines,
+                - matched_lines: list of tuples (element, wavelength, importance) for matched features,
+                - unmatched_features: list of tuples (feature_name, importance) for unmatched features,
+                - spurious_correlations: descriptive warnings for high-importance unmatched features,
+                - recommendations: actionable suggestions based on the validation results.
         """
         matched_lines: List[Tuple[str, float, float]] = []
         unmatched_features: List[Tuple[str, float]] = []

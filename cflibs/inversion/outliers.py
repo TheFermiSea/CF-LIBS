@@ -637,21 +637,15 @@ class MADOutlierDetector:
 
     def compute_mad(self, data: np.ndarray, axis: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute median and MAD of data.
-
-        Parameters
-        ----------
-        data : np.ndarray
-            Input data
-        axis : int, optional
-            Axis along which to compute. None for flattened array.
-
-        Returns
-        -------
-        median : np.ndarray
-            Median value(s)
-        mad : np.ndarray
-            MAD value(s)
+        Compute the median and median absolute deviation (MAD) of the input array.
+        
+        Parameters:
+            data (np.ndarray): Input array.
+            axis (int, optional): Axis along which to compute the statistics. If None, computation is performed over the flattened array.
+        
+        Returns:
+            median (np.ndarray): Median values. Shape matches `data` with the specified `axis` removed (or a scalar/1D array when `axis` is None).
+            mad (np.ndarray): Median absolute deviation values computed as the median of |data - median| along the same axis.
         """
         median = np.median(data, axis=axis, keepdims=True if axis is not None else False)
         deviations = np.abs(data - median)

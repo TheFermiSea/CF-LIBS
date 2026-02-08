@@ -1180,31 +1180,20 @@ class MCMCSampler:
         progress_bar: bool = True,
     ) -> MCMCResult:
         """
-        Run MCMC sampling.
-
-        Parameters
-        ----------
-        observed : array
-            Observed spectrum
-        num_warmup : int
-            Number of warmup samples (default: 500)
-        num_samples : int
-            Number of posterior samples (default: 1000)
-        num_chains : int
-            Number of MCMC chains (default: 1, use 4 for production)
-        seed : int
-            Random seed
-        target_accept_prob : float
-            Target acceptance probability for NUTS (default: 0.8)
-        max_tree_depth : int
-            Maximum tree depth for NUTS (default: 10)
-        progress_bar : bool
-            Show progress bar (default: True)
-
-        Returns
-        -------
-        MCMCResult
-            Results with posterior samples and convergence diagnostics
+        Run the NUTS MCMC sampler to infer plasma parameters from an observed spectrum.
+        
+        Parameters:
+            observed (np.ndarray): Observed spectrum (intensity per wavelength bin).
+            num_warmup (int): Number of warmup (tuning) iterations per chain.
+            num_samples (int): Number of posterior samples to collect per chain.
+            num_chains (int): Number of independent MCMC chains to run.
+            seed (int): Random seed for reproducibility.
+            target_accept_prob (float): Target acceptance probability for NUTS.
+            max_tree_depth (int): Maximum tree depth allowed for the NUTS integrator.
+            progress_bar (bool): Whether to show the sampling progress bar.
+        
+        Returns:
+            MCMCResult: Container with posterior samples, summary statistics (means, std, 2.5/97.5 percentiles), convergence diagnostics (R-hat, ESS, convergence status), sampling metadata, and optional ArviZ InferenceData.
         """
         import jax.random as random
 
@@ -1389,7 +1378,12 @@ class MCMCSampler:
             return ConvergenceStatus.NOT_CONVERGED
 
     def _to_arviz(self, mcmc: Any) -> Any:
-        """Convert MCMC results to ArviZ InferenceData."""
+        """
+        Convert MCMC results to an ArviZ InferenceData object.
+        
+        Returns:
+            ArviZ `InferenceData` if ArviZ is available and conversion succeeds, `None` otherwise.
+        """
         if not HAS_ARVIZ:
             return None
 

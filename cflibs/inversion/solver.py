@@ -90,20 +90,25 @@ class IterativeCFLIBSSolver:
         self, observations: List[LineObservation], closure_mode: str = "standard", **closure_kwargs
     ) -> CFLIBSResult:
         """
-        Solve for plasma parameters.
-
-        Parameters
-        ----------
-        observations : List[LineObservation]
-            Spectral lines
-        closure_mode : str
-            'standard', 'matrix', or 'oxide'
-        closure_kwargs : dict
-            Arguments for closure equation (e.g. matrix_element)
-
-        Returns
-        -------
-        CFLIBSResult
+        Invert plasma temperature, electron density, and species mass fractions from spectral line observations using the iterative CF-LIBS solver.
+        
+        Parameters:
+            observations (List[LineObservation]): Measured spectral line observations grouped by element.
+            closure_mode (str): Closure equation mode to determine concentrations; one of "standard", "matrix", or "oxide".
+            **closure_kwargs: Additional keyword arguments passed to the selected closure routine (for example, `matrix_element` or `matrix_fraction` when `closure_mode="matrix"`).
+        
+        Returns:
+            CFLIBSResult: Result container with inferred plasma parameters and metadata. Fields of interest:
+                - temperature_K: inferred plasma temperature in Kelvin.
+                - temperature_uncertainty_K: reported temperature uncertainty (0.0 if not propagated by this solver).
+                - electron_density_cm3: inferred electron density in cm^-3.
+                - electron_density_uncertainty_cm3: reported electron density uncertainty (0.0 if not propagated).
+                - concentrations: mapping of element -> mass fraction (sums to ~1).
+                - concentration_uncertainties: mapping of element -> 1-sigma uncertainty (empty / zeros if not propagated).
+                - iterations: number of iterations performed.
+                - converged: whether the iterative solver met convergence criteria.
+                - quality_metrics: diagnostic metrics (e.g., placeholder `r_squared_last`).
+                - boltzmann_covariance: optional covariance from the final Boltzmann fit (None if unavailable).
         """
         # 1. Initialization
         T_K = 10000.0

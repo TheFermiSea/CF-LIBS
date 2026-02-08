@@ -267,7 +267,17 @@ class QualityAssessor:
         self,
         observations: List[LineObservation],
     ) -> Tuple[Dict[str, float], Dict[str, float]]:
-        """Compute R² and T for each element separately."""
+        """
+        Compute per-element Boltzmann fit R² values and element temperatures from line observations.
+        
+        Parameters:
+            observations (List[LineObservation]): Line observations to group by element and fit.
+        
+        Returns:
+            r_squared_by_element (Dict[str, float]): Mapping from element symbol to the fit R² for that element.
+            temp_by_element (Dict[str, float]): Mapping from element symbol to the Boltzmann temperature in Kelvin for elements
+                whose fitted temperature is finite and greater than zero.
+        """
 
         obs_by_element = defaultdict(list)
         for obs in observations:
@@ -300,16 +310,20 @@ class QualityAssessor:
         partition_funcs_II: Dict[str, float],
     ) -> Tuple[float, float]:
         """
-        Check Saha-Boltzmann consistency.
-
-        Compare the temperature from Boltzmann slope to the temperature
-        that would be needed to reproduce observed ion/neutral intensity ratios
-        via Saha equation.
-
-        Returns
-        -------
-        Tuple[float, float]
-            (relative_difference, T_saha_estimate)
+        Assess consistency between the provided Boltzmann temperature and ion/neutral intensity ratios using a simplified Saha-based check.
+        
+        Groups observations by element and ionization stage; for elements with both neutral (I) and singly ionized (II) lines and positive mean intensities, the function currently records the input temperature as the Saha-derived estimate (placeholder for a full solver) and computes the relative difference between the input temperature and the mean Saha estimates.
+        
+        Parameters:
+            observations (List[LineObservation]): Measured spectral line observations with element, ionization_stage, and intensity fields.
+            temperature_K (float): Boltzmann temperature (K) to compare against.
+            electron_density_cm3 (float): Electron density (cm^-3). Accepted for API compatibility but not used in the current simplified implementation.
+            ionization_potentials (Dict[str, float]): Per-element ionization potentials. Accepted for API compatibility but not used.
+            partition_funcs_I (Dict[str, float]): Partition functions for neutral stage. Accepted for API compatibility but not used.
+            partition_funcs_II (Dict[str, float]): Partition functions for singly ionized stage. Accepted for API compatibility but not used.
+        
+        Returns:
+            Tuple[float, float]: `consistency` — relative difference between `temperature_K` and the Saha-derived temperature (|T - T_saha|/T, 0.0 if T <= 0); `t_saha` — mean Saha-derived temperature in Kelvin (falls back to `temperature_K` if no valid element pairs are found).
         """
         # Unused parameters kept for API compatibility
         _ = electron_density_cm3, ionization_potentials, partition_funcs_I, partition_funcs_II

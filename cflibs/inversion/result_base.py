@@ -84,7 +84,23 @@ class ResultTableMixin:
         ci: Optional[Tuple[float, float]] = None,
         include_ci: bool = True,
     ) -> str:
-        """Format a parameter row with exponential notation."""
+        """
+        Format a single parameter row using exponential (scientific) notation.
+        
+        Constructs a fixed-width line with the parameter label, the mean in scientific notation,
+        optionally the standard deviation in scientific notation, and optionally a confidence
+        interval shown as `[low, high]` in scientific notation.
+        
+        Parameters:
+            label (str): Parameter name to display (left-aligned in the row).
+            mean (float): Mean value to format in scientific notation.
+            std (Optional[float]): Standard deviation to format in scientific notation; omitted if None.
+            ci (Optional[Tuple[float, float]]): Confidence interval as (low, high); included if provided and allowed.
+            include_ci (bool): When True and `ci` is provided, append the CI bracket to the row.
+        
+        Returns:
+            str: A single formatted table row containing the label, mean, optional std, and optional CI.
+        """
         base = f"{label:<20} {mean:>12.2e}"
         if std is not None:
             base += f" {std:>12.2e}"
@@ -100,7 +116,19 @@ class ResultTableMixin:
         ci: Optional[Tuple[float, float]] = None,
         include_ci: bool = True,
     ) -> str:
-        """Format a parameter row with integer formatting (for temperature K)."""
+        """
+        Format a table row for an integer-valued parameter (e.g., temperature in K).
+        
+        Parameters:
+        	label (str): Parameter label shown in the first column.
+        	mean (float): Mean value; rendered with no decimal places.
+        	std (float): Standard deviation; rendered with no decimal places.
+        	ci (Optional[Tuple[float, float]]): Optional confidence interval as (low, high); rendered with no decimal places inside square brackets.
+        	include_ci (bool): If True and `ci` is provided, append the CI to the row.
+        
+        Returns:
+        	row (str): A single formatted table row with label, mean, std, and optional CI.
+        """
         if include_ci and ci is not None:
             ci_str = f"[{ci[0]:.0f}, {ci[1]:.0f}]"
             return f"{label:<20} {mean:>12.0f} {std:>12.0f} {ci_str:>20}"

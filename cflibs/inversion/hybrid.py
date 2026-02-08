@@ -83,7 +83,16 @@ class HybridInversionResult:
         return self.temperature_eV * EV_TO_K
 
     def summary(self) -> str:
-        """Generate human-readable summary."""
+        """
+        Return a human-readable multi-line summary of the inversion results, including coarse initialization, optimized parameters, per-element concentrations, and convergence information.
+        
+        Returns:
+            summary (str): Multi-line string containing:
+                - coarse manifold temperature (eV), electron density (cm^-3), and similarity;
+                - optimized temperature (eV) and electron density (cm^-3);
+                - concentrations for each element;
+                - convergence status, iteration count, and final residual.
+        """
         lines = [
             "Hybrid Inversion Result",
             f"  Coarse (manifold): T={self.coarse_temperature_eV:.3f} eV, "
@@ -103,7 +112,18 @@ class HybridInversionResult:
 
 
 def _pack_params(T_eV, n_e, concentrations, elements):
-    """Pack plasma parameters into an optimization vector (log-space)."""
+    """
+    Pack plasma parameters into a 1-D optimization vector in log-space.
+    
+    Parameters:
+        T_eV (float): Electron temperature in electronvolts.
+        n_e (float): Electron density (in the same units used by the optimizer).
+        concentrations (dict): Mapping from element name to concentration value; missing elements default to 0.01.
+        elements (Sequence[str]): Ordered list of element names that determines the concentration ordering in the output vector.
+    
+    Returns:
+        jnp.ndarray: 1-D array whose entries are [log(T_eV), log(n_e), log(conc_i)...] with concentrations ordered according to `elements`. Concentration values are clamped to a minimum of 1e-6 before taking the logarithm.
+    """
     log_T = jnp.log(T_eV)
     log_ne = jnp.log(n_e)
     conc_arr = jnp.array([concentrations.get(el, 0.01) for el in elements])
@@ -113,7 +133,19 @@ def _pack_params(T_eV, n_e, concentrations, elements):
 
 
 def _unpack_params(x):
-    """Unpack optimization vector to (T_eV, n_e, concentrations)."""
+    """
+    Interpret an optimization vector and return physical parameters.
+    
+    The input vector `x` is expected to contain: natural-log of electron temperature (first entry), natural-log of electron density (second entry), and logits for element concentrations (remaining entries). The concentration logits are converted to normalized fractions that sum to 1.
+    
+    Parameters:
+        x (array-like): 1D vector with length 2 + N (N = number of elements).
+    
+    Returns:
+        T_eV (float): Electron temperature in electronvolts (eV).
+        n_e (float): Electron density in units consistent with the optimizer (per cm³ in this module).
+        concentrations (array): Normalized concentration fractions for each element that sum to 1.
+    """
     T_eV = jnp.exp(x[0])
     n_e = jnp.exp(x[1])
     conc = jax.nn.softmax(x[2:])
@@ -303,11 +335,27 @@ class HybridInverter:
     def _pack_params(
         self, T_eV: float, n_e: float, concentrations: Dict[str, float]
     ) -> jnp.ndarray:
-        """Pack parameters into optimization vector."""
+        """
+        Create an optimization vector from physical parameters for the inverter.
+        
+        Returns:
+            jnp.ndarray: 1-D vector containing log(T_eV), log(n_e), followed by concentration parameters (one per element) in the instance's element order.
+        """
         return _pack_params(T_eV, n_e, concentrations, self.elements)
 
     def _unpack_params(self, x: jnp.ndarray) -> Tuple[float, float, jnp.ndarray]:
-        """Unpack optimization vector to parameters."""
+        """
+        Convert a packed optimization vector into physical parameters: temperature, electron density, and element concentrations.
+        
+        Parameters:
+            x (jnp.ndarray): Optimization vector with layout [log(T_eV), log(n_e), concentration_logits...].
+        
+        Returns:
+            Tuple[float, float, jnp.ndarray]: A tuple containing
+                - T_eV (float): Temperature in electronvolts.
+                - n_e (float): Electron density in cm^-3.
+                - concentrations (jnp.ndarray): Non-negative concentrations for each element that sum to 1.
+        """
         return _unpack_params(x)
 
     def _default_forward_model(
@@ -318,26 +366,16 @@ class HybridInverter:
         wavelength: jnp.ndarray,
     ) -> jnp.ndarray:
         """
-        Simple forward model for testing.
-
-        This is a simplified Gaussian emission model. For production use,
-        provide a full physics-based forward model.
-
-        Parameters
-        ----------
-        T_eV : float
-            Temperature in eV
-        n_e : float
-            Electron density
-        concentrations : array
-            Element concentrations
-        wavelength : array
-            Wavelength grid
-
-        Returns
-        -------
-        array
-            Predicted spectrum
+        Generate a synthetic Gaussian-emission spectrum for testing.
+        
+        Parameters:
+            T_eV (float): Temperature in electronvolts.
+            n_e (float): Electron density (units consistent with forward-model assumptions).
+            concentrations (jnp.ndarray): Per-element concentrations; length must match the inverter's element list.
+            wavelength (jnp.ndarray): Wavelength grid on which to evaluate the spectrum.
+        
+        Returns:
+            jnp.ndarray: Predicted spectrum sampled on `wavelength`, one intensity value per wavelength.
         """
         # This is a placeholder - in production, use the ManifoldGenerator's
         # _compute_spectrum_snapshot or a similar physics-based model
@@ -422,29 +460,19 @@ class SpectralFitter:
         max_iterations: int = 100,
     ) -> HybridInversionResult:
         """
-        Fit spectrum to data using gradient descent.
-
-        Parameters
-        ----------
-        measured_spectrum : array
-            Measured spectrum
-        initial_T_eV : float
-            Initial temperature guess
-        initial_n_e : float
-            Initial electron density guess
-        initial_concentrations : dict, optional
-            Initial concentration guess per element
-        uncertainties : array, optional
-            Spectral uncertainties
-        method : str
-            Optimization method
-        max_iterations : int
-            Maximum iterations
-
-        Returns
-        -------
-        HybridInversionResult
-            Fitting results
+        Perform a gradient-based fit of a measured spectrum to the configured forward model and return the fitted plasma parameters.
+        
+        Parameters:
+            measured_spectrum (np.ndarray): Observed spectral intensities on the instance wavelength grid.
+            initial_T_eV (float): Initial guess for electron temperature in electronvolts (default 1.0).
+            initial_n_e (float): Initial guess for electron density in cm^-3 (default 1e17).
+            initial_concentrations (Optional[Dict[str, float]]): Initial per-element concentration guesses; if None, a uniform distribution across elements is used.
+            uncertainties (Optional[np.ndarray]): Per-wavelength uncertainties; if None, defaults to sqrt(max(measured, 1.0)) per wavelength.
+            method (str): Optimization method name passed to the underlying optimizer (default "BFGS").
+            max_iterations (int): Maximum number of optimizer iterations (default 100).
+        
+        Returns:
+            HybridInversionResult: Result container with fitted temperature, electron density, per-element concentrations, the initial (coarse) guesses, final residual (loss), convergence flag, iteration count, and method.
         """
         measured = jnp.array(measured_spectrum)
 
@@ -501,9 +529,30 @@ class SpectralFitter:
         )
 
     def _pack(self, T_eV: float, n_e: float, concentrations: Dict[str, float]) -> jnp.ndarray:
-        """Pack parameters."""
+        """
+        Convert physical plasma parameters into a packed optimization vector.
+        
+        Parameters:
+            T_eV (float): Electron temperature in electronvolts.
+            n_e (float): Electron density in cm^-3.
+            concentrations (Dict[str, float]): Mapping from element name to its relative concentration (non-negative, not necessarily normalized).
+        
+        Returns:
+            jnp.ndarray: 1D vector containing [log(T_eV), log(n_e), ...] followed by the (unnormalized) concentration logits in the order of this instance's element list.
+        """
         return _pack_params(T_eV, n_e, concentrations, self.elements)
 
     def _unpack(self, x: jnp.ndarray) -> Tuple[float, float, jnp.ndarray]:
-        """Unpack parameters."""
+        """
+        Convert an optimization vector into physical model parameters: temperature (eV), electron density (cm⁻³), and element concentrations.
+        
+        Parameters:
+            x (jnp.ndarray): Optimization vector containing [log(T_eV), log(n_e), ...concentration_logits...].
+        
+        Returns:
+            Tuple[float, float, jnp.ndarray]: A tuple of
+                - T_eV (float): Temperature in electron volts (positive).
+                - n_e (float): Electron density in cm⁻³ (positive).
+                - concentrations (jnp.ndarray): Non-negative element concentrations that sum to 1.
+        """
         return _unpack_params(x)

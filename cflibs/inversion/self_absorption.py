@@ -80,7 +80,17 @@ M_PROTON = 1.6726219e-27  # kg
 
 
 def _escape_factor(tau: float) -> float:
-    """Photon escape factor f(tau) = (1 - exp(-tau)) / tau."""
+    """
+    Return the photon escape factor f(tau) = (1 - exp(-tau)) / tau, with stable edge-case handling.
+    
+    For tau below 1e-10 this returns 1.0; for tau above 50 this returns 1.0 / tau to avoid numerical issues.
+    
+    Parameters:
+        tau: line-center optical depth.
+    
+    Returns:
+        f_tau: the escape factor for the given optical depth.
+    """
     if tau < 1e-10:
         return 1.0
     elif tau > 50:
@@ -439,12 +449,16 @@ class SelfAbsorptionCorrector:
         tau_initial: float,
     ) -> AbsorptionCorrectionResult:
         """
-        Apply recursive self-absorption correction.
-
-        The correction factor for a Gaussian line profile is:
-        f(τ) = (1 - exp(-τ)) / τ
-
-        I_true = I_measured / f(τ)
+        Refine a line's measured intensity for self-absorption by iteratively applying the escape-factor correction.
+        
+        Performs iterative updates to estimate the true line intensity using the photon escape factor f(τ) = (1 - exp(-τ)) / τ and stops when the relative change is below the configured convergence tolerance or max iterations is reached.
+        
+        Parameters:
+            obs (LineObservation): Observation containing the measured intensity and uncertainty.
+            tau_initial (float): Initial estimate of the line-center optical depth τ to seed the iteration.
+        
+        Returns:
+            AbsorptionCorrectionResult: Result containing the original and corrected intensities, the initial optical depth provided, the applied correction factor (original / corrected, 0.0 if corrected intensity is zero), a boolean flag indicating whether the line was initially optically thick (τ > 1.0), and the number of iterations performed.
         """
         tau = tau_initial
         I_corrected = obs.intensity

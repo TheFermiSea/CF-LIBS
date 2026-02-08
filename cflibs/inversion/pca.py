@@ -485,7 +485,21 @@ class PCAPipeline:
         n_samples: int,
         n_features: int,
     ) -> int:
-        """Resolve n_components parameter to actual component count."""
+        """
+        Determine the concrete number of principal components to compute from the configured `n_components`.
+        
+        Parameters:
+            n_components (int | float | None): If an int, the exact number of components to keep. If a float in (0, 1), it represents the target fraction of explained variance and will be resolved after SVD (this function returns the maximum feasible components for now). If `None`, all possible components are used.
+            n_samples (int): Number of samples in the input data; used together with `n_features` to compute the upper bound.
+            n_features (int): Number of features in the input data; used together with `n_samples` to compute the upper bound.
+        
+        Returns:
+            int: The resolved number of components (>=1 and <= min(n_samples, n_features)).
+        
+        Raises:
+            ValueError: If a float `n_components` is not in (0, 1), if an int `n_components` is less than 1, or if an int `n_components` exceeds min(n_samples, n_features).
+            TypeError: If `n_components` is not an int, float, or None.
+        """
         max_components = min(n_samples, n_features)
 
         if n_components is None:
@@ -519,7 +533,16 @@ class PCAPipeline:
         explained_variance_ratio: np.ndarray,
         n_components: int,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
-        """Apply variance selection if n_components is a float."""
+        """
+        Trim PCA arrays when the desired component count was specified as a variance fraction.
+        
+        If the pipeline's `n_components` is a float in (0, 1), this selects the minimum number of leading components whose cumulative explained variance ratio
+        reaches or exceeds that fraction, slices `components`, `singular_values`, `explained_variance`, and `explained_variance_ratio` accordingly, and updates `n_components`.
+        
+        Returns:
+            A tuple with the possibly-trimmed `(components, singular_values, explained_variance, explained_variance_ratio, n_components)`,
+            where `n_components` is the integer number of components kept.
+        """
         if isinstance(self.n_components, float):
             cumvar = np.cumsum(explained_variance_ratio)
             n_keep = np.searchsorted(cumvar, self.n_components) + 1
@@ -546,7 +569,18 @@ class PCAPipeline:
         mean: np.ndarray,
         total_variance: float,
     ) -> PCAResult:
-        """Fit PCA using NumPy SVD."""
+        """
+        Compute PCA by performing SVD with NumPy (and optionally SciPy's randomized SVD) and assemble a PCAResult.
+        
+        Parameters:
+            X_centered (np.ndarray): Centered data matrix with shape (n_samples, n_features).
+            n_components (int): Number of principal components to retain (may be adjusted if variance-based selection is applied).
+            mean (np.ndarray): Feature-wise mean that was subtracted from the original data.
+            total_variance (float): Total variance of the centered training data used to compute explained variance ratios.
+        
+        Returns:
+            PCAResult: Fitted PCA result containing components (rows are principal components), singular values, explained variance, explained variance ratio, mean, counts (n_components, n_features, n_samples), and total_variance.
+        """
         n_samples = X_centered.shape[0]
 
         # SVD: X = U @ S @ Vt
@@ -614,7 +648,25 @@ class PCAPipeline:
         mean: np.ndarray,
         total_variance: float,
     ) -> PCAResult:
-        """Fit PCA using JAX SVD (GPU-accelerated)."""
+        """
+        Compute PCA using JAX SVD and return a PCAResult with JAX-backed arrays for fast transforms.
+        
+        Parameters:
+            X_centered (np.ndarray): Centered input data with shape (n_samples, n_features).
+            n_components (int): Number of principal components to compute (may be trimmed by variance selection).
+            mean (np.ndarray): Feature-wise mean used to center the training data.
+            total_variance (float): Total variance of the centered training data used to compute explained variance ratios.
+        
+        Returns:
+            PCAResult: Fitted PCAResult containing:
+                - components (np.ndarray): Principal components (n_components, n_features).
+                - explained_variance (np.ndarray): Per-component variances.
+                - explained_variance_ratio (np.ndarray): Per-component explained variance fractions.
+                - singular_values (np.ndarray): Singular values corresponding to components.
+                - mean (np.ndarray): Provided mean vector.
+                - n_components, n_features, n_samples, total_variance metadata.
+                - _components_jax, _mean_jax: JAX arrays of components and mean for accelerated transforms.
+        """
         if not HAS_JAX:
             raise RuntimeError("JAX not available")
 

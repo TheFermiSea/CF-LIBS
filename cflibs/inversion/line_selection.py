@@ -167,20 +167,29 @@ class LineSelector:
         atomic_uncertainties: Optional[Dict[Tuple[str, int, float], float]] = None,
     ) -> LineSelectionResult:
         """
-        Select optimal lines for CF-LIBS analysis.
-
-        Parameters
-        ----------
-        observations : List[LineObservation]
-            All candidate line observations
-        resonance_lines : Set[Tuple[str, int, float]], optional
-            Set of (element, ion_stage, wavelength) for resonance lines
-        atomic_uncertainties : Dict[Tuple[str, int, float], float], optional
-            Atomic data uncertainties by (element, ion_stage, wavelength)
-
-        Returns
-        -------
-        LineSelectionResult
+        Select optimal spectral lines from candidate observations for CF-LIBS analysis.
+        
+        Scores each candidate using SNR, atomic data uncertainty, and spectral isolation, applies configured filters
+        (minimum SNR, optional resonance exclusion, isolation threshold), groups surviving lines by element, enforces
+        per-element maximum and minimum counts, checks energy spread per element, and returns selected and rejected lines
+        along with scores, overall energy spread, element count, and any warnings.
+        
+        Parameters:
+            observations (List[LineObservation]): Candidate line observations to evaluate.
+            resonance_lines (Optional[Set[Tuple[str, int, float]]]): Optional set of (element, ion_stage, wavelength)
+                identifying resonance lines to be treated specially; defaults to empty set.
+            atomic_uncertainties (Optional[Dict[Tuple[str, int, float], float]]): Optional mapping from
+                (element, ion_stage, wavelength) to relative atomic-data uncertainty (fractional, e.g., 0.10 for 10%);
+                defaults to an empty mapping and falls back to a file-level default when entries are absent.
+        
+        Returns:
+            LineSelectionResult: Aggregated selection outcome containing:
+                - selected_lines: chosen LineObservation objects
+                - rejected_lines: LineObservation objects excluded during filtering or by per-element limits
+                - scores: list of LineScore entries for all evaluated observations
+                - energy_spread_ev: overall energy spread (eV) across selected lines
+                - n_elements: number of distinct elements represented in the grouping
+                - warnings: list of warning messages produced during selection
         """
         if resonance_lines is None:
             resonance_lines = set()
@@ -345,19 +354,15 @@ class LineSelector:
         n_per_element: int = 5,
     ) -> Dict[str, List[LineObservation]]:
         """
-        Recommend the best lines for each element.
-
-        Parameters
-        ----------
-        observations : List[LineObservation]
-            All candidate lines
-        n_per_element : int
-            Number of lines to recommend per element
-
-        Returns
-        -------
-        Dict[str, List[LineObservation]]
-            Best lines by element
+        Return top recommended spectral lines per element based on the selector's scoring and filtering.
+        
+        Parameters:
+            observations (List[LineObservation]): Candidate lines to evaluate.
+            n_per_element (int): Maximum number of lines to recommend per element.
+        
+        Returns:
+            Dict[str, List[LineObservation]]: Mapping from element symbol to a list of up to
+            `n_per_element` recommended LineObservation objects, ordered by descending score.
         """
         result = self.select(observations)
 

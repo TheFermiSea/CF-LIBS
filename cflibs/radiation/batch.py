@@ -69,14 +69,16 @@ def compute_spectrum_batch(
 
 
 def _apply_params_to_plasma(plasma, params: dict) -> None:
-    """Apply parameter dictionary to a plasma object.
-
-    Parameters
-    ----------
-    plasma : SingleZoneLTEPlasma
-        Plasma state to modify in-place
-    params : dict
-        Parameter values keyed by name (T_e_eV, n_e, or species names)
+    """
+    Apply parameter values to a SingleZoneLTEPlasma object in-place.
+    
+    Recognizes the keys "T_e_eV" and "n_e" to set plasma.T_e_eV and plasma.n_e respectively; any other keys that match entries in plasma.species will update those species values.
+    
+    Parameters:
+        plasma: SingleZoneLTEPlasma
+            Plasma state to modify in-place.
+        params: dict
+            Mapping of parameter names to values. Expected keys include "T_e_eV", "n_e", or species names present in plasma.species.
     """
     if "T_e_eV" in params:
         plasma.T_e_eV = params["T_e_eV"]
@@ -94,34 +96,16 @@ def compute_spectrum_grid(
     n_workers: Optional[int] = None,
 ) -> Tuple[List[Dict[str, float]], List[Tuple[np.ndarray, np.ndarray]]]:
     """
-    Compute spectra for a grid of parameter values.
-
-    Parameters
-    ----------
-    base_model : SpectrumModel
-        Base model to use as template
-    parameter_grid : Dict[str, List[float]]
-        Dictionary mapping parameter names to lists of values.
-        Supported parameters: 'T_e_eV', 'n_e', and species names.
-    n_workers : int, optional
-        Number of worker threads
-
-    Returns
-    -------
-    parameters : List[Dict[str, float]]
-        List of parameter dictionaries for each spectrum
-    spectra : List[Tuple[np.ndarray, np.ndarray]]
-        List of (wavelength, intensity) tuples
-
-    Example
-    -------
-    >>> base = SpectrumModel(...)
-    >>> grid = {
-    ...     'T_e_eV': [0.8, 1.0, 1.2],
-    ...     'n_e': [1e16, 1e17],
-    ...     'Ti': [1e15, 2e15]
-    ... }
-    >>> params, spectra = compute_spectrum_grid(base, grid)
+    Compute spectra for every combination of parameter values in `parameter_grid` using `base_model` as a template.
+    
+    Parameters:
+        base_model (SpectrumModel): Template model whose plasma will be copied and updated for each parameter combination.
+        parameter_grid (Dict[str, List[float]]): Mapping from parameter names to lists of values to sweep. Supported keys include 'T_e_eV', 'n_e', and species names present in the model's plasma.
+        n_workers (Optional[int]): Number of worker threads/processes to use for parallel computation (defaults to automatic selection).
+    
+    Returns:
+        parameters (List[Dict[str, float]]): List of parameter dictionaries corresponding to each computed spectrum, in the same order as the returned spectra.
+        spectra (List[Tuple[np.ndarray, np.ndarray]]): List of (wavelength, intensity) tuples for each parameter combination, preserving the input order.
     """
     from itertools import product
     from copy import deepcopy
@@ -163,36 +147,17 @@ def compute_spectrum_ensemble(
     n_workers: Optional[int] = None,
 ) -> Tuple[List[Dict[str, float]], List[Tuple[np.ndarray, np.ndarray]]]:
     """
-    Compute spectra for an ensemble of random parameter samples.
-
-    Parameters
-    ----------
-    base_model : SpectrumModel
-        Base model to use as template
-    n_samples : int
-        Number of samples to generate
-    parameter_distributions : Dict[str, callable]
-        Dictionary mapping parameter names to distribution functions.
-        Each function should take no arguments and return a float.
-    n_workers : int, optional
-        Number of worker threads
-
-    Returns
-    -------
-    parameters : List[Dict[str, float]]
-        List of sampled parameter dictionaries
-    spectra : List[Tuple[np.ndarray, np.ndarray]]
-        List of (wavelength, intensity) tuples
-
-    Example
-    -------
-    >>> import numpy as np
-    >>> base = SpectrumModel(...)
-    >>> dists = {
-    ...     'T_e_eV': lambda: np.random.normal(1.0, 0.1),
-    ...     'n_e': lambda: 10**np.random.uniform(16, 18)
-    ... }
-    >>> params, spectra = compute_spectrum_ensemble(base, 100, dists)
+    Compute spectra for an ensemble of parameter sets sampled from the provided distributions.
+    
+    Parameters:
+        base_model (SpectrumModel): Template model whose deep copies are used for each sample.
+        n_samples (int): Number of parameter samples to generate.
+        parameter_distributions (Dict[str, callable]): Mapping of parameter names to zero-argument callables that return a float for each sample.
+        n_workers (Optional[int]): Number of worker threads/processes to use for spectrum computation (optional).
+    
+    Returns:
+        parameters (List[Dict[str, float]]): List of sampled parameter dictionaries in the same order spectra were computed.
+        spectra (List[Tuple[np.ndarray, np.ndarray]]): List of (wavelength, intensity) tuples corresponding to each sampled parameter set.
     """
     from copy import deepcopy
 

@@ -365,7 +365,15 @@ class MatrixCorrectionResult:
 
 
 def _dummy_cflibs_result(concentrations: Dict[str, float]) -> CFLIBSResult:
-    """Create a minimal CFLIBSResult for compatibility."""
+    """
+    Build a minimal CFLIBSResult populated with the given concentrations.
+    
+    Parameters:
+        concentrations (Dict[str, float]): Mapping of element symbols to their measured concentrations (e.g., mass or fractional abundances).
+    
+    Returns:
+        CFLIBSResult: A CFLIBSResult containing the provided concentrations and nominal placeholder metadata required by functions that expect a full CFLIBSResult.
+    """
     return CFLIBSResult(
         temperature_K=10000.0,
         temperature_uncertainty_K=0.0,
@@ -663,20 +671,14 @@ class MatrixEffectCorrector:
         matrix_type: Optional[MatrixType] = None,
     ) -> MatrixCorrectionResult:
         """
-        Apply corrections to raw concentration dictionary.
-
-        Convenience method when you have concentrations but not a full CFLIBSResult.
-
-        Parameters
-        ----------
-        concentrations : Dict[str, float]
-            Element concentrations
-        matrix_type : MatrixType, optional
-            Matrix type. If None, will be classified.
-
-        Returns
-        -------
-        MatrixCorrectionResult
+        Apply matrix-effect corrections to a plain mapping of element concentrations and return the detailed correction result.
+        
+        Parameters:
+            concentrations (Dict[str, float]): Mapping from element symbol to concentration value.
+            matrix_type (MatrixType, optional): Matrix type to use for correction; if omitted the matrix type will be inferred.
+        
+        Returns:
+            MatrixCorrectionResult: Result containing original and corrected concentrations, correction uncertainties, applied factors, the matrix type used, and whether renormalization was performed.
         """
         # Create a minimal CFLIBSResult for compatibility
         dummy_result = _dummy_cflibs_result(concentrations)
@@ -825,18 +827,13 @@ class InternalStandardizer:
         concentrations: Dict[str, float],
     ) -> InternalStandardResult:
         """
-        Apply internal standardization to raw concentrations.
-
-        Convenience method when you have concentrations but not a full CFLIBSResult.
-
-        Parameters
-        ----------
-        concentrations : Dict[str, float]
-            Element concentrations
-
-        Returns
-        -------
-        InternalStandardResult
+        Standardize element concentrations using the configured internal standard without requiring a full CFLIBSResult.
+        
+        Parameters:
+            concentrations (Dict[str, float]): Mapping of element symbols to measured concentrations used as input for standardization.
+        
+        Returns:
+            InternalStandardResult: Result containing original and standardized concentrations, the internal standard element, the known standard concentration, and the applied scale factor.
         """
         dummy_result = _dummy_cflibs_result(concentrations)
         return self.standardize(dummy_result)
@@ -846,17 +843,22 @@ class InternalStandardizer:
         concentrations: Dict[str, float],
     ) -> Dict[str, float]:
         """
-        Compute concentration ratios relative to internal standard.
-
+        Compute concentration ratios of each element relative to the configured internal standard.
+        
         Parameters
         ----------
         concentrations : Dict[str, float]
-            Element concentrations
-
+            Mapping of element symbols to their measured concentrations.
+        
         Returns
         -------
         Dict[str, float]
-            Ratios C_element / C_standard for each element
+            Mapping of element symbols to the ratio C_element / C_standard.
+        
+        Raises
+        ------
+        ValueError
+            If the configured standard element is missing from `concentrations` or if its concentration is less than or equal to zero.
         """
         if self.standard_element not in concentrations:
             raise ValueError(
