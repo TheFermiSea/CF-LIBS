@@ -237,6 +237,7 @@ try:
 
     HAS_INTERPRETABLE_ML = True
 except ImportError:
+    # Interpretable ML components are optional
     pass
 
 # --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
@@ -258,8 +259,9 @@ try:
     )
     HAS_PINN = True
 except ImportError:
-    pass
+    # PINN components are optional
 
+    pass
 # --- Public API ---
 __all__ = [
     # Boltzmann plotting

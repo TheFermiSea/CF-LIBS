@@ -262,33 +262,40 @@ def _load_lines_from_db(
     """
     import sqlite3
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    # Validate column names to prevent SQL injection
+    for col in columns:
+        if not col.isidentifier():
+            raise ValueError(f"Invalid column name: {col}")
 
-    placeholders = ",".join(["?"] * len(elements))
-    col_str = ", ".join(columns)
-    query = f"SELECT {col_str} FROM lines WHERE element IN ({placeholders})"
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+
+        placeholders = ",".join(["?"] * len(elements))
+        col_str = ", ".join(columns)
+        query = f"SELECT {col_str} FROM lines WHERE element IN ({placeholders})"
     
-    params = list(elements)
-    if min_rel_int is not None:
-        query += " AND rel_int > ?"
-        params.append(min_rel_int)
+        params = list(elements)
+        if min_rel_int is not None:
+            query += " AND rel_int > ?"
+            params.append(min_rel_int)
         
-    query += " ORDER BY rel_int DESC"
+        query += " ORDER BY rel_int DESC"
 
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
 
-    lines = []
-    for row in rows:
-        line = {}
-        for i, col in enumerate(columns):
-            val = row[i]
-            if col == "rel_int":
-                val = val if val is not None else 0.0
-            line[col] = val
-        lines.append(line)
+        lines = []
+        for row in rows:
+            line = {}
+            for i, col in enumerate(columns):
+                val = row[i]
+                if col == "rel_int":
+                    val = val if val is not None else 0.0
+                line[col] = val
+            lines.append(line)
+
 
     return lines
 
