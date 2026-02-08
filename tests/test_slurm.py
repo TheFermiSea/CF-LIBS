@@ -308,7 +308,7 @@ def test_parse_state():
     # Test case insensitivity
     assert SlurmJobManager._parse_state("pending") == SlurmJobState.PENDING
     assert SlurmJobManager._parse_state("running") == SlurmJobState.RUNNING
-    
+
     # Test terminal states that should map to FAILED/CANCELLED
     assert SlurmJobManager._parse_state("OUT_OF_MEMORY") == SlurmJobState.FAILED
     assert SlurmJobManager._parse_state("OOM") == SlurmJobState.FAILED
@@ -353,7 +353,7 @@ def test_full_workflow_dry_run():
 def test_array_size_validation():
     """Test that array_size is validated."""
     manager = SlurmJobManager(dry_run=True)
-    
+
     # Invalid array_size < 1
     config = ArrayJobConfig(job_name="test", array_size=0)
     try:
@@ -361,7 +361,7 @@ def test_array_size_validation():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "array_size must be >= 1" in str(e)
-    
+
     # Invalid array_size < 0
     config = ArrayJobConfig(job_name="test", array_size=-5)
     try:
@@ -374,7 +374,7 @@ def test_array_size_validation():
 def test_max_concurrent_validation():
     """Test that max_concurrent is validated."""
     manager = SlurmJobManager(dry_run=True)
-    
+
     # Invalid max_concurrent < 0
     config = ArrayJobConfig(job_name="test", array_size=10, max_concurrent=-1)
     try:
@@ -394,9 +394,9 @@ def test_env_var_quoting():
             "WITH_SPECIAL": "value$with'special\"chars",
         }
     )
-    
+
     script = manager.generate_sbatch_script(config, "echo test")
-    
+
     # Values should be quoted
     assert "export SIMPLE=value" in script
     assert "export WITH_SPACES='value with spaces'" in script
@@ -442,7 +442,7 @@ def test_env_var_key_validation():
 def test_status_dry_run_non_dry_run_job():
     """Test status query in dry-run mode for non-DRY_RUN job IDs."""
     manager = SlurmJobManager(dry_run=True)
-    
+
     # Non-DRY_RUN job ID should return UNKNOWN without executing commands
     status = manager.status("12345")
     assert status.job_id == "12345"
@@ -452,7 +452,7 @@ def test_status_dry_run_non_dry_run_job():
 def test_wait_terminates_on_unknown():
     """Test that wait() treats UNKNOWN as terminal state."""
     manager = SlurmJobManager(dry_run=True)
-    
+
     # In dry-run mode, non-DRY_RUN job IDs return UNKNOWN
     # This should cause wait() to return immediately instead of timing out
     status = manager.wait("12345", poll_interval=0.1, timeout=1.0)

@@ -243,7 +243,7 @@ def submit_mode(
     # Quote paths to handle spaces and special characters
     script_path_quoted = shlex.quote(str(script_path))
     output_dir_quoted = shlex.quote(str(output_dir))
-    
+
     chunk_script = f"""
 python {script_path_quoted} chunk \\
     --chunk-id $SLURM_ARRAY_TASK_ID \\
