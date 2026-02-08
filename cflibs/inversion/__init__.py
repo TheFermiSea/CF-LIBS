@@ -118,42 +118,32 @@ from cflibs.inversion.interpretable import (
     ExplanationValidator,
 )
 from cflibs.inversion.transfer import (
-    # Domain adaptation
     DomainAdapter,
     DomainAdaptationMethod,
     DomainAdaptationResult,
     compute_mmd,
     adapt_domains,
-    # Calibration transfer
     CalibrationTransfer,
     CalibrationMethod,
     TransferResult,
     transfer_calibration,
-    # Fine-tuning
     FineTuner,
     FineTuneResult,
-    # Pipeline
     TransferLearningPipeline,
 )
 from cflibs.inversion.streaming import (
-    # Configuration
     AnalysisMode,
     StreamingConfig,
-    # Data structures
     SpectrumPacket,
     StreamingResult,
     LatencyStats,
-    # Buffer and monitoring
     SpectrumBuffer,
     LatencyMonitor,
-    # Analyzers
     BaseStreamingAnalyzer,
     FastAnalyzer,
     StandardAnalyzer,
     StreamingAnalyzer,
-    # Edge deployment
     EdgeOptimizedModel,
-    # Factory
     create_streaming_pipeline,
 )
 
@@ -238,6 +228,35 @@ try:
         propagate_through_closure_matrix,
         extract_values_and_uncertainties,
     )
+except ImportError:
+    pass
+
+# --- Optional: Interpretable ML (requires sklearn) ---
+try:
+    from cflibs.inversion.interpretable import InterpretableModel
+
+    HAS_INTERPRETABLE_ML = True
+except ImportError:
+    pass
+
+# --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
+try:
+    from cflibs.inversion.pinn import (
+        ConstraintType,
+        PhysicsConstraintConfig,
+        PINNConfig,
+        PINNResult,
+        DifferentiableForwardModel,
+        PINNInverter,
+        boltzmann_residual,
+        saha_residual,
+        closure_residual,
+        positivity_penalty,
+        range_penalty,
+        create_pinn_from_database,
+        generate_synthetic_training_data,
+    )
+    HAS_PINN = True
 except ImportError:
     pass
 
@@ -416,37 +435,8 @@ if HAS_PCA_JAX:
         "pca_transform_jax", "pca_inverse_transform_jax", "pca_reconstruction_error_jax",
     ])
 
-# --- Optional: Interpretable ML (requires sklearn) ---
-try:
-    from cflibs.inversion.interpretable import InterpretableModel
-
-    HAS_INTERPRETABLE_ML = True
-except ImportError:
-    pass
-
 if HAS_INTERPRETABLE_ML:
     __all__.extend(["InterpretableModel", "HAS_INTERPRETABLE_ML"])
-
-# --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
-try:
-    from cflibs.inversion.pinn import (
-        ConstraintType,
-        PhysicsConstraintConfig,
-        PINNConfig,
-        PINNResult,
-        DifferentiableForwardModel,
-        PINNInverter,
-        boltzmann_residual,
-        saha_residual,
-        closure_residual,
-        positivity_penalty,
-        range_penalty,
-        create_pinn_from_database,
-        generate_synthetic_training_data,
-    )
-    HAS_PINN = True
-except ImportError:
-    pass
 
 if HAS_PINN:
     __all__.extend([

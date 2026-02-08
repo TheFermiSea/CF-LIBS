@@ -511,6 +511,34 @@ class PCAPipeline:
 
         raise TypeError(f"n_components must be int, float, or None, got {type(n_components)}")
 
+    def _apply_variance_selection(
+        self,
+        components: np.ndarray,
+        singular_values: np.ndarray,
+        explained_variance: np.ndarray,
+        explained_variance_ratio: np.ndarray,
+        n_components: int,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+        """Apply variance selection if n_components is a float."""
+        if isinstance(self.n_components, float):
+            cumvar = np.cumsum(explained_variance_ratio)
+            n_keep = np.searchsorted(cumvar, self.n_components) + 1
+            n_keep = min(n_keep, len(components))
+
+            components = components[:n_keep]
+            singular_values = singular_values[:n_keep]
+            explained_variance = explained_variance[:n_keep]
+            explained_variance_ratio = explained_variance_ratio[:n_keep]
+            n_components = n_keep
+
+        return (
+            components,
+            singular_values,
+            explained_variance,
+            explained_variance_ratio,
+            n_components,
+        )
+
     def _fit_numpy(
         self,
         X_centered: np.ndarray,
@@ -557,22 +585,21 @@ class PCAPipeline:
             explained_variance_ratio = np.zeros_like(explained_variance)
 
         # Handle variance selection if n_components was a float
-        if isinstance(self.n_components, float):
-            cumvar = np.cumsum(explained_variance_ratio)
-            n_keep = np.searchsorted(cumvar, self.n_components) + 1
-            n_keep = min(n_keep, len(components))
-
-            components = components[:n_keep]
-            S = S[:n_keep]
-            explained_variance = explained_variance[:n_keep]
-            explained_variance_ratio = explained_variance_ratio[:n_keep]
-            n_components = n_keep
+        (
+            components,
+            singular_values,
+            explained_variance,
+            explained_variance_ratio,
+            n_components,
+        ) = self._apply_variance_selection(
+            components, S, explained_variance, explained_variance_ratio, n_components
+        )
 
         return PCAResult(
             components=components,
             explained_variance=explained_variance,
             explained_variance_ratio=explained_variance_ratio,
-            singular_values=S,
+            singular_values=singular_values,
             mean=mean,
             n_components=n_components,
             n_features=X_centered.shape[1],
@@ -616,16 +643,15 @@ class PCAPipeline:
             explained_variance_ratio = np.zeros_like(explained_variance)
 
         # Handle variance selection if n_components was a float
-        if isinstance(self.n_components, float):
-            cumvar = np.cumsum(explained_variance_ratio)
-            n_keep = np.searchsorted(cumvar, self.n_components) + 1
-            n_keep = min(n_keep, len(components))
-
-            components = components[:n_keep]
-            singular_values = singular_values[:n_keep]
-            explained_variance = explained_variance[:n_keep]
-            explained_variance_ratio = explained_variance_ratio[:n_keep]
-            n_components = n_keep
+        (
+            components,
+            singular_values,
+            explained_variance,
+            explained_variance_ratio,
+            n_components,
+        ) = self._apply_variance_selection(
+            components, singular_values, explained_variance, explained_variance_ratio, n_components
+        )
 
         # Keep JAX arrays for fast transform
         components_jax = jnp.array(components)

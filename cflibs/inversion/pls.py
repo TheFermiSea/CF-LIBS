@@ -43,7 +43,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
-from scipy import linalg
 
 from cflibs.core.logging_config import get_logger
 
@@ -406,11 +405,8 @@ class PLSRegression:
         y_var_explained = np.zeros(n_comp)
 
         for k in range(n_comp):
-            # Initialize u as first column of Y (PLS2) or Y itself (PLS1)
-            if n_targets == 1:
-                u = Yk[:, 0].copy()
-            else:
-                u = Yk[:, 0].copy()
+            # Initialize u as first column of Y
+            u = Yk[:, 0].copy()
 
             # Initialize w and t for this component (in case of early termination)
             w = np.zeros(n_features)
@@ -510,14 +506,8 @@ class PLSRegression:
         y_var_per_comp = np.diff(np.concatenate([[0], y_var_explained]))
 
         # Compute regression coefficients B = W(P'W)^-1 Q'
-        PW = P.T @ W
-        try:
-            PW_inv = np.linalg.inv(PW)
-            B = W @ PW_inv @ Q.T
-        except np.linalg.LinAlgError:
-            logger.warning("Singular PW matrix, using pseudoinverse")
-            PW_inv = np.linalg.pinv(PW)
-            B = W @ PW_inv @ Q.T
+        PW_inv = self._safe_pw_inverse(P, W)
+        B = W @ PW_inv @ Q.T
 
         return PLSComponents(
             n_components=actual_n_comp,
@@ -648,12 +638,7 @@ class PLSRegression:
         P = self._components.x_loadings[:, :n_comp]
 
         # Scores via projection
-        PW = P.T @ W
-        try:
-            PW_inv = np.linalg.inv(PW)
-        except np.linalg.LinAlgError:
-            PW_inv = np.linalg.pinv(PW)
-
+        PW_inv = self._safe_pw_inverse(P, W)
         T = X_proc @ W @ PW_inv
 
         # Predict using coefficients with reduced components
@@ -714,12 +699,7 @@ class PLSRegression:
         W = self._components.x_weights
         P = self._components.x_loadings
 
-        PW = P.T @ W
-        try:
-            PW_inv = np.linalg.inv(PW)
-        except np.linalg.LinAlgError:
-            PW_inv = np.linalg.pinv(PW)
-
+        PW_inv = self._safe_pw_inverse(P, W)
         return X_proc @ W @ PW_inv
 
     def vip_scores(self) -> np.ndarray:
@@ -787,6 +767,30 @@ class PLSRegression:
             raise ValueError(f"Component {component} not available")
 
         return self._components.x_loadings[:, component]
+
+    @staticmethod
+    def _safe_pw_inverse(P: np.ndarray, W: np.ndarray) -> np.ndarray:
+        """
+        Compute (P.T @ W)^-1 with fallback to pseudoinverse.
+
+        Parameters
+        ----------
+        P : np.ndarray
+            X loadings (n_features x n_components)
+        W : np.ndarray
+            X weights (n_features x n_components)
+
+        Returns
+        -------
+        np.ndarray
+            Inverse or pseudoinverse of (P.T @ W)
+        """
+        PW = P.T @ W
+        try:
+            return np.linalg.inv(PW)
+        except np.linalg.LinAlgError:
+            logger.warning("Singular PW matrix, using pseudoinverse")
+            return np.linalg.pinv(PW)
 
 
 class PLSCrossValidator:

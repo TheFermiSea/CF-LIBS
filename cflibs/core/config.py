@@ -170,14 +170,9 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
         elif suffix == ".json":
             json.dump(config, f, indent=2)
         else:
-            # Default to JSON if YAML not available
-            if HAS_YAML:
-                config_path = config_path.with_suffix(".yaml")
-                with open(config_path, "w") as f2:
-                    yaml.dump(config, f2, default_flow_style=False, sort_keys=False)
-            else:
-                config_path = config_path.with_suffix(".json")
-                with open(config_path, "w") as f:
-                    json.dump(config, f, indent=2)
+            raise ValueError(
+                f"Unsupported config file format: {suffix}. "
+                "Use .yaml, .yml, or .json"
+            )
 
     logger.info(f"Saved configuration to {config_path}")

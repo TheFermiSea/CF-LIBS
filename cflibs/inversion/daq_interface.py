@@ -6,7 +6,7 @@ invoke inversion algorithms on spectral data.
 """
 
 import numpy as np
-from typing import Dict, Any, Union
+from typing import Any, Dict
 
 def process_spectrum(wavelength: np.ndarray, intensity: np.ndarray) -> Dict[str, Any]:
     """

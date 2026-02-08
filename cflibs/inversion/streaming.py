@@ -59,7 +59,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
     Callable,
-    Deque,
     Dict,
     List,
     Optional,
@@ -253,7 +252,7 @@ class SpectrumBuffer:
     def __init__(self, max_size: int = 100, drop_old: bool = True):
         self.max_size = max_size
         self.drop_old = drop_old
-        self._buffer: Deque[SpectrumPacket] = deque(maxlen=max_size if drop_old else None)
+        self._buffer: deque[SpectrumPacket] = deque(maxlen=max_size if drop_old else None)
         self._lock = threading.Lock()
         self._not_empty = threading.Condition(self._lock)
         self._not_full = threading.Condition(self._lock)
@@ -365,9 +364,7 @@ class SpectrumBuffer:
             self._not_full.notify()
             return packet
 
-    def pop_batch(
-        self, max_count: int, timeout: Optional[float] = None
-    ) -> List[SpectrumPacket]:
+    def pop_batch(self, max_count: int, timeout: Optional[float] = None) -> List[SpectrumPacket]:
         """Pop up to max_count spectra from the buffer.
 
         Parameters
@@ -458,7 +455,7 @@ class LatencyMonitor:
     def __init__(self, window_size: int = 1000, target_ms: float = 500.0):
         self.window_size = window_size
         self.target_ms = target_ms
-        self._latencies: Deque[float] = deque(maxlen=window_size)
+        self._latencies: deque[float] = deque(maxlen=window_size)
         self._lock = threading.Lock()
 
     def record(self, latency_ms: float) -> None:
@@ -667,7 +664,11 @@ class FastAnalyzer(BaseStreamingAnalyzer):
                 concentration_uncertainties={el: 0.5 for el in self.elements},
                 iterations=0,
                 converged=False,
-                quality_metrics={"mode": "fast", "n_lines": len(selected), "warning": "insufficient_lines"},
+                quality_metrics={
+                    "mode": "fast",
+                    "n_lines": len(selected),
+                    "warning": "insufficient_lines",
+                },
             )
 
         # Single Boltzmann fit (no iteration)
@@ -871,7 +872,7 @@ class StreamingAnalyzer:
         # Threading
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._results: Deque[StreamingResult] = deque(maxlen=1000)
+        self._results: deque[StreamingResult] = deque(maxlen=1000)
         self._results_lock = threading.Lock()
 
         # Statistics
@@ -932,9 +933,7 @@ class StreamingAnalyzer:
         start_time = time.time()
 
         try:
-            result = self._analyzer.analyze_spectrum(
-                packet.wavelength, packet.intensity
-            )
+            result = self._analyzer.analyze_spectrum(packet.wavelength, packet.intensity)
             quality_flag = self._assess_quality(result)
             warnings = self._collect_warnings(result)
         except Exception as e:
@@ -1156,9 +1155,7 @@ class EdgeOptimizedModel:
             transitions = self.atomic_db.get_transitions(el, ionization_stage=1)
             if transitions:
                 # Keep top 50 strongest transitions
-                sorted_trans = sorted(
-                    transitions, key=lambda t: t.A_ki or 0, reverse=True
-                )[:50]
+                sorted_trans = sorted(transitions, key=lambda t: t.A_ki or 0, reverse=True)[:50]
                 self._transitions[el] = [
                     (
                         t.wavelength_nm,
@@ -1170,8 +1167,7 @@ class EdgeOptimizedModel:
                 ]
 
         logger.info(
-            f"Built edge model: {len(self.elements)} elements, "
-            f"quantize={self.quantize}"
+            f"Built edge model: {len(self.elements)} elements, " f"quantize={self.quantize}"
         )
 
     def _compile_functions(self) -> None:
@@ -1227,9 +1223,7 @@ class EdgeOptimizedModel:
         """Get ionization potential in eV."""
         return self._ionization_potentials.get(element, 10.0)
 
-    def get_transitions(
-        self, element: str
-    ) -> List[Tuple[float, float, float, float]]:
+    def get_transitions(self, element: str) -> List[Tuple[float, float, float, float]]:
         """Get pruned transitions for element.
 
         Returns

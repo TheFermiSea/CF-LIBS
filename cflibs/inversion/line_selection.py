@@ -60,6 +60,7 @@ Literature References
 """
 
 from dataclasses import dataclass, field
+from collections import defaultdict
 from typing import List, Dict, Optional, Tuple, Set
 import numpy as np
 
@@ -215,7 +216,6 @@ class LineSelector:
                 valid_scores.append(score)
 
         # Group by element and ensure energy spread
-        from collections import defaultdict
 
         by_element = defaultdict(list)
         for score in valid_scores:
@@ -360,8 +360,6 @@ class LineSelector:
             Best lines by element
         """
         result = self.select(observations)
-
-        from collections import defaultdict
 
         by_element = defaultdict(list)
         for score in result.scores:

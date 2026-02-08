@@ -45,16 +45,13 @@ References
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from enum import Enum
 import numpy as np
 
 from cflibs.core.constants import (
     SAHA_CONST_CM3,
     EV_TO_K,
-    EV_TO_J,
-    KB_EV,
-    C_LIGHT,
 )
 from cflibs.core.logging_config import get_logger
 

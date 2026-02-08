@@ -90,7 +90,7 @@ References
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from enum import Enum
 
@@ -1246,17 +1246,9 @@ class MCMCSampler:
         # Get samples
         samples = mcmc.get_samples(group_by_chain=(num_chains > 1))
 
-        # Process samples for single vs multi-chain
-        if num_chains > 1:
-            # Shape: (n_chains, n_samples, ...)
-            T_samples = samples["T_eV"]
-            log_ne_samples = samples["log_ne"]
-            conc_samples = samples["concentrations"]
-        else:
-            # Shape: (n_samples, ...)
-            T_samples = samples["T_eV"]
-            log_ne_samples = samples["log_ne"]
-            conc_samples = samples["concentrations"]
+        T_samples = samples["T_eV"]
+        log_ne_samples = samples["log_ne"]
+        conc_samples = samples["concentrations"]
 
         # Flatten for statistics
         T_flat = np.array(T_samples).flatten()
@@ -1302,7 +1294,7 @@ class MCMCSampler:
             n_samples=num_samples,
             n_chains=num_chains,
             n_warmup=num_warmup,
-            inference_data=self._to_arviz(mcmc, num_chains) if HAS_ARVIZ else None,
+            inference_data=self._to_arviz(mcmc) if HAS_ARVIZ else None,
         )
 
         logger.info(
@@ -1396,7 +1388,7 @@ class MCMCSampler:
         else:
             return ConvergenceStatus.NOT_CONVERGED
 
-    def _to_arviz(self, mcmc: Any, num_chains: int) -> Any:
+    def _to_arviz(self, mcmc: Any) -> Any:
         """Convert MCMC results to ArviZ InferenceData."""
         if not HAS_ARVIZ:
             return None

@@ -654,11 +654,7 @@ class MADOutlierDetector:
             MAD value(s)
         """
         median = np.median(data, axis=axis, keepdims=True if axis is not None else False)
-        if axis is not None:
-            # Need to broadcast for subtraction
-            deviations = np.abs(data - median)
-        else:
-            deviations = np.abs(data - median)
+        deviations = np.abs(data - median)
         mad = np.median(deviations, axis=axis, keepdims=False)
 
         # Squeeze median if keepdims was used

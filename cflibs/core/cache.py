@@ -138,55 +138,34 @@ _transition_cache = LRUCache(max_size=512, ttl_seconds=1800)  # 30 min TTL
 _ionization_cache = LRUCache(max_size=128, ttl_seconds=1800)  # 30 min TTL
 
 
-def cached_partition_function(func: Callable) -> Callable:
-    """Decorator to cache partition function calculations."""
+def _make_cache_decorator(cache: LRUCache) -> Callable:
+    """Create a caching decorator backed by the given LRUCache instance."""
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        cache_key = _partition_function_cache._make_key(*args, **kwargs)
-        cached = _partition_function_cache.get(cache_key)
-        if cached is not None:
-            return cached
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            cache_key = cache._make_key(*args, **kwargs)
+            cached_value = cache.get(cache_key)
+            if cached_value is not None:
+                return cached_value
 
-        result = func(*args, **kwargs)
-        _partition_function_cache.set(cache_key, result)
-        return result
+            result = func(*args, **kwargs)
+            cache.set(cache_key, result)
+            return result
 
-    return wrapper
+        return wrapper
 
-
-def cached_transitions(func: Callable) -> Callable:
-    """Decorator to cache transition queries."""
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        cache_key = _transition_cache._make_key(*args, **kwargs)
-        cached = _transition_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        result = func(*args, **kwargs)
-        _transition_cache.set(cache_key, result)
-        return result
-
-    return wrapper
+    return decorator
 
 
-def cached_ionization(func: Callable) -> Callable:
-    """Decorator to cache ionization potential queries."""
+cached_partition_function = _make_cache_decorator(_partition_function_cache)
+"""Decorator to cache partition function calculations."""
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        cache_key = _ionization_cache._make_key(*args, **kwargs)
-        cached = _ionization_cache.get(cache_key)
-        if cached is not None:
-            return cached
+cached_transitions = _make_cache_decorator(_transition_cache)
+"""Decorator to cache transition queries."""
 
-        result = func(*args, **kwargs)
-        _ionization_cache.set(cache_key, result)
-        return result
-
-    return wrapper
+cached_ionization = _make_cache_decorator(_ionization_cache)
+"""Decorator to cache ionization potential queries."""
 
 
 def get_cache_stats() -> Dict[str, Dict[str, Any]]:

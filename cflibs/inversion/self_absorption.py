@@ -79,6 +79,16 @@ K_BOLTZMANN = 1.380649e-23  # J/K
 M_PROTON = 1.6726219e-27  # kg
 
 
+def _escape_factor(tau: float) -> float:
+    """Photon escape factor f(tau) = (1 - exp(-tau)) / tau."""
+    if tau < 1e-10:
+        return 1.0
+    elif tau > 50:
+        return 1.0 / tau
+    else:
+        return (1.0 - np.exp(-tau)) / tau
+
+
 class COGRegime(Enum):
     """
     Regime of the curve-of-growth.
@@ -442,13 +452,7 @@ class SelfAbsorptionCorrector:
 
         for iteration in range(self.max_iterations):
             # Correction factor
-            if tau < 1e-10:
-                f_tau = 1.0
-            elif tau > 50:
-                # Saturated limit: f(τ) ≈ 1/τ
-                f_tau = 1.0 / tau
-            else:
-                f_tau = (1.0 - np.exp(-tau)) / tau
+            f_tau = _escape_factor(tau)
 
             # Corrected intensity
             I_new = obs.intensity / f_tau
@@ -1386,12 +1390,7 @@ class CurveOfGrowthAnalyzer:
             tau_i = tau_ref * (10**delta_log_gf)
 
             # Calculate correction factor
-            if tau_i < 1e-10:
-                f_tau = 1.0
-            elif tau_i > 50:
-                f_tau = 1.0 / tau_i
-            else:
-                f_tau = (1.0 - np.exp(-tau_i)) / tau_i
+            f_tau = _escape_factor(tau_i)
 
             # Correction factor: multiply measured intensity by this to get true
             correction = 1.0 / f_tau if f_tau > 0 else 1.0
