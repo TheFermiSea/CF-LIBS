@@ -169,10 +169,7 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
     elif suffix == ".json":
         pass  # No additional dependencies needed
     else:
-        raise ValueError(
-            f"Unsupported config file format: {suffix}. "
-            "Use .yaml, .yml, or .json"
-        )
+        raise ValueError(f"Unsupported config file format: {suffix}. " "Use .yaml, .yml, or .json")
 
     # Write the configuration file
     with open(config_path, "w") as f:

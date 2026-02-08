@@ -160,6 +160,7 @@ HAS_PINN = False
 # --- Optional: Hybrid inversion (requires JAX) ---
 try:
     from cflibs.inversion.hybrid import HybridInverter, HybridInversionResult, SpectralFitter
+
     HAS_HYBRID = True
 except ImportError:
     pass
@@ -174,6 +175,7 @@ try:
         ConvergenceStatus as JointConvergenceStatus,
         create_simple_forward_model,
     )
+
     HAS_JOINT_OPTIMIZER = True
 except ImportError:
     pass
@@ -185,6 +187,7 @@ try:
         pca_inverse_transform_jax,
         pca_reconstruction_error_jax,
     )
+
     HAS_PCA_JAX = True
 except ImportError:
     pass
@@ -206,6 +209,7 @@ try:
         create_density_prior,
         create_concentration_prior,
     )
+
     HAS_BAYESIAN = True
 except ImportError:
     pass
@@ -213,6 +217,7 @@ except ImportError:
 # --- Optional: Nested sampling (requires dynesty) ---
 try:
     from cflibs.inversion.bayesian import NestedSampler, NestedSamplingResult
+
     HAS_NESTED = True
 except ImportError:
     pass
@@ -257,6 +262,7 @@ try:
         create_pinn_from_database,
         generate_synthetic_training_data,
     )
+
     HAS_PINN = True
 except ImportError:
     # PINN components are optional; leave them disabled if dependencies (JAX, Equinox, Optax) are missing.
@@ -409,51 +415,79 @@ if HAS_HYBRID:
     __all__.extend(["HybridInverter", "HybridInversionResult", "SpectralFitter"])
 
 if HAS_JOINT_OPTIMIZER:
-    __all__.extend([
-        "JointOptimizer", "JointOptimizationResult", "MultiStartJointOptimizer",
-        "JointLossType", "JointConvergenceStatus", "create_simple_forward_model",
-    ])
+    __all__.extend(
+        [
+            "JointOptimizer",
+            "JointOptimizationResult",
+            "MultiStartJointOptimizer",
+            "JointLossType",
+            "JointConvergenceStatus",
+            "create_simple_forward_model",
+        ]
+    )
 
 if HAS_BAYESIAN:
-    __all__.extend([
-        "BayesianForwardModel", "AtomicDataArrays", "NoiseParameters", "PriorConfig",
-        "MCMCResult", "MCMCSampler", "ConvergenceStatus", "log_likelihood",
-        "bayesian_model", "run_mcmc", "create_temperature_prior",
-        "create_density_prior", "create_concentration_prior",
-    ])
+    __all__.extend(
+        [
+            "BayesianForwardModel",
+            "AtomicDataArrays",
+            "NoiseParameters",
+            "PriorConfig",
+            "MCMCResult",
+            "MCMCSampler",
+            "ConvergenceStatus",
+            "log_likelihood",
+            "bayesian_model",
+            "run_mcmc",
+            "create_temperature_prior",
+            "create_density_prior",
+            "create_concentration_prior",
+        ]
+    )
 
 if HAS_NESTED:
     __all__.extend(["NestedSampler", "NestedSamplingResult"])
 
 if HAS_UNCERTAINTIES:
-    __all__.extend([
-        "create_boltzmann_uncertainties", "temperature_from_slope",
-        "saha_factor_with_uncertainty", "propagate_through_closure_standard",
-        "propagate_through_closure_matrix", "extract_values_and_uncertainties",
-    ])
+    __all__.extend(
+        [
+            "create_boltzmann_uncertainties",
+            "temperature_from_slope",
+            "saha_factor_with_uncertainty",
+            "propagate_through_closure_standard",
+            "propagate_through_closure_matrix",
+            "extract_values_and_uncertainties",
+        ]
+    )
 
 if HAS_PCA_JAX:
-    __all__.extend([
-        "pca_transform_jax", "pca_inverse_transform_jax", "pca_reconstruction_error_jax",
-    ])
+    __all__.extend(
+        [
+            "pca_transform_jax",
+            "pca_inverse_transform_jax",
+            "pca_reconstruction_error_jax",
+        ]
+    )
 
 if HAS_INTERPRETABLE_ML:
     __all__.extend(["InterpretableModel", "HAS_INTERPRETABLE_ML"])
 
 if HAS_PINN:
-    __all__.extend([
-        "ConstraintType",
-        "PhysicsConstraintConfig",
-        "PINNConfig",
-        "PINNResult",
-        "DifferentiableForwardModel",
-        "PINNInverter",
-        "boltzmann_residual",
-        "saha_residual",
-        "closure_residual",
-        "positivity_penalty",
-        "range_penalty",
-        "create_pinn_from_database",
-        "generate_synthetic_training_data",
-        "HAS_PINN",
-    ])
+    __all__.extend(
+        [
+            "ConstraintType",
+            "PhysicsConstraintConfig",
+            "PINNConfig",
+            "PINNResult",
+            "DifferentiableForwardModel",
+            "PINNInverter",
+            "boltzmann_residual",
+            "saha_residual",
+            "closure_residual",
+            "positivity_penalty",
+            "range_penalty",
+            "create_pinn_from_database",
+            "generate_synthetic_training_data",
+            "HAS_PINN",
+        ]
+    )
