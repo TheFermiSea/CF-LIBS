@@ -262,8 +262,12 @@ def _load_lines_from_db(
     """
     import sqlite3
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    # Validate column names to prevent SQL injection via identifier interpolation
+    if not columns:
+        raise ValueError("columns must contain at least one column name")
+    for col in columns:
+        if not isinstance(col, str) or not col.replace("_", "").isalnum():
+            raise ValueError(f"Invalid column name: {col!r}")
 
     placeholders = ",".join(["?"] * len(elements))
     col_str = ", ".join(columns)
@@ -276,9 +280,11 @@ def _load_lines_from_db(
         
     query += " ORDER BY rel_int DESC"
 
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
+    # Use context manager to ensure connection is closed on errors
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
 
     lines = []
     for row in rows:

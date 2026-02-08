@@ -159,13 +159,13 @@ def _make_cache_decorator(cache: LRUCache) -> Callable:
 
 
 cached_partition_function = _make_cache_decorator(_partition_function_cache)
-"""Decorator to cache partition function calculations."""
+# Decorator to cache partition function calculations.
 
 cached_transitions = _make_cache_decorator(_transition_cache)
-"""Decorator to cache transition queries."""
+# Decorator to cache transition queries.
 
 cached_ionization = _make_cache_decorator(_ionization_cache)
-"""Decorator to cache ionization potential queries."""
+# Decorator to cache ionization potential queries.
 
 
 def get_cache_stats() -> Dict[str, Dict[str, Any]]:

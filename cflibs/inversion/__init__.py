@@ -237,6 +237,7 @@ try:
 
     HAS_INTERPRETABLE_ML = True
 except ImportError:
+    # Interpretable ML components are optional; leave them disabled if dependencies are missing.
     pass
 
 # --- Optional: Physics-Informed Neural Networks (requires JAX + Equinox + Optax) ---
@@ -258,6 +259,7 @@ try:
     )
     HAS_PINN = True
 except ImportError:
+    # PINN components are optional; leave them disabled if dependencies (JAX, Equinox, Optax) are missing.
     pass
 
 # --- Public API ---
