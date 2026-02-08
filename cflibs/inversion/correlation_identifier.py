@@ -91,7 +91,10 @@ class CorrelationIdentifier:
     ):
         self.atomic_db = atomic_db
         self.vector_index = vector_index
-        self.elements = elements or ["Fe", "Ti", "Cr", "Ca", "Al", "Mg", "Si"]
+        if elements is None:
+            self.elements = atomic_db.get_available_elements()
+        else:
+            self.elements = elements
         self.wavelength_tolerance_nm = wavelength_tolerance_nm
         self.top_k = top_k
         self.min_confidence = min_confidence
@@ -141,7 +144,7 @@ class CorrelationIdentifier:
         logger.info(f"Running correlation identifier in {mode} mode")
 
         # Detect experimental peaks
-        peak_indices, peak_properties = find_peaks(
+        peak_indices, _ = find_peaks(
             intensity, height=np.max(intensity) * 0.05, distance=5
         )
         experimental_peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
@@ -238,7 +241,7 @@ class CorrelationIdentifier:
             # Compute correlations for each (T, n_e) point
             correlations = []
             for T_K in T_grid:
-                T_eV = T_K / KB_EV
+                T_eV = T_K * KB_EV
                 for n_e in n_e_grid:
                     model_spectrum = self._generate_model_spectrum(intensity, 
                         element, transitions, wavelength, T_eV, n_e
@@ -277,8 +280,13 @@ class CorrelationIdentifier:
         List[Tuple[str, float, float, List[IdentifiedLine], List[Transition]]]
             List of (element, score, confidence, matched_lines, unmatched_lines)
         """
-        # Placeholder for vector mode - requires embedder and manifold metadata
-        # For now, return empty results with a warning
+        # Placeholder for vector mode - requires embedder and manifold metadata.
+        # For now, log a warning and return an empty list so callers can safely
+        # iterate over the result without crashing.
+        logger.warning(
+            "Vector identification mode is not implemented; returning no candidates."
+        )
+        return []
 
     def _generate_model_spectrum(
         self,

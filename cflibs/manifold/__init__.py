@@ -13,22 +13,29 @@ from cflibs.manifold.config import ManifoldConfig
 from cflibs.manifold.loader import ManifoldLoader
 
 # SpectralEmbedder is always available (only needs numpy + pca)
-from cflibs.manifold.vector_index import SpectralEmbedder
+from cflibs.manifold.vector_index import SpectralEmbedder, HAS_FAISS
 
 # VectorIndex requires faiss (optional)
-try:
+if HAS_FAISS:
     from cflibs.manifold.vector_index import VectorIndex, VectorIndexConfig
+
     HAS_VECTOR_INDEX = True
-except ImportError:
+    # Explicitly mark as used (exposed via __all__)
+    __all__ = [
+        "ManifoldGenerator",
+        "ManifoldConfig",
+        "ManifoldLoader",
+        "SpectralEmbedder",
+        "HAS_VECTOR_INDEX",
+        "VectorIndex",
+        "VectorIndexConfig",
+    ]
+else:
     HAS_VECTOR_INDEX = False
-
-__all__ = [
-    "ManifoldGenerator",
-    "ManifoldConfig",
-    "ManifoldLoader",
-    "SpectralEmbedder",
-    "HAS_VECTOR_INDEX",
-]
-
-if HAS_VECTOR_INDEX:
-    __all__.extend(["VectorIndex", "VectorIndexConfig"])
+    __all__ = [
+        "ManifoldGenerator",
+        "ManifoldConfig",
+        "ManifoldLoader",
+        "SpectralEmbedder",
+        "HAS_VECTOR_INDEX",
+    ]
