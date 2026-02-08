@@ -29,7 +29,7 @@ class IdentifiedLine:
     intensity_exp : float
         Experimental intensity at peak (arbitrary units)
     emissivity_th : float
-        Theoretical emissivity (0.0 default)
+        Theoretical emissivity
     transition : Transition
         Atomic transition from database
     correlation : float
