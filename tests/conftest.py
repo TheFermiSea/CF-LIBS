@@ -590,9 +590,14 @@ def quality_input_set(synthetic_line_observations, mock_boltzmann_fit_result):
 @pytest.fixture
 def sample_atomic_transitions():
     """
-    Fixture providing realistic atomic transition data.
-
-    Returns a list of LineObservation objects for common LIBS elements.
+    Provide a set of representative LineObservation objects for common LIBS elements.
+    
+    Includes Fe I, Fe II, Cu I, and Al I transitions with realistic wavelengths, intensities,
+    uncertainties, excitation energies, statistical weights, and Einstein A coefficients.
+    
+    Returns:
+        transitions (list[LineObservation]): Preconfigured LineObservation instances for use
+            in tests and examples.
     """
     transitions = [
         # Fe I lines
@@ -641,7 +646,31 @@ def sample_atomic_transitions():
 
 @pytest.fixture
 def synthetic_libs_spectrum():
-    """Factory fixture for creating synthetic LIBS spectra with known peaks."""
+    """
+    Create a factory that generates synthetic LIBS spectra with Gaussian peaks and additive noise.
+    
+    The returned factory _create(...) builds a synthetic spectrum over a wavelength grid and returns a dict with wavelength and intensity arrays plus metadata.
+    
+    Parameters of the returned factory _create:
+        elements (dict, optional): Mapping from element symbol to a list of (wavelength_nm, amplitude) tuples.
+            If None, defaults to common Fe and H peaks:
+            {"Fe": [(371.99, 1000.0), (373.49, 500.0), (374.95, 200.0)],
+             "H": [(656.28, 5000.0), (486.13, 1000.0)]}.
+        temperature_K (float): Plasma temperature in kelvin to include as metadata.
+        wavelength_range (tuple): (min_nm, max_nm) wavelength interval for the spectrum.
+        n_points (int): Number of wavelength samples.
+        noise_level (float): Relative noise amplitude (e.g., 0.01 = 1% of peak).
+        fwhm_nm (float): Full width at half maximum for Gaussian peaks in nanometers.
+        seed (int): Random seed for reproducible noise.
+    
+    Returns:
+        function: A factory function _create(...) that returns a dict with keys:
+            - "wavelength": ndarray of wavelengths (nm)
+            - "intensity": ndarray of intensities (baseline + peaks + noise)
+            - "elements": dict of element peak definitions used
+            - "peaks": list of (element, wavelength_nm, amplitude) tuples actually placed inside the wavelength_range
+            - "temperature_K": the provided temperature_K metadata
+    """
 
     def _create(
         elements=None,

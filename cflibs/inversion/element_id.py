@@ -133,19 +133,15 @@ class ElementIdentificationResult:
 
 def to_line_observations(result: ElementIdentificationResult) -> List[LineObservation]:
     """
-    Convert ElementIdentificationResult to LineObservation list for Boltzmann/solver pipeline.
-
-    Filters out interfered lines and deduplicates by (element, ionization_stage, wavelength_th_nm).
-
-    Parameters
-    ----------
-    result : ElementIdentificationResult
-        Element identification result to convert
-
-    Returns
-    -------
-    List[LineObservation]
-        LineObservation objects for downstream CF-LIBS pipeline
+    Convert an ElementIdentificationResult into deduplicated, non-interfered LineObservation objects for the Boltzmann/solver pipeline.
+    
+    Constructs LineObservation entries from matched lines of detected elements while excluding lines flagged as interfered, deduplicating by (element, ionization_stage, wavelength_th_nm), and assigning intensity uncertainty as max(2% of the experimental intensity, 1e-6).
+    
+    Parameters:
+        result (ElementIdentificationResult): Element identification results to convert.
+    
+    Returns:
+        List[LineObservation]: LineObservation objects ready for downstream processing; interfered lines are omitted, duplicate theoretical lines per element/ionization stage are removed, and each observation's `intensity_uncertainty` is set to max(0.02 * intensity, 1e-6).
     """
     observations = []
     seen = set()
