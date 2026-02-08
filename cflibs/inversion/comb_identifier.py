@@ -86,6 +86,19 @@ class CombIdentifier:
         max_width_factor: float = 1.0,
         elements: Optional[List[str]] = None,
     ):
+        """
+        Initialize the CombIdentifier with its atomic transition database and matching configuration.
+        
+        Parameters:
+            atomic_db (AtomicDatabase): Source of atomic transitions used to build element templates.
+            baseline_window_nm (float): Window size in nanometers for moving-median baseline estimation.
+            threshold_percentile (float): Percentile of positive residuals used to set the peak detection threshold.
+            min_correlation (float): Minimum Pearson correlation required for a template tooth to be considered active.
+            max_shift_pts (int): Maximum allowed shift (in data points) when aligning templates to the spectrum.
+            min_width_pts (int): Minimum triangular template width in data points to consider during matching.
+            max_width_factor (float): Maximum allowed tooth width expressed as a fraction of the instrument resolution element.
+            elements (Optional[List[str]]): Optional list of element symbols to restrict the search; if None, defaults are used.
+        """
         self.atomic_db = atomic_db
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
@@ -99,19 +112,16 @@ class CombIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> ElementIdentificationResult:
         """
-        Identify elements in a spectrum using comb template correlation.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array in nm
-        intensity : np.ndarray
-            Intensity array (arbitrary units)
-
-        Returns
-        -------
-        ElementIdentificationResult
-            Complete identification results with algorithm="comb"
+        Identify atomic elements present in a spectrum by correlating triangular comb templates with spectral peaks.
+        
+        Performs baseline and threshold estimation, correlates per-element template "teeth" with the baseline-corrected spectrum across allowable shifts and widths, computes per-element fingerprint scores, analyzes inter-element interferences, and returns a structured ElementIdentificationResult summarizing detections and peak matches.
+        
+        Parameters:
+            wavelength (np.ndarray): Wavelength array in nanometers.
+            intensity (np.ndarray): Intensity array (same shape as `wavelength`).
+        
+        Returns:
+            ElementIdentificationResult: Result containing detected and rejected element identifications, all per-element details (matched/unmatched lines, scores, metadata), experimental peaks and peak-match counts, algorithm name ("comb"), and the parameters used for the identification run.
         """
         logger.info(
             f"Starting comb identification on spectrum: "
@@ -266,21 +276,15 @@ class CombIdentifier:
 
     def _get_element_lines(self, element: str, wl_min: float, wl_max: float) -> List[Transition]:
         """
-        Get all transitions for an element in wavelength range.
-
-        Parameters
-        ----------
-        element : str
-            Element symbol
-        wl_min : float
-            Minimum wavelength in nm
-        wl_max : float
-            Maximum wavelength in nm
-
-        Returns
-        -------
-        List[Transition]
-            All transitions for all ionization stages
+        Retrieve atomic transitions for the given element within the specified wavelength interval.
+        
+        Parameters:
+            element (str): Element symbol (e.g., "Fe").
+            wl_min (float): Minimum wavelength in nanometers.
+            wl_max (float): Maximum wavelength in nanometers.
+        
+        Returns:
+            List[Transition]: Transitions for the element (all ionization stages) whose wavelengths fall within [wl_min, wl_max].
         """
         # Get all ionization stages for this element
         transitions = self.atomic_db.get_transitions(
@@ -292,21 +296,15 @@ class CombIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> Tuple[np.ndarray, float]:
         """
-        Estimate baseline using moving median and compute peak threshold.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array in nm
-        intensity : np.ndarray
-            Intensity array
-
-        Returns
-        -------
-        baseline : np.ndarray
-            Estimated baseline
-        threshold : float
-            Peak detection threshold
+        Estimate a moving-median baseline and compute a peak-detection threshold from positive residuals.
+        
+        Parameters:
+            wavelength (np.ndarray): Wavelength array in nanometers; used to derive the median wavelength spacing for window sizing.
+            intensity (np.ndarray): Measured intensity array matching `wavelength`.
+        
+        Returns:
+            baseline (np.ndarray): Moving-median baseline computed with a window size derived from `baseline_window_nm`.
+            threshold (float): Peak detection threshold equal to the `threshold_percentile` percentile of positive residuals (intensity - baseline); `0.0` if no positive residuals are present.
         """
         # Compute window size in points
         dwl_median = np.median(np.diff(wavelength))
@@ -333,17 +331,15 @@ class CombIdentifier:
 
     def _build_triangular_template(self, width_pts: int) -> np.ndarray:
         """
-        Create triangular (isosceles) template of given width.
-
-        Parameters
-        ----------
-        width_pts : int
-            Width of template in data points (must be odd)
-
-        Returns
-        -------
-        np.ndarray
-            Triangular template normalized to max=1.0
+        Create a symmetric isosceles triangular template of the given width in data points.
+        
+        If `width_pts` is even it will be increased to the next odd integer so the triangle has a single center sample.
+        
+        Parameters:
+            width_pts (int): Desired template width in data points (will be adjusted to odd if even).
+        
+        Returns:
+            np.ndarray: 1D array containing a centered triangular shape normalized so its maximum equals 1.0.
         """
         if width_pts % 2 == 0:
             width_pts += 1  # Ensure odd width
@@ -370,28 +366,24 @@ class CombIdentifier:
         threshold: float,
     ) -> dict:
         """
-        Correlate triangular template with spectral data at a given wavelength.
-
-        Searches over shifts and widths to maximize Pearson correlation.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array in nm
-        intensity : np.ndarray
-            Intensity array
-        baseline : np.ndarray
-            Baseline array
-        center_nm : float
-            Center wavelength for tooth in nm
-        threshold : float
-            Peak detection threshold
-
-        Returns
-        -------
-        dict
-            Dictionary with keys: center_nm, best_correlation, best_shift,
-            best_width, active (bool)
+        Find the best-matching triangular template for a single spectral tooth centered at a given wavelength by searching allowed shifts and widths.
+        
+        Searches over template widths and integer data-point shifts around center_nm, compares each template to the baseline-corrected data segment, and selects the width and shift that maximize the Pearson correlation. Marks the tooth as active when the best correlation meets or exceeds the configured minimum correlation.
+        
+        Parameters:
+            wavelength (np.ndarray): Wavelength array in nanometers.
+            intensity (np.ndarray): Measured intensity array.
+            baseline (np.ndarray): Estimated baseline array to subtract from intensity.
+            center_nm (float): Nominal center wavelength of the tooth in nanometers.
+            threshold (float): Peak detection threshold (used by callers for gating; not modified).
+        
+        Returns:
+            dict: Mapping with keys:
+                - "center_nm" (float): The input center wavelength.
+                - "best_correlation" (float): Highest Pearson correlation found (0–1, or negative if applicable).
+                - "best_shift" (int): Integer shift in data points that produced best_correlation.
+                - "best_width" (int): Template width in data points that produced best_correlation.
+                - "active" (bool): `true` if best_correlation >= configured minimum correlation, `false` otherwise.
         """
         # Find nearest index to center_nm
         center_idx = np.argmin(np.abs(wavelength - center_nm))
@@ -500,17 +492,13 @@ class CombIdentifier:
 
     def _compute_fingerprint(self, teeth: List[dict]) -> float:
         """
-        Compute fingerprint score as mean correlation of active teeth.
-
-        Parameters
-        ----------
-        teeth : List[dict]
-            List of tooth results from _correlate_tooth
-
-        Returns
-        -------
-        float
-            Fingerprint score (0-1)
+        Compute an element fingerprint as the mean correlation of the active template teeth.
+        
+        Parameters:
+            teeth (List[dict]): List of tooth result dictionaries (as returned by _correlate_tooth). Each dict is expected to contain at least the keys `"active"` (bool) and `"best_correlation"` (float).
+        
+        Returns:
+            float: Mean of `best_correlation` across teeth where `"active"` is true; returns 0.0 if no teeth are active.
         """
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
