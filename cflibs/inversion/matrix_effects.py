@@ -364,6 +364,19 @@ class MatrixCorrectionResult:
     renormalized: bool
 
 
+def _dummy_cflibs_result(concentrations: Dict[str, float]) -> CFLIBSResult:
+    """Create a minimal CFLIBSResult for compatibility."""
+    return CFLIBSResult(
+        temperature_K=10000.0,
+        temperature_uncertainty_K=0.0,
+        electron_density_cm3=1e17,
+        concentrations=concentrations,
+        concentration_uncertainties={},
+        iterations=0,
+        converged=True,
+    )
+
+
 class MatrixEffectCorrector:
     """
     Applies matrix-specific corrections to CF-LIBS concentration results.
@@ -666,15 +679,7 @@ class MatrixEffectCorrector:
         MatrixCorrectionResult
         """
         # Create a minimal CFLIBSResult for compatibility
-        dummy_result = CFLIBSResult(
-            temperature_K=10000.0,
-            temperature_uncertainty_K=0.0,
-            electron_density_cm3=1e17,
-            concentrations=concentrations,
-            concentration_uncertainties={},
-            iterations=0,
-            converged=True,
-        )
+        dummy_result = _dummy_cflibs_result(concentrations)
         return self.correct(dummy_result, matrix_type)
 
 
@@ -833,15 +838,7 @@ class InternalStandardizer:
         -------
         InternalStandardResult
         """
-        dummy_result = CFLIBSResult(
-            temperature_K=10000.0,
-            temperature_uncertainty_K=0.0,
-            electron_density_cm3=1e17,
-            concentrations=concentrations,
-            concentration_uncertainties={},
-            iterations=0,
-            converged=True,
-        )
+        dummy_result = _dummy_cflibs_result(concentrations)
         return self.standardize(dummy_result)
 
     def compute_ratios(

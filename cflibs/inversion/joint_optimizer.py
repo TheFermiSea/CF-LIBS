@@ -25,10 +25,10 @@ References:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Callable, Any
+from typing import Dict, List, Optional, Tuple, Callable
 import numpy as np
 
-from cflibs.core.constants import KB_EV, EV_TO_K, SAHA_CONST_CM3
+from cflibs.core.constants import EV_TO_K
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.result_base import ResultTableMixin, StatisticsMixin
 
@@ -37,18 +37,19 @@ logger = get_logger("inversion.joint_optimizer")
 try:
     import jax
     import jax.numpy as jnp
-    from jax import jit, grad, value_and_grad
+    from jax import jit
     from jax.scipy.optimize import minimize as jax_minimize
 
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+    def jit(f): return f  # noqa: E731
 
 
 class LossType(Enum):
     """Loss function types for joint optimization."""
+
     CHI_SQUARED = "chi_squared"  # Standard chi-squared (weighted residuals)
     LEAST_SQUARES = "least_squares"  # Unweighted sum of squares
     HUBER = "huber"  # Robust Huber loss
@@ -56,6 +57,7 @@ class LossType(Enum):
 
 class ConvergenceStatus(Enum):
     """Convergence status for optimization."""
+
     CONVERGED = "converged"
     MAX_ITERATIONS = "max_iterations"
     FAILED = "failed"
@@ -109,6 +111,7 @@ class JointOptimizationResult(ResultTableMixin, StatisticsMixin):
     metadata : Dict
         Additional metadata
     """
+
     # Optimized parameters
     temperature_eV: float
     electron_density_cm3: float
@@ -196,18 +199,20 @@ class JointOptimizationResult(ResultTableMixin, StatisticsMixin):
             else:
                 lines.append(f"{el:<20} {c_opt:>15.4f} {c_init:>15.4f}")
 
-        lines.extend([
-            "-" * 70,
-            f"Sum of concentrations: {sum(self.concentrations.values()):.6f}",
-            "-" * 70,
-            "Fit Quality:",
-            f"  Final loss: {self.final_loss:.4e}",
-            f"  Chi-squared: {self.chi_squared:.2f}",
-            f"  Reduced chi-squared: {self.reduced_chi_squared:.3f} ({self.goodness_of_fit})",
-            f"  Degrees of freedom: {self.degrees_of_freedom}",
-            f"  Gradient norm: {self.gradient_norm:.2e}",
-            "=" * 70,
-        ])
+        lines.extend(
+            [
+                "-" * 70,
+                f"Sum of concentrations: {sum(self.concentrations.values()):.6f}",
+                "-" * 70,
+                "Fit Quality:",
+                f"  Final loss: {self.final_loss:.4e}",
+                f"  Chi-squared: {self.chi_squared:.2f}",
+                f"  Reduced chi-squared: {self.reduced_chi_squared:.3f} ({self.goodness_of_fit})",
+                f"  Degrees of freedom: {self.degrees_of_freedom}",
+                f"  Gradient norm: {self.gradient_norm:.2e}",
+                "=" * 70,
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -267,8 +272,7 @@ class JointOptimizer:
     ):
         if not HAS_JAX:
             raise ImportError(
-                "JAX is required for joint optimization. "
-                "Install with: pip install jax jaxlib"
+                "JAX is required for joint optimization. " "Install with: pip install jax jaxlib"
             )
 
         self.forward_model = forward_model
@@ -354,9 +358,7 @@ class JointOptimizer:
 
         # Set default initial concentrations
         if initial_concentrations is None:
-            initial_concentrations = {
-                el: 1.0 / self.n_elements for el in self.elements
-            }
+            initial_concentrations = {el: 1.0 / self.n_elements for el in self.elements}
 
         # Ensure all elements have initial concentrations
         for el in self.elements:
@@ -366,9 +368,7 @@ class JointOptimizer:
         # Normalize initial concentrations to sum to 1
         total = sum(initial_concentrations.values())
         if total > 0:
-            initial_concentrations = {
-                el: c / total for el, c in initial_concentrations.items()
-            }
+            initial_concentrations = {el: c / total for el, c in initial_concentrations.items()}
 
         # Pack initial parameters
         x0 = self._pack_params(initial_T_eV, initial_n_e, initial_concentrations)
@@ -420,9 +420,7 @@ class JointOptimizer:
 
         # Unpack final parameters
         final_T, final_ne, final_conc_arr = self._unpack_params(final_x)
-        final_concentrations = {
-            el: float(final_conc_arr[i]) for i, el in enumerate(self.elements)
-        }
+        final_concentrations = {el: float(final_conc_arr[i]) for i, el in enumerate(self.elements)}
 
         # Compute fit statistics
         n_obs = self.n_wavelength
@@ -448,7 +446,9 @@ class JointOptimizer:
             if hessian_condition < 1e12:  # Reasonably conditioned
                 # Covariance matrix from inverse Hessian
                 # Scale by chi^2 / dof for proper uncertainties
-                cov = np.linalg.inv(hessian) * (reduced_chi_squared if reduced_chi_squared > 0 else 1.0)
+                cov = np.linalg.inv(hessian) * (
+                    reduced_chi_squared if reduced_chi_squared > 0 else 1.0
+                )
 
                 # Standard errors from diagonal
                 std_errors = np.sqrt(np.abs(np.diag(cov)))
@@ -514,17 +514,13 @@ class JointOptimizer:
         # Convert concentrations to logits
         # softmax(theta) = exp(theta) / sum(exp(theta))
         # To invert: theta = log(c) + constant (shift doesn't affect softmax)
-        conc_arr = jnp.array([
-            concentrations.get(el, 1e-6) for el in self.elements
-        ])
+        conc_arr = jnp.array([concentrations.get(el, 1e-6) for el in self.elements])
         conc_arr = jnp.maximum(conc_arr, 1e-10)  # Avoid log(0)
         theta = jnp.log(conc_arr)
 
         return jnp.concatenate([jnp.array([log_T, log_ne]), theta])
 
-    def _unpack_params(
-        self, x: jnp.ndarray
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    def _unpack_params(self, x: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         Unpack optimization vector to physical parameters.
 
@@ -563,20 +559,20 @@ class JointOptimizer:
         - HUBER: Huber loss for robustness to outliers
         """
 
+        def _apply_reg(loss, conc):
+            if self.regularization > 0:
+                entropy = -jnp.sum(conc * jnp.log(conc + 1e-10))
+                loss = loss - self.regularization * entropy
+            return loss
+
         @jit
         def chi_squared_loss(x: jnp.ndarray) -> float:
             T_eV, n_e, conc = self._unpack_params(x)
             predicted = self.forward_model(T_eV, n_e, conc, self.wavelength)
 
             residuals = (measured - predicted) / uncertainties
-            loss = jnp.mean(residuals ** 2)
-
-            # Add regularization if specified
-            if self.regularization > 0:
-                # Entropy regularization to encourage sparse concentrations
-                entropy = -jnp.sum(conc * jnp.log(conc + 1e-10))
-                loss = loss - self.regularization * entropy
-
+            loss = jnp.mean(residuals**2)
+            loss = _apply_reg(loss, conc)
             return loss
 
         @jit
@@ -585,12 +581,8 @@ class JointOptimizer:
             predicted = self.forward_model(T_eV, n_e, conc, self.wavelength)
 
             residuals = measured - predicted
-            loss = jnp.sum(residuals ** 2)
-
-            if self.regularization > 0:
-                entropy = -jnp.sum(conc * jnp.log(conc + 1e-10))
-                loss = loss - self.regularization * entropy
-
+            loss = jnp.sum(residuals**2)
+            loss = _apply_reg(loss, conc)
             return loss
 
         @jit
@@ -603,14 +595,10 @@ class JointOptimizer:
 
             # Huber loss: quadratic for |r| < delta, linear for |r| >= delta
             abs_r = jnp.abs(residuals)
-            quadratic = 0.5 * residuals ** 2
-            linear = delta * abs_r - 0.5 * delta ** 2
+            quadratic = 0.5 * residuals**2
+            linear = delta * abs_r - 0.5 * delta**2
             loss = jnp.mean(jnp.where(abs_r <= delta, quadratic, linear))
-
-            if self.regularization > 0:
-                entropy = -jnp.sum(conc * jnp.log(conc + 1e-10))
-                loss = loss - self.regularization * entropy
-
+            loss = _apply_reg(loss, conc)
             return loss
 
         if self.loss_type == LossType.CHI_SQUARED:
@@ -619,8 +607,6 @@ class JointOptimizer:
             return least_squares_loss
         elif self.loss_type == LossType.HUBER:
             return huber_loss
-        else:
-            return chi_squared_loss
 
     def profile_likelihood(
         self,
@@ -695,13 +681,9 @@ class JointOptimizer:
             # TODO: Re-optimize with fixed parameter
             # For now, compute loss at fixed parameter with other params at optimum
             if parameter == "T_eV":
-                x = self._pack_params(
-                    pval, result.electron_density_cm3, result.concentrations
-                )
+                x = self._pack_params(pval, result.electron_density_cm3, result.concentrations)
             elif parameter == "log_ne":
-                x = self._pack_params(
-                    result.temperature_eV, 10 ** pval, result.concentrations
-                )
+                x = self._pack_params(result.temperature_eV, 10**pval, result.concentrations)
             else:
                 # Fixed concentration (not yet implemented)
                 x = self._pack_params(
@@ -786,21 +768,16 @@ class MultiStartJointOptimizer:
         for i in range(self.n_starts):
             # Generate random starting point
             T_init = self.rng.uniform(T_eV_range[0], T_eV_range[1])
-            log_ne_init = self.rng.uniform(
-                np.log10(n_e_range[0]), np.log10(n_e_range[1])
-            )
-            n_e_init = 10 ** log_ne_init
+            log_ne_init = self.rng.uniform(np.log10(n_e_range[0]), np.log10(n_e_range[1]))
+            n_e_init = 10**log_ne_init
 
             # Random concentrations (Dirichlet-like)
             alpha = np.ones(self.optimizer.n_elements)
             conc_init = self.rng.dirichlet(alpha)
-            conc_dict = {
-                el: conc_init[j] for j, el in enumerate(self.optimizer.elements)
-            }
+            conc_dict = {el: conc_init[j] for j, el in enumerate(self.optimizer.elements)}
 
             logger.debug(
-                f"Multi-start {i + 1}/{self.n_starts}: "
-                f"T0={T_init:.3f} eV, n_e0={n_e_init:.2e}"
+                f"Multi-start {i + 1}/{self.n_starts}: " f"T0={T_init:.3f} eV, n_e0={n_e_init:.2e}"
             )
 
             try:

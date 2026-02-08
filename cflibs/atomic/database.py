@@ -3,6 +3,7 @@ Atomic database interface for loading and querying atomic data.
 """
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional, Tuple
 import pandas as pd
@@ -55,14 +56,20 @@ class AtomicDatabase(AtomicDataSource):
         self._check_and_migrate_schema()
         logger.info(f"Connected to atomic database: {db_path}")
 
+    @contextmanager
+    def _get_connection(self):
+        """Yield a database connection from the pool or the direct connection."""
+        if self._use_pool:
+            with self._pool.get_connection() as conn:
+                yield conn
+        else:
+            yield self.conn
+
     def _check_and_migrate_schema(self):
         """Check database schema and migrate if necessary."""
         try:
-            if self._use_pool:
-                with self._pool.get_connection() as conn:
-                    self._perform_migration(conn)
-            else:
-                self._perform_migration(self.conn)
+            with self._get_connection() as conn:
+                self._perform_migration(conn)
         except Exception as e:
             logger.error(f"Schema migration failed: {e}")
             raise
@@ -191,16 +198,10 @@ class AtomicDatabase(AtomicDataSource):
 
         query += " ORDER BY wavelength_nm"
 
-        # Use connection pool or direct connection
         try:
-            if self._use_pool:
-                with self._pool.get_connection() as conn:
-                    df = pd.read_sql_query(query, conn, params=params)
-            else:
-                df = pd.read_sql_query(query, self.conn, params=params)
+            with self._get_connection() as conn:
+                df = pd.read_sql_query(query, conn, params=params)
         except Exception as e:
-            # Fallback for older DBs if migration failed silently or something else happened?
-            # Or maybe the columns were just added but are NULL.
             logger.error(f"Error querying transitions: {e}")
             return []
 
@@ -232,9 +233,11 @@ class AtomicDatabase(AtomicDataSource):
                 wavelength_nm=float(row["wavelength_nm"]),
                 A_ki=float(row["aki"]),
                 E_k_ev=float(row["ek_ev"]),
-                E_i_ev=float(row.get("ei_ev", 0.0)),  # May not be in all DBs
+                E_i_ev=float(0.0)
+                if pd.isna(row.get("ei_ev", 0.0))
+                else float(row.get("ei_ev", 0.0)),
                 g_k=int(row["gk"]),
-                g_i=int(row.get("gi", 1)),
+                g_i=int(1) if pd.isna(row.get("gi", 1)) else int(row.get("gi", 1)),
                 relative_intensity=(
                     float(row.get("rel_int", 0.0)) if pd.notna(row.get("rel_int")) else None
                 ),
@@ -270,11 +273,8 @@ class AtomicDatabase(AtomicDataSource):
             WHERE element = ? AND sp_num = ?
             ORDER BY energy_ev
         """
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                df = pd.read_sql_query(query, conn, params=(element, ionization_stage))
-        else:
-            df = pd.read_sql_query(query, self.conn, params=(element, ionization_stage))
+        with self._get_connection() as conn:
+            df = pd.read_sql_query(query, conn, params=(element, ionization_stage))
 
         levels = []
         for _, row in df.iterrows():
@@ -311,14 +311,8 @@ class AtomicDatabase(AtomicDataSource):
             FROM species_physics
             WHERE element = ? AND sp_num = ?
         """
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query, (element, ionization_stage))
-                res = cur.fetchone()
-                return float(res[0]) if res else None
-        else:
-            cur = self.conn.cursor()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
             cur.execute(query, (element, ionization_stage))
             res = cur.fetchone()
             return float(res[0]) if res else None
@@ -346,14 +340,8 @@ class AtomicDatabase(AtomicDataSource):
             WHERE element = ? AND atomic_mass IS NOT NULL
             LIMIT 1
         """
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query, (element,))
-                res = cur.fetchone()
-                return float(res[0]) if res else None
-        else:
-            cur = self.conn.cursor()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
             cur.execute(query, (element,))
             res = cur.fetchone()
             return float(res[0]) if res else None
@@ -380,13 +368,8 @@ class AtomicDatabase(AtomicDataSource):
             FROM partition_functions
             WHERE element = ? AND sp_num = ?
         """
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query, (element, ionization_stage))
-                res = cur.fetchone()
-        else:
-            cur = self.conn.cursor()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
             cur.execute(query, (element, ionization_stage))
             res = cur.fetchone()
 
@@ -423,13 +406,8 @@ class AtomicDatabase(AtomicDataSource):
             FROM species_physics
             WHERE element = ? AND sp_num = ?
         """
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query, (element, ionization_stage))
-                res = cur.fetchone()
-        else:
-            cur = self.conn.cursor()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
             cur.execute(query, (element, ionization_stage))
             res = cur.fetchone()
 
@@ -437,8 +415,7 @@ class AtomicDatabase(AtomicDataSource):
             return None
 
         ip_ev = float(res[0])
-        # Check if atomic_mass is present (it might be None if not populated)
-        atomic_mass = float(res[1]) if (len(res) > 1 and res[1] is not None) else None
+        atomic_mass = float(res[1]) if res[1] is not None else None
 
         return SpeciesPhysics(
             element=element,
@@ -479,13 +456,8 @@ class AtomicDatabase(AtomicDataSource):
         """
         params = (element, ionization_stage, wavelength_nm, tolerance_nm, wavelength_nm)
 
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query, params)
-                res = cur.fetchone()
-        else:
-            cur = self.conn.cursor()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
             cur.execute(query, params)
             res = cur.fetchone()
 
@@ -501,12 +473,8 @@ class AtomicDatabase(AtomicDataSource):
     def get_available_elements(self) -> List[str]:
         """Get list of elements available in the database."""
         query = "SELECT DISTINCT element FROM lines ORDER BY element"
-        if self._use_pool:
-            with self._pool.get_connection() as conn:
-                df = pd.read_sql_query(query, conn)
-                return df["element"].tolist()
-        else:
-            df = pd.read_sql_query(query, self.conn)
+        with self._get_connection() as conn:
+            df = pd.read_sql_query(query, conn)
             return df["element"].tolist()
 
     def close(self):

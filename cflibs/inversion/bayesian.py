@@ -90,7 +90,7 @@ References
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from enum import Enum
 
@@ -99,14 +99,12 @@ from cflibs.core.constants import (
     C_LIGHT,
     EV_TO_K,
     EV_TO_J,
-    KB_EV,
 )
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("inversion.bayesian")
 
 try:
-    import jax
     import jax.numpy as jnp
     from jax import jit
 
@@ -116,13 +114,13 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    jit = lambda f: f
+    def jit(f): return f  # noqa: E731
     _faddeeva_weideman_jax = None
 
 try:
     import numpyro
     import numpyro.distributions as dist
-    from numpyro.infer import MCMC, NUTS, init_to_value, init_to_median, init_to_uniform
+    from numpyro.infer import MCMC, NUTS, init_to_uniform
 
     HAS_NUMPYRO = True
 except ImportError:
@@ -141,7 +139,6 @@ except ImportError:
 try:
     import dynesty
     from dynesty import NestedSampler as DynestyNestedSampler
-    from dynesty import DynamicNestedSampler as DynestyDynamicSampler
 
     HAS_DYNESTY = True
 except ImportError:
@@ -452,7 +449,7 @@ class MCMCResult:
         ]
 
         # Header row
-        header = f"{'':>12}" + "".join(f"{l:>10}" for l in labels)
+        header = f"{'':>12}" + "".join(f"{lbl:>10}" for lbl in labels)
         lines.append(header)
         lines.append("-" * len(header))
 
@@ -1211,9 +1208,6 @@ class MCMCSampler:
         observed_jax = jnp.array(observed)
         n_elements = len(self.elements)
 
-        # Get initial values
-        init_values = self._get_init_values()
-
         # Create model function
         def model(obs):
             bayesian_model(
@@ -1246,17 +1240,9 @@ class MCMCSampler:
         # Get samples
         samples = mcmc.get_samples(group_by_chain=(num_chains > 1))
 
-        # Process samples for single vs multi-chain
-        if num_chains > 1:
-            # Shape: (n_chains, n_samples, ...)
-            T_samples = samples["T_eV"]
-            log_ne_samples = samples["log_ne"]
-            conc_samples = samples["concentrations"]
-        else:
-            # Shape: (n_samples, ...)
-            T_samples = samples["T_eV"]
-            log_ne_samples = samples["log_ne"]
-            conc_samples = samples["concentrations"]
+        T_samples = samples["T_eV"]
+        log_ne_samples = samples["log_ne"]
+        conc_samples = samples["concentrations"]
 
         # Flatten for statistics
         T_flat = np.array(T_samples).flatten()
@@ -1302,7 +1288,7 @@ class MCMCSampler:
             n_samples=num_samples,
             n_chains=num_chains,
             n_warmup=num_warmup,
-            inference_data=self._to_arviz(mcmc, num_chains) if HAS_ARVIZ else None,
+            inference_data=self._to_arviz(mcmc) if HAS_ARVIZ else None,
         )
 
         logger.info(
@@ -1396,7 +1382,7 @@ class MCMCSampler:
         else:
             return ConvergenceStatus.NOT_CONVERGED
 
-    def _to_arviz(self, mcmc: Any, num_chains: int) -> Any:
+    def _to_arviz(self, mcmc: Any) -> Any:
         """Convert MCMC results to ArviZ InferenceData."""
         if not HAS_ARVIZ:
             return None

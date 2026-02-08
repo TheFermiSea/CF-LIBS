@@ -62,7 +62,7 @@ References
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from enum import Enum
 import numpy as np
 
@@ -235,6 +235,71 @@ class ValidationResult:
     recommendations: List[str] = field(default_factory=list)
 
 
+def _load_lines_from_db(
+    db_path: str,
+    elements: List[str],
+    columns: List[str],
+    min_rel_int: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Load known emission lines from atomic database.
+
+    Parameters
+    ----------
+    db_path : str
+        Path to SQLite database
+    elements : List[str]
+        Elements to load
+    columns : List[str]
+        Columns to select
+    min_rel_int : float, optional
+        Minimum relative intensity filter
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        List of line data dictionaries
+    """
+    import sqlite3
+
+    # Validate column names to prevent SQL injection
+    for col in columns:
+        if not col.isidentifier():
+            raise ValueError(f"Invalid column name: {col}")
+
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+
+        placeholders = ",".join(["?"] * len(elements))
+        col_str = ", ".join(columns)
+        query = f"SELECT {col_str} FROM lines WHERE element IN ({placeholders})"
+    
+        params = list(elements)
+        if min_rel_int is not None:
+            query += " AND rel_int > ?"
+            params.append(min_rel_int)
+        
+        query += " ORDER BY rel_int DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        lines = []
+        for row in rows:
+            line = {}
+            for i, col in enumerate(columns):
+                val = row[i]
+                if col == "rel_int":
+                    val = val if val is not None else 0.0
+                line[col] = val
+            lines.append(line)
+
+
+    return lines
+
+
 class PhysicsGuidedFeatureExtractor:
     """
     Extract physics-guided features from LIBS spectra.
@@ -291,38 +356,8 @@ class PhysicsGuidedFeatureExtractor:
 
     def _load_known_lines(self) -> List[Dict[str, Any]]:
         """Load known emission lines from atomic database."""
-        import sqlite3
-
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        placeholders = ",".join(["?"] * len(self.elements))
-        query = f"""
-            SELECT element, sp_num, wavelength_nm, aki, ek_ev, gk, rel_int
-            FROM lines
-            WHERE element IN ({placeholders})
-            ORDER BY rel_int DESC
-        """
-
-        cursor.execute(query, self.elements)
-        rows = cursor.fetchall()
-        conn.close()
-
-        lines = []
-        for row in rows:
-            lines.append(
-                {
-                    "element": row[0],
-                    "sp_num": row[1],
-                    "wavelength_nm": row[2],
-                    "aki": row[3],
-                    "ek_ev": row[4],
-                    "gk": row[5],
-                    "rel_int": row[6] if row[6] is not None else 0.0,
-                }
-            )
-
-        return lines
+        columns = ["element", "sp_num", "wavelength_nm", "aki", "ek_ev", "gk", "rel_int"]
+        return _load_lines_from_db(self.db_path, self.elements, columns)
 
     def extract(
         self,
@@ -671,6 +706,12 @@ class SpectralExplainer:
 
         logger.info(f"SpectralExplainer initialized with {len(wavelengths)} wavelengths")
 
+    def _call_model(self, X: np.ndarray) -> np.ndarray:
+        """Helper to call model's predict method or the model itself."""
+        if hasattr(self.model, "predict"):
+            return self.model.predict(X)
+        return self.model(X)
+
     def explain_shap(
         self,
         spectrum: np.ndarray,
@@ -711,10 +752,7 @@ class SpectralExplainer:
 
         # Create SHAP explainer
         try:
-            explainer = shap.KernelExplainer(
-                self.model.predict if hasattr(self.model, "predict") else self.model,
-                background,
-            )
+            explainer = shap.KernelExplainer(self._call_model, background)
 
             # Calculate SHAP values
             shap_values = explainer.shap_values(spectrum, nsamples=n_samples)
@@ -736,11 +774,7 @@ class SpectralExplainer:
         }
 
         # Get prediction and base value
-        prediction = float(
-            self.model.predict(spectrum)[0]
-            if hasattr(self.model, "predict")
-            else self.model(spectrum)[0]
-        )
+        prediction = float(self._call_model(spectrum)[0])
         base_value = float(explainer.expected_value) if hasattr(explainer, "expected_value") else 0.0
 
         # Sort by absolute importance
@@ -776,11 +810,7 @@ class SpectralExplainer:
             spectrum_2d = spectrum
 
         # Get baseline prediction
-        prediction = float(
-            self.model.predict(spectrum_2d)[0]
-            if hasattr(self.model, "predict")
-            else self.model(spectrum_2d)[0]
-        )
+        prediction = float(self._call_model(spectrum_2d)[0])
 
         # Compute permutation importances
         importances = np.zeros(len(self.wavelengths))
@@ -793,11 +823,7 @@ class SpectralExplainer:
                 permuted = spectrum_2d.copy()
                 permuted[0, i] = rng.normal(permuted[0, i], np.std(spectrum_2d[0]) * 0.1)
 
-                perm_pred = float(
-                    self.model.predict(permuted)[0]
-                    if hasattr(self.model, "predict")
-                    else self.model(permuted)[0]
-                )
+                perm_pred = float(self._call_model(permuted)[0])
                 changes.append(abs(prediction - perm_pred))
 
             importances[i] = np.mean(changes)
@@ -864,11 +890,7 @@ class SpectralExplainer:
             spectrum_2d = spectrum
 
         # Get baseline prediction
-        prediction = float(
-            self.model.predict(spectrum_2d)[0]
-            if hasattr(self.model, "predict")
-            else self.model(spectrum_2d)[0]
-        )
+        prediction = float(self._call_model(spectrum_2d)[0])
 
         # Generate perturbed samples
         rng = np.random.default_rng(42)
@@ -885,11 +907,7 @@ class SpectralExplainer:
             perturbed[i, ~masks[i]] = 0
 
         # Get predictions for perturbed samples
-        predictions = (
-            self.model.predict(perturbed)
-            if hasattr(self.model, "predict")
-            else np.array([self.model(p.reshape(1, -1))[0] for p in perturbed])
-        )
+        predictions = self._call_model(perturbed)
 
         # Compute distances from original
         distances = np.sqrt(np.sum((perturbed - spectrum_2d[0]) ** 2, axis=1))
@@ -968,16 +986,8 @@ class SpectralExplainer:
             perturbed_minus = spectrum_2d.copy()
             perturbed_minus[0, i] -= eps
 
-            pred_plus = (
-                self.model.predict(perturbed_plus)[0]
-                if hasattr(self.model, "predict")
-                else self.model(perturbed_plus)[0]
-            )
-            pred_minus = (
-                self.model.predict(perturbed_minus)[0]
-                if hasattr(self.model, "predict")
-                else self.model(perturbed_minus)[0]
-            )
+            pred_plus = self._call_model(perturbed_plus)[0]
+            pred_minus = self._call_model(perturbed_minus)[0]
 
             if isinstance(pred_plus, np.ndarray) and len(pred_plus) > target_output:
                 gradient = (pred_plus[target_output] - pred_minus[target_output]) / (2 * eps)
@@ -1047,36 +1057,8 @@ class ExplanationValidator:
 
     def _load_known_lines(self) -> List[Dict[str, Any]]:
         """Load known emission lines from atomic database."""
-        import sqlite3
-
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        placeholders = ",".join(["?"] * len(self.elements))
-        query = f"""
-            SELECT element, sp_num, wavelength_nm, rel_int
-            FROM lines
-            WHERE element IN ({placeholders})
-            AND rel_int > 100
-            ORDER BY rel_int DESC
-        """
-
-        cursor.execute(query, self.elements)
-        rows = cursor.fetchall()
-        conn.close()
-
-        lines = []
-        for row in rows:
-            lines.append(
-                {
-                    "element": row[0],
-                    "sp_num": row[1],
-                    "wavelength_nm": row[2],
-                    "rel_int": row[3] if row[3] is not None else 0.0,
-                }
-            )
-
-        return lines
+        columns = ["element", "sp_num", "wavelength_nm", "rel_int"]
+        return _load_lines_from_db(self.db_path, self.elements, columns, min_rel_int=100)
 
     def validate(
         self,
@@ -1356,9 +1338,11 @@ class InterpretableModel:
         elif model_type == "lasso":
             return Lasso(**kwargs)
         elif model_type == "random_forest":
-            return RandomForestRegressor(n_estimators=kwargs.get("n_estimators", 100), **kwargs)
+            kwargs.setdefault("n_estimators", 100)
+            return RandomForestRegressor(**kwargs)
         elif model_type == "gradient_boost":
-            return GradientBoostingRegressor(n_estimators=kwargs.get("n_estimators", 100), **kwargs)
+            kwargs.setdefault("n_estimators", 100)
+            return GradientBoostingRegressor(**kwargs)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 

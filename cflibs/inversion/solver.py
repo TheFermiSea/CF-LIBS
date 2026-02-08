@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 import numpy as np
 from collections import defaultdict
 
-from cflibs.core.constants import KB_EV, SAHA_CONST_CM3, STP_PRESSURE, EV_TO_K
+from cflibs.core.constants import KB, KB_EV, SAHA_CONST_CM3, STP_PRESSURE, EV_TO_K
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.inversion.boltzmann import LineObservation, BoltzmannPlotFitter
 from cflibs.inversion.closure import ClosureEquation
@@ -169,31 +169,7 @@ class IterativeCFLIBSSolver:
 
                 partition_funcs[el] = U_I
 
-                # Calculate Saha Correction Factor (log scale) to subtract from Ion lines
-                # y_neutral_plane = y_ion - delta
-                # delta = ln(C_saha) + 1.5 ln T - ln ne + ln 2 - IP/T
-                # SAHA_CONST_CM3 includes prefactors.
-                # Formula: n_II/n_I = S
-                # S = (SAHA_CONST / ne) * T^1.5 * exp(-IP/T) * (2 U_II / U_I)
-                # ln S = ln(SAHA) - ln ne + 1.5 ln T - IP/T + ln 2 + ln U_II - ln U_I
-                #
-                # We want y_neutral = y_ion - ln(S * U_I / U_II) ??
-                # Re-derivation from boltzmann.py logic:
-                # Neutral: ln(I L / g A) = ln(n_I / U_I) - E/T
-                # Ion:     ln(I L / g A) = ln(n_II / U_II) - E/T
-                # Substitute n_II = n_I * S:
-                # Ion:     y = ln(n_I * S / U_II) - E/T
-                # Ion:     y = ln(n_I / U_I) + ln(S * U_I / U_II) - E/T
-                # So Intercept_Ion = Intercept_Neutral + ln(S * U_I / U_II)
-                # Therefore: Intercept_Neutral = Intercept_Ion - ln(S * U_I / U_II)
-                # Correction term to subtract: D = ln(S) + ln(U_I) - ln(U_II)
-                # D = ln(S) + ln(U_I / U_II)
-
-                # S = (SAHA_CONST_CM3 / n_e) * T_eV**1.5 * exp(-IP/T_eV) * 2 * (U_II/U_I) ??
-                # Wait, standard Saha formula usually includes U ratios.
-                # My constants.py SAHA_CONST_CM3 is just the (2pi mk/h2)^1.5 part.
-                # So S_raw = SAHA_CONST_CM3 * T_eV**1.5 / n_e * exp(-IP/T)
-                # Actual ratio n_II/n_I = S_raw * 2 * (U_II/U_I)
+                # Saha correction: map ionic lines to neutral energy plane
 
                 S_raw = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * np.exp(-ips[el] / T_eV)
                 S_actual = S_raw * 2.0 * (U_II / U_I)
@@ -289,10 +265,8 @@ class IterativeCFLIBSSolver:
             else:
                 T_new = -1.0 / (slope * KB_EV)
 
-            T_new_K = T_new
-
             # Damping
-            T_K = 0.5 * T_prev + 0.5 * T_new_K
+            T_K = 0.5 * T_prev + 0.5 * T_new
 
             # Calculate Intercepts
             intercepts = {}
@@ -315,12 +289,7 @@ class IterativeCFLIBSSolver:
 
             concentrations = closure_res.concentrations
 
-            # 5. Update Electron Density
-            # Use pressure balance: P = (n_tot + n_e) k T
-            # n_tot = P/kT - n_e
-            # Also n_e = n_tot * avg_ionization
-            # n_e = (P/kT - n_e) * avg_Z => n_e (1 + avg_Z) = avg_Z * P/kT
-            # n_e = (avg_Z / (1 + avg_Z)) * (P / (k * T_K))
+            # 5. Update electron density via pressure balance
 
             # Calculate avg_Z based on Saha ratios
             # n_II / n_I = S(T, ne)
@@ -357,8 +326,7 @@ class IterativeCFLIBSSolver:
             # n_tot = P / (k T (1 + avg_Z))
             # n_e = avg_Z * n_tot
 
-            k_joule = 1.380649e-23
-            n_tot = self.pressure_pa / (k_joule * T_K * (1.0 + avg_Z))
+            n_tot = self.pressure_pa / (KB * T_K * (1.0 + avg_Z))
             # Convert to cm^-3
             n_tot_cm3 = n_tot * 1e-6
 
@@ -447,7 +415,6 @@ class IterativeCFLIBSSolver:
 
         # Use converged T to get partition functions
         T_K = result.temperature_K
-        T_eV = T_K / EV_TO_K
 
         # Get intercepts with uncertainties by fitting each element
         intercepts_u = {}

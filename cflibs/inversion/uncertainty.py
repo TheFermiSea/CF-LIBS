@@ -51,7 +51,7 @@ References
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional, Any, Callable, TYPE_CHECKING
+from typing import Dict, List, Tuple, Optional, Any, TYPE_CHECKING
 from enum import Enum
 import numpy as np
 

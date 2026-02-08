@@ -67,6 +67,27 @@ def compute_spectrum_batch(
     return results
 
 
+
+def _apply_params_to_plasma(plasma, params: dict) -> None:
+    """Apply parameter dictionary to a plasma object.
+
+    Parameters
+    ----------
+    plasma : SingleZoneLTEPlasma
+        Plasma state to modify in-place
+    params : dict
+        Parameter values keyed by name (T_e_eV, n_e, or species names)
+    """
+    if "T_e_eV" in params:
+        plasma.T_e_eV = params["T_e_eV"]
+    if "n_e" in params:
+        plasma.n_e = params["n_e"]
+
+    for key, value in params.items():
+        if key not in ("T_e_eV", "n_e") and key in plasma.species:
+            plasma.species[key] = value
+
+
 def compute_spectrum_grid(
     base_model: SpectrumModel,
     parameter_grid: Dict[str, List[float]],
@@ -125,16 +146,7 @@ def compute_spectrum_grid(
         model = deepcopy(base_model)
         plasma = model.plasma
 
-        # Update plasma parameters
-        if "T_e_eV" in params:
-            plasma.T_e_eV = params["T_e_eV"]
-        if "n_e" in params:
-            plasma.n_e = params["n_e"]
-
-        # Update species concentrations
-        for key, value in params.items():
-            if key not in ["T_e_eV", "n_e"] and key in plasma.species:
-                plasma.species[key] = value
+        _apply_params_to_plasma(plasma, params)
 
         models.append(model)
 
@@ -200,14 +212,7 @@ def compute_spectrum_ensemble(
         model = deepcopy(base_model)
         plasma = model.plasma
 
-        if "T_e_eV" in params:
-            plasma.T_e_eV = params["T_e_eV"]
-        if "n_e" in params:
-            plasma.n_e = params["n_e"]
-
-        for key, value in params.items():
-            if key not in ["T_e_eV", "n_e"] and key in plasma.species:
-                plasma.species[key] = value
+        _apply_params_to_plasma(plasma, params)
 
         models.append(model)
 

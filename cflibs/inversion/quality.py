@@ -7,6 +7,7 @@ Provides objective measures to assess analysis quality and flag unreliable resul
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+from collections import defaultdict
 
 from cflibs.core.constants import KB_EV, EV_TO_K, SAHA_CONST_CM3
 from cflibs.core.logging_config import get_logger
@@ -267,7 +268,6 @@ class QualityAssessor:
         observations: List[LineObservation],
     ) -> Tuple[Dict[str, float], Dict[str, float]]:
         """Compute R² and T for each element separately."""
-        from collections import defaultdict
 
         obs_by_element = defaultdict(list)
         for obs in observations:
@@ -314,7 +314,6 @@ class QualityAssessor:
         # Unused parameters kept for API compatibility
         _ = electron_density_cm3, ionization_potentials, partition_funcs_I, partition_funcs_II
 
-        from collections import defaultdict
 
         # Group by element and ionization stage
         obs_by_element_stage = defaultdict(lambda: defaultdict(list))

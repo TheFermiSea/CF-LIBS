@@ -24,7 +24,7 @@ logger = get_logger("inversion.hybrid")
 try:
     import jax
     import jax.numpy as jnp
-    from jax import jit, grad, value_and_grad
+    # jit, grad, value_and_grad available via jax module
     from jax.scipy.optimize import minimize as jax_minimize
 
     HAS_JAX = True
@@ -91,7 +91,7 @@ class HybridInversionResult:
             f"similarity={self.coarse_similarity:.4f}",
             f"  Fine (optimized):  T={self.temperature_eV:.3f} eV, "
             f"n_e={self.electron_density_cm3:.2e} cm^-3",
-            f"  Concentrations:",
+            "  Concentrations:",
         ]
         for el, c in self.concentrations.items():
             lines.append(f"    {el}: {c:.4f}")
@@ -100,6 +100,24 @@ class HybridInversionResult:
             f"residual={self.final_residual:.2e})"
         )
         return "\n".join(lines)
+
+
+def _pack_params(T_eV, n_e, concentrations, elements):
+    """Pack plasma parameters into an optimization vector (log-space)."""
+    log_T = jnp.log(T_eV)
+    log_ne = jnp.log(n_e)
+    conc_arr = jnp.array([concentrations.get(el, 0.01) for el in elements])
+    conc_arr = jnp.maximum(conc_arr, 1e-6)
+    log_conc = jnp.log(conc_arr)
+    return jnp.concatenate([jnp.array([log_T, log_ne]), log_conc])
+
+
+def _unpack_params(x):
+    """Unpack optimization vector to (T_eV, n_e, concentrations)."""
+    T_eV = jnp.exp(x[0])
+    n_e = jnp.exp(x[1])
+    conc = jax.nn.softmax(x[2:])
+    return T_eV, n_e, conc
 
 
 class HybridInverter:
@@ -218,9 +236,7 @@ class HybridInverter:
         elif initial_guess is not None:
             coarse_T = initial_guess.get("T_eV", 1.0)
             coarse_ne = initial_guess.get("n_e", 1e17)
-            coarse_conc = {
-                el: initial_guess.get(el, 1.0 / self.n_elements) for el in self.elements
-            }
+            coarse_conc = {el: initial_guess.get(el, 1.0 / self.n_elements) for el in self.elements}
             coarse_similarity = 0.0
         else:
             # Default initial guess
@@ -288,30 +304,11 @@ class HybridInverter:
         self, T_eV: float, n_e: float, concentrations: Dict[str, float]
     ) -> jnp.ndarray:
         """Pack parameters into optimization vector."""
-        # Use log scale for T and n_e (ensures positivity)
-        log_T = jnp.log(T_eV)
-        log_ne = jnp.log(n_e)
-
-        # Use log-softmax for concentrations (ensures sum to 1, all positive)
-        conc_arr = jnp.array([concentrations.get(el, 0.01) for el in self.elements])
-        conc_arr = jnp.maximum(conc_arr, 1e-6)  # Avoid log(0)
-        log_conc = jnp.log(conc_arr)  # Will be softmax'ed during unpack
-
-        return jnp.concatenate([jnp.array([log_T, log_ne]), log_conc])
+        return _pack_params(T_eV, n_e, concentrations, self.elements)
 
     def _unpack_params(self, x: jnp.ndarray) -> Tuple[float, float, jnp.ndarray]:
         """Unpack optimization vector to parameters."""
-        log_T = x[0]
-        log_ne = x[1]
-        log_conc = x[2:]
-
-        T_eV = jnp.exp(log_T)
-        n_e = jnp.exp(log_ne)
-
-        # Apply softmax to ensure concentrations sum to 1
-        conc_arr = jax.nn.softmax(log_conc)
-
-        return T_eV, n_e, conc_arr
+        return _unpack_params(x)
 
     def _default_forward_model(
         self,
@@ -492,9 +489,7 @@ class SpectralFitter:
         return HybridInversionResult(
             temperature_eV=float(final_T),
             electron_density_cm3=float(final_ne),
-            concentrations={
-                el: float(final_conc[i]) for i, el in enumerate(self.elements)
-            },
+            concentrations={el: float(final_conc[i]) for i, el in enumerate(self.elements)},
             coarse_temperature_eV=initial_T_eV,
             coarse_electron_density_cm3=initial_n_e,
             coarse_concentrations=initial_concentrations,
@@ -505,20 +500,10 @@ class SpectralFitter:
             method=method,
         )
 
-    def _pack(
-        self, T_eV: float, n_e: float, concentrations: Dict[str, float]
-    ) -> jnp.ndarray:
+    def _pack(self, T_eV: float, n_e: float, concentrations: Dict[str, float]) -> jnp.ndarray:
         """Pack parameters."""
-        log_T = jnp.log(T_eV)
-        log_ne = jnp.log(n_e)
-        conc_arr = jnp.array([concentrations.get(el, 0.01) for el in self.elements])
-        conc_arr = jnp.maximum(conc_arr, 1e-6)
-        log_conc = jnp.log(conc_arr)
-        return jnp.concatenate([jnp.array([log_T, log_ne]), log_conc])
+        return _pack_params(T_eV, n_e, concentrations, self.elements)
 
     def _unpack(self, x: jnp.ndarray) -> Tuple[float, float, jnp.ndarray]:
         """Unpack parameters."""
-        T_eV = jnp.exp(x[0])
-        n_e = jnp.exp(x[1])
-        conc = jax.nn.softmax(x[2:])
-        return T_eV, n_e, conc
+        return _unpack_params(x)

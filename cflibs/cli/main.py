@@ -13,7 +13,6 @@ logger = get_logger("cli.main")
 
 def forward_model_cmd(args):
     """Forward modeling command."""
-    from pathlib import Path
     from cflibs.core.config import load_config, validate_plasma_config, validate_instrument_config
     from cflibs.atomic.database import AtomicDatabase
     from cflibs.plasma.state import SingleZoneLTEPlasma

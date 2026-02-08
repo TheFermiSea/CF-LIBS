@@ -85,17 +85,12 @@ class ResultTableMixin:
         include_ci: bool = True,
     ) -> str:
         """Format a parameter row with exponential notation."""
+        base = f"{label:<20} {mean:>12.2e}"
+        if std is not None:
+            base += f" {std:>12.2e}"
         if include_ci and ci is not None:
-            ci_str = f"[{ci[0]:.2e}, {ci[1]:.2e}]"
-            if std is not None:
-                return f"{label:<20} {mean:>12.2e} {std:>12.2e} {ci_str:>20}"
-            else:
-                return f"{label:<20} {mean:>12.2e}"
-        else:
-            if std is not None:
-                return f"{label:<20} {mean:>12.2e} {std:>12.2e}"
-            else:
-                return f"{label:<20} {mean:>12.2e}"
+            base += f" [{ci[0]:.2e}, {ci[1]:.2e}]"
+        return base
 
     @staticmethod
     def _format_param_row_int(

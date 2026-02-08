@@ -287,11 +287,7 @@ class EchelleExtractor:
                 resampled_flux = interp_func(master_grid)
 
                 # Apply merge method
-                if merge_method == "weighted_average":
-                    order_weight = (resampled_flux > 0).astype(float)
-                    master_flux += resampled_flux
-                    weights += order_weight
-                elif merge_method == "simple_average":
+                if merge_method in ("weighted_average", "simple_average"):
                     order_weight = (resampled_flux > 0).astype(float)
                     master_flux += resampled_flux
                     weights += order_weight

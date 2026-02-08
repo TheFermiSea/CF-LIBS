@@ -160,24 +160,22 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
     config_path = Path(config_path)
     suffix = config_path.suffix.lower()
 
+    # Validate suffix before opening file to avoid truncating on error
+    if suffix in [".yaml", ".yml"]:
+        if not HAS_YAML:
+            raise ImportError(
+                "PyYAML is required for YAML config files. " "Install with: pip install pyyaml"
+            )
+    elif suffix != ".json":
+        raise ValueError(
+            f"Unsupported config file format: {suffix}. "
+            "Use .yaml, .yml, or .json"
+        )
+
     with open(config_path, "w") as f:
         if suffix in [".yaml", ".yml"]:
-            if not HAS_YAML:
-                raise ImportError(
-                    "PyYAML is required for YAML config files. " "Install with: pip install pyyaml"
-                )
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         elif suffix == ".json":
             json.dump(config, f, indent=2)
-        else:
-            # Default to JSON if YAML not available
-            if HAS_YAML:
-                config_path = config_path.with_suffix(".yaml")
-                with open(config_path, "w") as f2:
-                    yaml.dump(config, f2, default_flow_style=False, sort_keys=False)
-            else:
-                config_path = config_path.with_suffix(".json")
-                with open(config_path, "w") as f:
-                    json.dump(config, f, indent=2)
 
     logger.info(f"Saved configuration to {config_path}")
