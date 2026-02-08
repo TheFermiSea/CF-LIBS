@@ -260,13 +260,14 @@ def _load_lines_from_db(
     List[Dict[str, Any]]
         List of line data dictionaries
     """
+    import re
     import sqlite3
 
     # Validate column names to prevent SQL injection via identifier interpolation
     if not columns:
         raise ValueError("columns must contain at least one column name")
     for col in columns:
-        if not isinstance(col, str) or not col.replace("_", "").isalnum():
+        if not isinstance(col, str) or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", col):
             raise ValueError(f"Invalid column name: {col!r}")
 
     placeholders = ",".join(["?"] * len(elements))
