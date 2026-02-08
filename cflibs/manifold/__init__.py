@@ -20,7 +20,7 @@ if HAS_FAISS:
     from cflibs.manifold.vector_index import VectorIndex, VectorIndexConfig
 
     HAS_VECTOR_INDEX = True
-    # Explicitly mark as used (exposed via __all__)
+    # Define public API when FAISS is available
     __all__ = [
         "ManifoldGenerator",
         "ManifoldConfig",
