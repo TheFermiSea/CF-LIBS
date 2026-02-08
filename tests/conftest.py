@@ -590,9 +590,10 @@ def quality_input_set(synthetic_line_observations, mock_boltzmann_fit_result):
 @pytest.fixture
 def sample_atomic_transitions():
     """
-    Fixture providing realistic atomic transition data.
-
-    Returns a list of LineObservation objects for common LIBS elements.
+    Provide a list of representative LineObservation instances for common LIBS transitions.
+    
+    Returns:
+        list[LineObservation]: Line observations for typical Fe I, Fe II, Cu I, and Al I transitions including wavelengths, intensities, uncertainties, and basic atomic parameters.
     """
     transitions = [
         # Fe I lines
@@ -641,7 +642,22 @@ def sample_atomic_transitions():
 
 @pytest.fixture
 def synthetic_libs_spectrum():
-    """Factory fixture for creating synthetic LIBS spectra with known peaks."""
+    """
+    Create a pytest factory fixture that generates synthetic LIBS spectra with configurable Gaussian peaks.
+    
+    The returned factory produces a wavelength array and corresponding intensity spectrum containing baseline, Gaussian peaks for specified element lines, and additive noise; the factory accepts parameters to set element peak definitions, temperature metadata, wavelength range, point count, noise level, peak FWHM, and RNG seed.
+    
+    Returns:
+        factory (callable): A function with signature
+            _create(elements=None, temperature_K=10000.0, wavelength_range=(200.0, 800.0),
+                    n_points=6000, noise_level=0.01, fwhm_nm=0.15, seed=42) -> dict
+            The returned dict contains:
+            - "wavelength" (ndarray): Wavelength grid in nanometers.
+            - "intensity" (ndarray): Simulated intensity values (non-negative).
+            - "elements" (dict): Element-to-peak-definition mapping provided to the factory.
+            - "peaks" (list): List of (element, wavelength_nm, amplitude) tuples actually included in the spectrum.
+            - "temperature_K" (float): Provided plasma temperature metadata.
+    """
 
     def _create(
         elements=None,
@@ -653,36 +669,25 @@ def synthetic_libs_spectrum():
         seed=42,
     ):
         """
-        Generate synthetic LIBS spectrum with Gaussian peaks at known wavelengths.
-
-        Parameters
-        ----------
-        elements : dict, optional
-            Dict mapping element symbols to list of (wavelength_nm, amplitude) tuples.
-            Default: {"Fe": [(371.99, 1000.0), (373.49, 500.0), (374.95, 200.0)],
-                      "H": [(656.28, 5000.0), (486.13, 1000.0)]}
-        temperature_K : float
-            Plasma temperature in K (metadata only)
-        wavelength_range : tuple
-            (min_nm, max_nm) wavelength range
-        n_points : int
-            Number of wavelength points
-        noise_level : float
-            Relative noise level (0.01 = 1%)
-        fwhm_nm : float
-            Full width at half maximum for Gaussian peaks in nm
-        seed : int
-            Random seed for reproducibility
-
-        Returns
-        -------
-        dict
-            Dictionary with keys:
-            - "wavelength": ndarray of wavelengths
-            - "intensity": ndarray of intensities
-            - "elements": dict of element peaks
-            - "peaks": list of (element, wavelength_nm, amplitude) tuples
-            - "temperature_K": plasma temperature (metadata)
+        Generate a synthetic LIBS spectrum containing Gaussian emission peaks for specified elements.
+        
+        Parameters:
+            elements (dict, optional): Mapping from element symbol to list of (wavelength_nm, amplitude) tuples.
+                Peaks outside `wavelength_range` are ignored. Default provides several Fe and H lines.
+            temperature_K (float): Plasma temperature in kelvin stored as metadata.
+            wavelength_range (tuple): (min_nm, max_nm) wavelength interval for the generated spectrum.
+            n_points (int): Number of wavelength samples to generate across `wavelength_range`.
+            noise_level (float): Relative noise level expressed as a fraction of the strongest signal (e.g., 0.01 = 1%).
+            fwhm_nm (float): Full width at half maximum for all Gaussian peaks in nanometers.
+            seed (int): Random seed used to initialize the noise generator for reproducibility.
+        
+        Returns:
+            dict: Dictionary with keys:
+                - "wavelength": ndarray of shape (n_points,) containing wavelengths in nm.
+                - "intensity": ndarray of shape (n_points,) containing simulated intensities (non-negative).
+                - "elements": the input `elements` mapping (possibly the default).
+                - "peaks": list of (element, wavelength_nm, amplitude) tuples included within `wavelength_range`.
+                - "temperature_K": the provided `temperature_K` value (metadata).
         """
         if elements is None:
             elements = {

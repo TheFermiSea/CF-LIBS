@@ -67,6 +67,24 @@ class ALIASIdentifier:
         detection_threshold: float = 0.5,
         elements: Optional[List[str]] = None,
     ):
+        """
+        Initialize an ALIASIdentifier with configuration for the ALIAS LIBS element-identification pipeline.
+        
+        Parameters:
+            atomic_db (AtomicDatabase): Database of atomic transitions and thermodynamic data used by the Saha–Boltzmann solver.
+            resolving_power (float): Instrument resolving power (lambda / delta_lambda) used for line fusion and matching.
+            T_range_K (Tuple[float, float]): Min and max temperatures (K) defining the temperature search interval.
+            n_e_range_cm3 (Tuple[float, float]): Min and max electron densities (cm^-3) defining the electron-density search interval.
+            T_steps (int): Number of discrete temperature points to generate across T_range_K.
+            n_e_steps (int): Number of discrete electron-density points to generate across n_e_range_cm3.
+            intensity_threshold_factor (float): Multiplier applied to the noise estimate to set the peak-detection threshold.
+            detection_threshold (float): Minimum confidence level required to classify an element as detected.
+            elements (Optional[List[str]]): Optional explicit list of element symbols to search; if None, a default set of common LIBS elements is used.
+        
+        Notes:
+            - A SahaBoltzmannSolver instance is created from `atomic_db`.
+            - Temperature and electron-density grids (`T_grid_K` and `n_e_grid_cm3`) are generated using the provided ranges and step counts.
+        """
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
         self.T_range_K = T_range_K
@@ -88,19 +106,14 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> ElementIdentificationResult:
         """
-        Identify elements in experimental spectrum.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array in nm
-        intensity : np.ndarray
-            Intensity array (arbitrary units)
-
-        Returns
-        -------
-        ElementIdentificationResult
-            Complete identification result with detected/rejected elements
+        Identify elements present in a LIBS spectrum and return a structured identification result.
+        
+        Parameters:
+        	wavelength (np.ndarray): Wavelength array in nanometers.
+        	intensity (np.ndarray): Spectral intensity array (arbitrary units).
+        
+        Returns:
+        	ElementIdentificationResult: Aggregated identification result containing detected and rejected elements, per-element matched/unmatched lines and metadata, experimental peak list, peak counts, algorithm name, and used parameters.
         """
         # Step 1: Detect peaks
         peaks = self._detect_peaks(wavelength, intensity)
@@ -250,19 +263,10 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> List[Tuple[int, float]]:
         """
-        Detect peaks using 2nd derivative enhancement.
-
-        Parameters
-        ----------
-        wavelength : np.ndarray
-            Wavelength array
-        intensity : np.ndarray
-            Intensity array
-
-        Returns
-        -------
-        List[Tuple[int, float]]
-            List of (peak_index, peak_wavelength) tuples
+        Identify spectral peaks in the provided wavelength and intensity arrays.
+        
+        Returns:
+            List[Tuple[int, float]]: List of (peak_index, peak_wavelength) tuples.
         """
         # Estimate noise using MAD (Median Absolute Deviation)
         median_intensity = np.median(intensity)
@@ -363,19 +367,14 @@ class ALIASIdentifier:
 
     def _fuse_lines(self, line_data: List[dict], wavelength_nm: np.ndarray) -> List[dict]:
         """
-        Fuse lines within resolution element.
-
-        Parameters
-        ----------
-        line_data : List[dict]
-            List of line dicts from _compute_element_emissivities
-        wavelength_nm : np.ndarray
-            Experimental wavelength array (for reference wavelength)
-
-        Returns
-        -------
-        List[dict]
-            Fused line list with combined emissivities
+        Group theoretical spectral lines that fall within a single instrumental resolution element into fused entries.
+        
+        Parameters:
+            line_data (List[dict]): Per-transition dictionaries produced by _compute_element_emissivities; each entry must include a "wavelength_nm" and an emissivity value.
+            wavelength_nm (np.ndarray): Experimental wavelength array used to compute the instrument resolution element (mean wavelength / resolving_power).
+        
+        Returns:
+            List[dict]: Fused line dictionaries where emissivities from lines within one resolution element are combined and a representative transition/wavelength is chosen.
         """
         if not line_data:
             return []
@@ -411,17 +410,23 @@ class ALIASIdentifier:
 
     def _finalize_group(self, group: List[dict]) -> dict:
         """
-        Finalize a group of lines by summing emissivities.
-
-        Parameters
-        ----------
-        group : List[dict]
-            Group of line dicts
-
-        Returns
-        -------
-        dict
-            Fused line dict
+        Create a fused line entry from a group of theoretical lines.
+        
+        Sums the `avg_emissivity` values of all lines in the group and selects the line
+        with the largest `avg_emissivity` to provide the representative `wavelength_nm`
+        and `transition`.
+        
+        Parameters:
+            group (List[dict]): List of line dictionaries. Each dictionary is expected to
+                contain at least the keys `"avg_emissivity"`, `"wavelength_nm"`, and
+                `"transition"`.
+        
+        Returns:
+            dict: Fused line dictionary with keys:
+                - `transition`: representative transition (from the strongest line).
+                - `avg_emissivity`: sum of emissivities for the fused group.
+                - `wavelength_nm`: representative wavelength (from the strongest line).
+                - `n_fused`: number of lines fused.
         """
         # Sum emissivities
         total_emissivity = sum(line["avg_emissivity"] for line in group)
@@ -440,20 +445,16 @@ class ALIASIdentifier:
         self, fused_lines: List[dict], peaks: List[Tuple[int, float]]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Match theoretical lines to experimental peaks.
-
-        Parameters
-        ----------
-        fused_lines : List[dict]
-            Fused theoretical lines
-        peaks : List[Tuple[int, float]]
-            Experimental peaks as (index, wavelength) tuples
-
-        Returns
-        -------
-        Tuple[np.ndarray, np.ndarray]
-            (matched_mask, wavelength_shifts) where matched_mask is bool array and
-            wavelength_shifts is float array of shifts in nm
+        Match fused theoretical lines to experimental spectral peaks.
+        
+        Parameters:
+            fused_lines (List[dict]): Fused theoretical line entries (each must include a `wavelength_nm` key) sorted or unsorted; matching is performed against each entry's wavelength.
+            peaks (List[Tuple[int, float]]): Experimental peaks as (index, wavelength_nm) tuples.
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 
+                matched_mask: boolean array aligned with `fused_lines`, `True` where a peak was found within half a resolution element of the fused line.
+                wavelength_shifts: float array (nm) aligned with `fused_lines`, giving the matched peak wavelength minus the fused line wavelength; entries are zero for lines with no match.
         """
         if not peaks or not fused_lines:
             return np.zeros(len(fused_lines), dtype=bool), np.zeros(len(fused_lines))
@@ -486,19 +487,16 @@ class ALIASIdentifier:
         self, fused_lines: List[dict], matched_mask: np.ndarray
     ) -> float:
         """
-        Determine emissivity threshold where detection rate > 50%.
-
-        Parameters
-        ----------
-        fused_lines : List[dict]
-            Fused theoretical lines
-        matched_mask : np.ndarray
-            Boolean mask of matched lines
-
-        Returns
-        -------
-        float
-            Log10 emissivity threshold
+        Determine the log10 emissivity threshold at which the per-bin detection rate exceeds 50%.
+        
+        This inspects the fused theoretical lines' average emissivities (using each dict's "avg_emissivity" value), bins them in integer log10-decade bins, and computes the fraction of matched lines in each bin. It returns the lowest log10-emissivity bin edge for which the detection rate is greater than 0.5. If the emissivity dynamic range is too small or no bin meets the criterion, returns the minimum log10 emissivity observed.
+        
+        Parameters:
+            fused_lines (List[dict]): Fused theoretical line entries; each dict must contain an "avg_emissivity" numeric value.
+            matched_mask (np.ndarray): Boolean array indicating which fused lines are matched; must align with fused_lines order.
+        
+        Returns:
+            float: Log10 emissivity threshold (bin edge) where detection rate > 0.5, or the minimum log10 emissivity if no bin meets the criterion.
         """
         emissivities = np.array([line["avg_emissivity"] for line in fused_lines])
 
@@ -554,27 +552,21 @@ class ALIASIdentifier:
         emissivity_threshold: float,
     ) -> Tuple[float, float, float]:
         """
-        Compute k_sim, k_rate, k_shift scores.
-
-        Parameters
-        ----------
-        fused_lines : List[dict]
-            Fused theoretical lines
-        matched_mask : np.ndarray
-            Boolean mask of matched lines
-        wavelength_shifts : np.ndarray
-            Wavelength shifts in nm
-        intensity : np.ndarray
-            Experimental intensity array
-        peaks : List[Tuple[int, float]]
-            Experimental peaks
-        emissivity_threshold : float
-            Log10 emissivity threshold
-
-        Returns
-        -------
-        Tuple[float, float, float]
-            (k_sim, k_rate, k_shift) scores in [0, 1]
+        Compute three quality scores used for element detection: similarity, detection-rate, and wavelength alignment.
+        
+        Parameters:
+            fused_lines (List[dict]): Fused theoretical line entries; each must contain keys "avg_emissivity" and "wavelength_nm".
+            matched_mask (np.ndarray): Boolean array indicating which fused lines were matched to experimental peaks.
+            wavelength_shifts (np.ndarray): Array of wavelength shifts (peak_wavelength - theory_wavelength) in nm, aligned with fused_lines.
+            intensity (np.ndarray): Experimental intensity array indexed by sample points.
+            peaks (List[Tuple[int, float]]): List of detected peaks as (index, wavelength_nm) tuples.
+            emissivity_threshold (float): Log10 emissivity threshold; lines with avg_emissivity >= 10**emissivity_threshold are considered above threshold.
+        
+        Returns:
+            Tuple[float, float, float]: (k_sim, k_rate, k_shift)
+                - k_sim: Cosine similarity between theoretical emissivities and matched experimental peak intensities (in [0,1]; 0.5 used as neutral when insufficient points).
+                - k_rate: Emissivity-weighted detection rate — fraction of total emissivity (above threshold) accounted for by matched lines (in [0,1]).
+                - k_shift: Wavelength alignment quality mapped to [0,1], where 1 indicates perfect alignment and values decrease with mean absolute shift relative to the instrument resolution.
         """
         if not np.any(matched_mask):
             return 0.0, 0.0, 0.0
@@ -654,27 +646,18 @@ class ALIASIdentifier:
         peaks: List[Tuple[int, float]],
     ) -> Tuple[float, float]:
         """
-        Compute detection score k_det and confidence level CL.
-
-        Parameters
-        ----------
-        k_sim : float
-            Similarity score
-        k_rate : float
-            Detection rate score
-        k_shift : float
-            Wavelength shift score
-        N_X : int
-            Number of matched lines above threshold
-        intensity : np.ndarray
-            Experimental intensity array
-        peaks : List[Tuple[int, float]]
-            Experimental peaks
-
-        Returns
-        -------
-        Tuple[float, float]
-            (k_det, CL) detection score and confidence level
+        Combine the component scores into a single detection score and compute a confidence level.
+        
+        Parameters:
+            k_sim (float): Intensity-style similarity between theoretical and observed line strengths.
+            k_rate (float): Fractional detection rate for strong theoretical lines.
+            k_shift (float): Wavelength-alignment quality (higher is better).
+            N_X (int): Number of matched strong lines used to weight combined score.
+            intensity (np.ndarray): Full experimental intensity array; used to estimate spectrum SNR.
+            peaks (List[Tuple[int, float]]): Detected peaks as (index, wavelength) pairs; used to compute median peak intensity.
+        
+        Returns:
+            Tuple[float, float]: (k_det, CL) where `k_det` is the combined detection score and `CL` is the confidence level (product of `k_det` with auxiliary quality factors).
         """
         # k_det formula
         if N_X > 0:

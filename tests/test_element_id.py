@@ -15,7 +15,12 @@ from cflibs.inversion.boltzmann import LineObservation
 
 @pytest.fixture
 def mock_transition():
-    """Create a mock Transition object."""
+    """
+    Constructs a pre-filled Transition for Fe used in tests.
+    
+    Returns:
+        Transition: A Transition for Fe (ionization_stage=1) with wavelength 371.99 nm, A_ki=1.0e8, E_k_ev=3.33, E_i_ev=0.0, g_k=9, g_i=9, and relative_intensity=1000.0.
+    """
     return Transition(
         element="Fe",
         ionization_stage=1,
@@ -31,7 +36,12 @@ def mock_transition():
 
 @pytest.fixture
 def mock_transition_ti():
-    """Create a mock Transition object for Ti."""
+    """
+    Create a mock Transition for titanium (Ti) used in tests.
+    
+    Returns:
+        Transition: A Transition for Ti I with wavelength 498.17 nm, A_ki 5.0e7 s^-1, upper energy 2.49 eV, lower energy 0.0 eV, degeneracies g_k=7 and g_i=5, and relative intensity 500.0.
+    """
     return Transition(
         element="Ti",
         ionization_stage=1,
