@@ -18,6 +18,7 @@ from cflibs.inversion.element_id import (
     ElementIdentification,
     ElementIdentificationResult,
 )
+from cflibs.inversion.preprocessing import estimate_baseline, estimate_noise
 
 
 class ALIASIdentifier:
@@ -48,7 +49,7 @@ class ALIASIdentifier:
     n_e_steps : int, optional
         Number of electron density grid points (default: 3)
     intensity_threshold_factor : float, optional
-        Peak detection threshold = factor × noise_estimate (default: 10.0)
+        Peak detection threshold = factor × noise_estimate (default: 4.0)
     detection_threshold : float, optional
         Minimum confidence level for element detection (default: 0.5)
     elements : Optional[List[str]], optional
@@ -63,7 +64,7 @@ class ALIASIdentifier:
         n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
         T_steps: int = 5,
         n_e_steps: int = 3,
-        intensity_threshold_factor: float = 10.0,
+        intensity_threshold_factor: float = 4.0,
         detection_threshold: float = 0.5,
         elements: Optional[List[str]] = None,
     ):
@@ -264,16 +265,16 @@ class ALIASIdentifier:
         List[Tuple[int, float]]
             List of (peak_index, peak_wavelength) tuples
         """
-        # Estimate noise using MAD (Median Absolute Deviation)
-        median_intensity = np.median(intensity)
-        mad = np.median(np.abs(intensity - median_intensity))
-        noise_estimate = mad * 1.4826  # Scale factor for normal distribution
+        # Estimate baseline and noise using sigma-clipped MAD
+        baseline = estimate_baseline(wavelength, intensity)
+        noise_estimate = estimate_noise(intensity, baseline)
 
         # Threshold
         threshold = noise_estimate * self.intensity_threshold_factor
 
-        # Find peaks
-        peak_indices, properties = find_peaks(intensity, height=threshold, prominence=threshold / 2)
+        # Find peaks in baseline-corrected signal
+        corrected = intensity - baseline
+        peak_indices, _ = find_peaks(corrected, height=threshold, prominence=threshold / 3)
 
         # Return as list of (index, wavelength) tuples
         peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
@@ -464,11 +465,29 @@ class ALIASIdentifier:
         mean_wl = np.mean([line["wavelength_nm"] for line in fused_lines])
         delta_lambda = mean_wl / self.resolving_power
 
+        # Estimate global wavelength offset from strongest peaks
+        sorted_by_emissivity = sorted(
+            fused_lines, key=lambda x: x["avg_emissivity"], reverse=True
+        )
+        top_lines = sorted_by_emissivity[: min(5, len(sorted_by_emissivity))]
+
+        shifts = []
+        for line in top_lines:
+            wl_th = line["wavelength_nm"]
+            distances = np.abs(peak_wavelengths - wl_th)
+            if len(distances) > 0:
+                min_dist = np.min(distances)
+                if min_dist <= delta_lambda:  # within one resolution element
+                    closest_idx = np.argmin(distances)
+                    shifts.append(peak_wavelengths[closest_idx] - wl_th)
+
+        global_shift = np.median(shifts) if shifts else 0.0
+
         matched_mask = np.zeros(len(fused_lines), dtype=bool)
         wavelength_shifts = np.zeros(len(fused_lines))
 
         for i, line in enumerate(fused_lines):
-            wl_th = line["wavelength_nm"]
+            wl_th = line["wavelength_nm"] + global_shift  # Apply correction
 
             # Find peaks within +/- delta_lambda/2
             distances = np.abs(peak_wavelengths - wl_th)
@@ -476,9 +495,9 @@ class ALIASIdentifier:
 
             if np.any(within_window):
                 matched_mask[i] = True
-                # Shift to closest peak
+                # Shift to closest peak (relative to uncorrected wavelength)
                 closest_idx = np.argmin(distances)
-                wavelength_shifts[i] = peak_wavelengths[closest_idx] - wl_th
+                wavelength_shifts[i] = peak_wavelengths[closest_idx] - line["wavelength_nm"]
 
         return matched_mask, wavelength_shifts
 
@@ -679,6 +698,9 @@ class ALIASIdentifier:
         # k_det formula
         if N_X > 0:
             k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+        elif k_rate > 0:
+            # Partial credit: some lines matched but below emissivity threshold
+            k_det = k_rate * 0.3
         else:
             k_det = 0.0
 
