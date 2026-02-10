@@ -54,6 +54,9 @@ class CorrelationIdentifier:
         Temperature grid steps for classic mode (default: 5)
     n_e_steps : int
         Density grid steps for classic mode (default: 3)
+    instrument_fwhm_nm : float
+        Instrument spectral FWHM in nm (default: 0.05). Used to derive
+        Gaussian sigma = FWHM / 2.355 for model line profiles.
 
     Attributes
     ----------
@@ -88,6 +91,7 @@ class CorrelationIdentifier:
         n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
         T_steps: int = 5,
         n_e_steps: int = 3,
+        instrument_fwhm_nm: float = 0.05,
     ):
         self.atomic_db = atomic_db
         self.vector_index = vector_index
@@ -99,6 +103,7 @@ class CorrelationIdentifier:
         self.n_e_range_cm3 = n_e_range_cm3
         self.T_steps = T_steps
         self.n_e_steps = n_e_steps
+        self.instrument_fwhm_nm = instrument_fwhm_nm
 
         self.saha_solver = SahaBoltzmannSolver(atomic_db)
 
@@ -356,23 +361,37 @@ class CorrelationIdentifier:
 
         model_spectrum = np.zeros_like(wavelength, dtype=np.float64)
 
+        # Compute ionization fractions using Saha equation
+        total_density = 1e15  # arbitrary reference density
+        try:
+            stage_densities = self.saha_solver.solve_ionization_balance(
+                element, T_eV, n_e, total_density
+            )
+        except Exception:
+            stage_densities = {}
+
+        sigma = self.instrument_fwhm_nm / 2.355
+
         for trans in transitions:
             # Partition function
             U = self.saha_solver.calculate_partition_function(
                 element, trans.ionization_stage, T_eV
             )
 
-            # Boltzmann factor: eps = A_ki * g_k * exp(-E_k/kT) / U(T)
-            eps = trans.A_ki * trans.g_k * np.exp(-trans.E_k_ev / T_eV) / U
+            # Ion-stage population fraction from Saha balance
+            W_q = stage_densities.get(trans.ionization_stage, 1.0) / max(total_density, 1e-30)
 
-            # Add Gaussian line profile (simple approximation)
-            sigma = 0.05  # nm, simple width
+            # Boltzmann factor weighted by ionization fraction
+            eps = W_q * trans.A_ki * trans.g_k * np.exp(-trans.E_k_ev / T_eV) / U
+
             gaussian = np.exp(-0.5 * ((wavelength - trans.wavelength_nm) / sigma) ** 2)
             model_spectrum += eps * gaussian
 
-        # Normalize to match experimental scale
-        if np.max(model_spectrum) > 1e-10:
-            model_spectrum = model_spectrum / np.max(model_spectrum) * np.max(intensity)
+        # Robust normalization: 95th percentile instead of max (resistant to spikes)
+        exp_scale = np.percentile(intensity, 95.0)
+        model_scale = np.percentile(model_spectrum, 95.0)
+        if model_scale > 1e-10 and exp_scale > 1e-10:
+            model_spectrum = model_spectrum * (exp_scale / model_scale)
 
         return model_spectrum
 
