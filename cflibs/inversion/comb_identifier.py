@@ -579,12 +579,11 @@ class CombIdentifier:
 
     def _compute_fingerprint(self, teeth: List[dict]) -> float:
         """
-        Compute fingerprint as coverage-penalized mean of active correlations.
+        Compute fingerprint as coverage-penalized mean correlation.
 
-        Paper formula (Gajarska et al. 2024): fingerprint = mean(active_correlations)
-        Hybrid: fingerprint = mean(active_corr) × (n_active / n_total)
-        The hybrid preserves the coverage penalty while using the correct mean,
-        preventing 1 lucky tooth from producing fingerprint = 0.9.
+        Score = sum(active correlations) / total teeth count.
+        This penalizes elements with few active teeth out of many total,
+        preventing false positives when only a handful of lines match noise.
 
         Parameters
         ----------
@@ -601,11 +600,7 @@ class CombIdentifier:
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-        # Hybrid: mean of active correlations × sqrt coverage penalty.
-        # sqrt softens the linear coverage penalty to avoid crushing
-        # elements with many theoretical lines but few visible peaks
-        # (common at low RP where lines merge).
-        mean_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
-        coverage = len(active_teeth) / len(teeth)
-        fingerprint = mean_corr * np.sqrt(coverage)
+        # Sum of active correlations divided by TOTAL teeth count
+        total_correlation = sum(t["best_correlation"] for t in active_teeth)
+        fingerprint = total_correlation / len(teeth)
         return fingerprint
