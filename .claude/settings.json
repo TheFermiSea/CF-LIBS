@@ -2,19 +2,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "hooks": [
-          {"type": "command", "command": ".claude/hooks/block-orchestrator-tools.sh"}
-        ]
-      },
-      {
-        "matcher": "Task",
-        "hooks": [
-          {"type": "command", "command": ".claude/hooks/enforce-bead-for-supervisor.sh"},
-          {"type": "command", "command": ".claude/hooks/remind-inprogress.sh"},
-          {"type": "command", "command": ".claude/hooks/inject-discipline-reminder.sh"}
-        ]
-      },
-      {
         "matcher": "Edit",
         "hooks": [
           {"type": "command", "command": ".claude/hooks/enforce-branch-before-edit.sh"}
@@ -33,21 +20,8 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Task",
-        "hooks": [
-          {"type": "command", "command": ".claude/hooks/enforce-concise-response.sh"}
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {"type": "command", "command": ".claude/hooks/validate-completion.sh"}
-        ]
-      }
-    ],
+    "PostToolUse": [],
+    "SubagentStop": [],
     "SessionStart": [
       {
         "hooks": [
