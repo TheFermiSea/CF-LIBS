@@ -168,7 +168,7 @@ class CorrelationIdentifier:
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
         if len(non_zero_scores) >= 2:
             median_score = np.median(non_zero_scores)
-            relative_threshold = 1.5 * median_score
+            relative_threshold = 1.3 * median_score
         else:
             relative_threshold = 0.0
 
