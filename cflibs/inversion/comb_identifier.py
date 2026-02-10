@@ -13,6 +13,7 @@ from scipy.ndimage import median_filter
 from scipy.stats import pearsonr
 
 from cflibs.atomic.database import AtomicDatabase
+from cflibs.core.constants import KB_EV
 from cflibs.atomic.structures import Transition
 from cflibs.inversion.element_id import (
     IdentifiedLine,
@@ -47,7 +48,7 @@ class CombIdentifier:
     max_shift_pts : int, optional
         Maximum shift in data points for template matching (default: 5)
     min_width_pts : int, optional
-        Minimum tooth width in data points (default: 3)
+        Minimum tooth width in data points (default: 5)
     max_width_factor : float, optional
         Maximum width as fraction of resolution element (default: 1.0)
     elements : List[str], optional
@@ -231,7 +232,7 @@ class CombIdentifier:
         non_zero_scores = [e.score for e in element_identifications if e.score > 0]
         if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
-            relative_threshold = 1.5 * median_score
+            relative_threshold = min(1.0, 1.5 * median_score)
         else:
             relative_threshold = 0.0
 
@@ -253,7 +254,7 @@ class CombIdentifier:
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
-        # Step 6: Identify experimental peaks (simple threshold-based for now)
+        # Step 7: Identify experimental peaks (simple threshold-based for now)
         residual = intensity - baseline
         peak_mask = residual > threshold
         peak_indices = np.where(peak_mask)[0]
@@ -320,8 +321,7 @@ class CombIdentifier:
             element, wavelength_min=wl_min, wavelength_max=wl_max
         )
         if len(transitions) > self.max_lines_per_element:
-            kB_eV = 8.617e-5
-            kT = kB_eV * self.reference_temperature
+            kT = KB_EV * self.reference_temperature
             transitions = sorted(
                 transitions,
                 key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),

@@ -1,6 +1,5 @@
 """Tests for shared preprocessing module."""
 import numpy as np
-import pytest
 from cflibs.inversion.preprocessing import (
     estimate_baseline,
     estimate_noise,

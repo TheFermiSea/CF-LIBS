@@ -55,24 +55,23 @@ def load_netcdf(path: str) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     metadata : dict
         Metadata extracted from dataset
     """
-    ds = xr.open_dataset(path)
-    wavelength = ds.coords["Wavelength"].values
+    with xr.open_dataset(path) as ds:
+        wavelength = ds.coords["Wavelength"].values
 
-    # Handle different variable names
-    if "__xarray_dataarray_variable__" in ds:
-        data = ds["__xarray_dataarray_variable__"].values
-    elif "Intensity" in ds:
-        data = ds["Intensity"].values
-    else:
-        raise ValueError(f"Unknown data variable in {path}")
+        # Handle different variable names
+        if "__xarray_dataarray_variable__" in ds:
+            data = ds["__xarray_dataarray_variable__"].values
+        elif "Intensity" in ds:
+            data = ds["Intensity"].values
+        else:
+            raise ValueError(f"Unknown data variable in {path}")
 
-    metadata = {
-        "format": "netcdf",
-        "shape": data.shape,
-        "wavelength_range": (wavelength.min(), wavelength.max()),
-    }
+        metadata = {
+            "format": "netcdf",
+            "shape": data.shape,
+            "wavelength_range": (wavelength.min(), wavelength.max()),
+        }
 
-    ds.close()
     return wavelength, data, metadata
 
 
@@ -362,10 +361,11 @@ def print_result_table(
                 detected_str = "YES*" if (e.detected and elem in expected) else (
                     "YES" if e.detected else "NO"
                 )
+                matched_str = f"{e.n_matched_lines}/{e.n_total_lines}"
                 print(
                     f"{algo_name:<15} {e.element:<8} {detected_str:<10} "
                     f"{e.score:<8.3f} {e.confidence:<12.3f} "
-                    f"{e.n_matched_lines}/{e.n_total_lines:<15}"
+                    f"{matched_str:<15}"
                 )
                 algo_name = ""  # Don't repeat algorithm name
             else:
@@ -558,7 +558,7 @@ def plot_spatial_map(
 
     # Plot heatmaps
     fig, axes = plt.subplots(2, (n_elements + 1) // 2, figsize=(12, 8))
-    axes = axes.flatten() if n_elements > 1 else [axes]
+    axes = np.atleast_1d(axes).flatten()
 
     for idx, elem in enumerate(elements):
         ax = axes[idx]
@@ -692,7 +692,8 @@ def main():
             continue
 
         print(f"  Loaded: {metadata['format']}, shape={metadata['shape']}")
-        print(f"  Wavelength range: {metadata['wavelength_range'][0]:.2f}-{metadata['wavelength_range'][1]:.2f} nm")
+        wl_min, wl_max = metadata["wavelength_range"]
+        print(f"  Wavelength range: {wl_min:.2f}-{wl_max:.2f} nm")
 
         # Select representative spectrum
         spectrum = select_representative_spectrum(data, dataset["name"])

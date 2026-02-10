@@ -339,8 +339,7 @@ class ALIASIdentifier:
 
         # Cap to strongest lines by estimated emissivity to avoid line-count disparity
         if len(transitions) > self.max_lines_per_element:
-            kB_eV = 8.617e-5
-            kT = kB_eV * self.reference_temperature
+            kT = KB_EV * self.reference_temperature
             transitions = sorted(
                 transitions,
                 key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),
@@ -520,7 +519,7 @@ class ALIASIdentifier:
         for i, line in enumerate(fused_lines):
             wl_th = line["wavelength_nm"] + global_shift  # Apply correction
 
-            # Find peaks within +/- delta_lambda/2
+            # Find peaks within +/- delta_lambda
             distances = np.abs(peak_wavelengths - wl_th)
             within_window = distances <= delta_lambda
 

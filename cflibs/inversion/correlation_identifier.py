@@ -46,7 +46,7 @@ class CorrelationIdentifier:
     top_k : int
         Number of nearest neighbors for vector mode (default: 10)
     min_confidence : float
-        Minimum confidence threshold for detection (default: 0.3)
+        Minimum confidence threshold for detection (default: 0.03)
     T_range_K : Tuple[float, float]
         Temperature range for classic mode in Kelvin (default: (8000, 12000))
     n_e_range_cm3 : Tuple[float, float]
@@ -58,6 +58,10 @@ class CorrelationIdentifier:
     instrument_fwhm_nm : float
         Instrument spectral FWHM in nm (default: 0.05). Used to derive
         Gaussian sigma = FWHM / 2.355 for model line profiles.
+    max_lines_per_element : int
+        Cap transitions per element by emissivity (default: 100)
+    reference_temperature : float
+        Reference temperature in K for emissivity ranking (default: 10000.0)
 
     Attributes
     ----------
@@ -171,7 +175,7 @@ class CorrelationIdentifier:
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
         if len(non_zero_scores) >= 2:
             median_score = np.median(non_zero_scores)
-            relative_threshold = 1.5 * median_score
+            relative_threshold = min(1.0, 1.5 * median_score)
         else:
             relative_threshold = 0.0
 
@@ -408,7 +412,7 @@ class CorrelationIdentifier:
                 element, T_eV, n_e, total_density
             )
         except Exception:
-            stage_densities = {}
+            stage_densities = None
 
         sigma = self.instrument_fwhm_nm / 2.355
 
@@ -419,7 +423,10 @@ class CorrelationIdentifier:
             )
 
             # Ion-stage population fraction from Saha balance
-            W_q = stage_densities.get(trans.ionization_stage, 1.0) / max(total_density, 1e-30)
+            if stage_densities is not None:
+                W_q = stage_densities.get(trans.ionization_stage, 1.0) / max(total_density, 1e-30)
+            else:
+                W_q = 1.0  # Fallback: avoid zeroing model when Saha fails
 
             # Boltzmann factor weighted by ionization fraction
             eps = W_q * trans.A_ki * trans.g_k * np.exp(-trans.E_k_ev / T_eV) / U

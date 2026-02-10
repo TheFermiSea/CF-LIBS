@@ -7,6 +7,8 @@ import numpy as np
 from cflibs.inversion.comb_identifier import CombIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
 
+pytestmark = pytest.mark.requires_db
+
 
 def test_build_triangular_template():
     """Test triangular template generation."""
@@ -642,6 +644,6 @@ def test_max_lines_per_element_parameter(atomic_db):
 
 
 def test_default_min_correlation_lowered(atomic_db):
-    """Test that default min_correlation is 0.15."""
+    """Test that default min_correlation is 0.10."""
     identifier = CombIdentifier(atomic_db)
     assert identifier.min_correlation == 0.10

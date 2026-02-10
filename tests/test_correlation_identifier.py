@@ -8,6 +8,8 @@ import numpy as np
 from cflibs.inversion.correlation_identifier import CorrelationIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
 
+pytestmark = pytest.mark.requires_db
+
 
 def test_correlation_identifier_classic_mode(temp_db):
     """Test classic mode correlation identification."""
@@ -202,7 +204,7 @@ def test_max_lines_per_element_parameter(temp_db):
 
 
 def test_default_min_confidence_lowered(temp_db):
-    """Test that default min_confidence is 0.05."""
+    """Test that default min_confidence is 0.03."""
     from cflibs.atomic.database import AtomicDatabase
 
     db = AtomicDatabase(temp_db)
