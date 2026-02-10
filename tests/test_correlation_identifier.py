@@ -208,4 +208,4 @@ def test_default_min_confidence_lowered(temp_db):
     db = AtomicDatabase(temp_db)
 
     identifier = CorrelationIdentifier(db)
-    assert identifier.min_confidence == 0.05
+    assert identifier.min_confidence == 0.03

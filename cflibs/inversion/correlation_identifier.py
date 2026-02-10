@@ -86,7 +86,7 @@ class CorrelationIdentifier:
         elements: Optional[List[str]] = None,
         wavelength_tolerance_nm: float = 0.1,
         top_k: int = 10,
-        min_confidence: float = 0.05,
+        min_confidence: float = 0.03,
         T_range_K: Tuple[float, float] = (8000, 12000),
         n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
         T_steps: int = 5,
@@ -163,6 +163,15 @@ class CorrelationIdentifier:
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
+        # Relative score filter: require score to stand out from median
+        # Only apply when comparing 2+ elements (single-element has nothing to compare)
+        non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
+        if len(non_zero_scores) >= 2:
+            median_score = np.median(non_zero_scores)
+            relative_threshold = 1.5 * median_score
+        else:
+            relative_threshold = 0.0
+
         # Build result
         detected_elements = []
         rejected_elements = []
@@ -170,7 +179,7 @@ class CorrelationIdentifier:
         for element, score, confidence, matched_lines, unmatched_lines in element_scores:
             elem_id = ElementIdentification(
                 element=element,
-                detected=confidence >= self.min_confidence,
+                detected=confidence >= self.min_confidence and confidence >= relative_threshold,
                 score=score,
                 confidence=confidence,
                 n_matched_lines=len(matched_lines),
