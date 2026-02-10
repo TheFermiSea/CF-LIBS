@@ -195,6 +195,21 @@ DATASETS = [
     },
 ]
 
+BENCHMARK_CRITERIA = {
+    "min_recall": 0.60,
+    "max_fpr": 0.20,
+    "required_detections": {
+        ("Fe_245nm", "Fe"),
+        ("Ni_245nm", "Ni"),
+        ("steel_245nm", "Fe"),
+    },
+    "required_absences": {
+        ("Fe_245nm", "Ni"),
+        ("Fe_245nm", "Cu"),
+        ("Ni_245nm", "Fe"),
+    },
+}
+
 
 # ============================================================================
 # Spectrum Selection
@@ -606,6 +621,11 @@ def main():
         action="store_true",
         help="Skip spatial maps (slow) (default: False)",
     )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run benchmark mode with pass/fail criteria (default: False)",
+    )
 
     args = parser.parse_args()
 
@@ -637,6 +657,11 @@ def main():
 
     # Summary tracking
     summary = {algo: {"expected_detected": 0, "total_expected": 0} for algo in ["ALIAS", "Comb", "Correlation"]}
+    # Per-dataset detection results for benchmark mode
+    # Structure: {algo: {(dataset_name, element): bool_detected}}
+    detection_results: Dict[str, Dict[Tuple[str, str], bool]] = {
+        algo: {} for algo in ["ALIAS", "Comb", "Correlation"]
+    }
 
     # Process each dataset
     for dataset in datasets_to_run:
@@ -679,15 +704,19 @@ def main():
         # Print results table
         print_result_table(results, dataset["name"], expected)
 
-        # Update summary
+        # Update summary and per-dataset detection results
         for algo_name in ["ALIAS", "Comb", "Correlation"]:
             result = results.get(algo_name)
             if result is not None:
                 detected_elems = {e.element for e in result.detected_elements}
+                all_searched = {e.element for e in result.all_elements}
                 for exp_elem in expected:
                     if exp_elem in detected_elems:
                         summary[algo_name]["expected_detected"] += 1
                 summary[algo_name]["total_expected"] += len(expected)
+                # Record per-(dataset, element) detection for benchmark
+                for elem in all_searched:
+                    detection_results[algo_name][(dataset["name"], elem)] = elem in detected_elems
 
         # Generate plots
         if not args.no_plots:
@@ -733,6 +762,106 @@ def main():
         print(f"{algo_name:<15} {detected:<20} {total:<15} {success_rate:<15.2%}")
 
     print(f"\nValidation complete. Results saved to {output_dir}")
+
+    # Benchmark mode
+    if args.benchmark:
+        passed = run_benchmark(detection_results, datasets_to_run)
+        sys.exit(0 if passed else 1)
+
+
+def run_benchmark(
+    detection_results: Dict[str, Dict[Tuple[str, str], bool]],
+    datasets_run: List[Dict[str, Any]],
+) -> bool:
+    """
+    Evaluate benchmark criteria against collected detection results.
+
+    Parameters
+    ----------
+    detection_results : dict
+        {algo: {(dataset_name, element): bool_detected}}
+    datasets_run : list
+        List of dataset dicts that were processed
+
+    Returns
+    -------
+    bool
+        True if all benchmark criteria pass
+    """
+    print(f"\n{'='*100}")
+    print("BENCHMARK RESULTS")
+    print(f"{'='*100}")
+
+    # Build expected set from datasets that were actually run
+    dataset_expected = {}
+    for ds in datasets_run:
+        dataset_expected[ds["name"]] = set(ds["expected"])
+
+    all_passed = True
+
+    for algo_name in ["ALIAS", "Comb", "Correlation"]:
+        print(f"\n--- {algo_name} ---")
+        algo_results = detection_results.get(algo_name, {})
+
+        # Classify TP/FP/FN/TN
+        tp = fp = fn = tn = 0
+        for (ds_name, elem), detected in algo_results.items():
+            if ds_name not in dataset_expected:
+                continue
+            is_expected = elem in dataset_expected[ds_name]
+            if is_expected and detected:
+                tp += 1
+            elif is_expected and not detected:
+                fn += 1
+            elif not is_expected and detected:
+                fp += 1
+            else:
+                tn += 1
+
+        # Compute metrics
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+        print(f"  TP={tp}  FP={fp}  FN={fn}  TN={tn}")
+        print(f"  Precision: {precision:.3f}")
+        print(f"  Recall:    {recall:.3f}  (min: {BENCHMARK_CRITERIA['min_recall']:.2f})")
+        print(f"  FPR:       {fpr:.3f}  (max: {BENCHMARK_CRITERIA['max_fpr']:.2f})")
+
+        # Check thresholds
+        recall_ok = recall >= BENCHMARK_CRITERIA["min_recall"]
+        fpr_ok = fpr <= BENCHMARK_CRITERIA["max_fpr"]
+        print(f"  Recall pass: {'YES' if recall_ok else 'FAIL'}")
+        print(f"  FPR pass:    {'YES' if fpr_ok else 'FAIL'}")
+
+        if not recall_ok or not fpr_ok:
+            all_passed = False
+
+        # Check required detections
+        for ds_name, elem in BENCHMARK_CRITERIA["required_detections"]:
+            key = (ds_name, elem)
+            if key in algo_results:
+                detected = algo_results[key]
+                status = "OK" if detected else "FAIL"
+                print(f"  Required detection ({ds_name}, {elem}): {status}")
+                if not detected:
+                    all_passed = False
+
+        # Check required absences
+        for ds_name, elem in BENCHMARK_CRITERIA["required_absences"]:
+            key = (ds_name, elem)
+            if key in algo_results:
+                detected = algo_results[key]
+                status = "OK" if not detected else "FAIL"
+                print(f"  Required absence  ({ds_name}, {elem}): {status}")
+                if detected:
+                    all_passed = False
+
+    print(f"\n{'='*100}")
+    print(f"BENCHMARK {'PASSED' if all_passed else 'FAILED'}")
+    print(f"{'='*100}")
+
+    return all_passed
 
 
 if __name__ == "__main__":
