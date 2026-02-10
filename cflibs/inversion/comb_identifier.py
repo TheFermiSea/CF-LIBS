@@ -82,7 +82,7 @@ class CombIdentifier:
         threshold_percentile: float = 85.0,
         min_correlation: float = 0.5,
         max_shift_pts: int = 5,
-        min_width_pts: int = 3,
+        min_width_pts: int = 5,
         max_width_factor: float = 1.0,
         elements: Optional[List[str]] = None,
     ):
@@ -444,8 +444,16 @@ class CombIdentifier:
                     best_shift = shift
                     best_width = width
 
-        # Determine if tooth is active
-        active = best_correlation >= self.min_correlation
+        # Check if there's actually signal above threshold at the best position
+        shifted_idx = center_idx + best_shift
+        half_w = best_width // 2
+        start = max(0, shifted_idx - half_w)
+        end = min(len(intensity), shifted_idx + half_w + 1)
+        segment = intensity[start:end] - baseline[start:end]
+        peak_amplitude = np.max(segment) if len(segment) > 0 else 0.0
+
+        # Tooth is active only if BOTH correlation is high AND signal is present
+        active = best_correlation >= self.min_correlation and peak_amplitude > threshold
 
         return {
             "center_nm": center_nm,
@@ -500,7 +508,11 @@ class CombIdentifier:
 
     def _compute_fingerprint(self, teeth: List[dict]) -> float:
         """
-        Compute fingerprint score as mean correlation of active teeth.
+        Compute fingerprint as coverage-penalized mean correlation.
+
+        Score = sum(active correlations) / total teeth count.
+        This penalizes elements with few active teeth out of many total,
+        preventing false positives when only a handful of lines match noise.
 
         Parameters
         ----------
@@ -512,11 +524,12 @@ class CombIdentifier:
         float
             Fingerprint score (0-1)
         """
+        if not teeth:
+            return 0.0
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-
-        correlations = [t["best_correlation"] for t in active_teeth]
-        fingerprint = np.mean(correlations)
-
+        # Sum of active correlations divided by TOTAL teeth count
+        total_correlation = sum(t["best_correlation"] for t in active_teeth)
+        fingerprint = total_correlation / len(teeth)
         return fingerprint
