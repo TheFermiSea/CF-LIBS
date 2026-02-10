@@ -498,7 +498,7 @@ class ALIASIdentifier:
 
             # Find peaks within +/- delta_lambda/2
             distances = np.abs(peak_wavelengths - wl_th)
-            within_window = distances <= delta_lambda / 2
+            within_window = distances <= delta_lambda
 
             if np.any(within_window):
                 matched_mask[i] = True
@@ -731,6 +731,6 @@ class ALIASIdentifier:
         P_ab = 1.0
 
         # Confidence level
-        CL = k_det * P_maj * P_SNR * P_ab
+        CL = k_det * P_SNR * P_ab
 
         return k_det, CL
