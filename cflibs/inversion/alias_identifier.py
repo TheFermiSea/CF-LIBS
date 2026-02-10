@@ -7,6 +7,7 @@ calculation, line fusion, matching, threshold determination, scoring, and decisi
 """
 
 from typing import List, Tuple, Optional
+import math
 import numpy as np
 from scipy.signal import find_peaks
 
@@ -68,6 +69,7 @@ class ALIASIdentifier:
         detection_threshold: float = 0.1,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
+        reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
@@ -79,6 +81,7 @@ class ALIASIdentifier:
         self.detection_threshold = detection_threshold
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
+        self.reference_temperature = reference_temperature
 
         # Create Saha-Boltzmann solver
         self.solver = SahaBoltzmannSolver(atomic_db)
@@ -319,9 +322,15 @@ class ALIASIdentifier:
         if not transitions:
             return []
 
-        # Cap to strongest lines by gA to avoid line-count disparity
+        # Cap to strongest lines by estimated emissivity to avoid line-count disparity
         if len(transitions) > self.max_lines_per_element:
-            transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+            kB_eV = 8.617e-5
+            kT = kB_eV * self.reference_temperature
+            transitions = sorted(
+                transitions,
+                key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),
+                reverse=True,
+            )
             transitions = transitions[: self.max_lines_per_element]
 
         # Compute emissivities

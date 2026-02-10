@@ -7,6 +7,7 @@ to correlate with spectral peaks, treating atomic spectral lines as teeth in a c
 """
 
 from typing import List, Dict, Optional, Tuple
+import math
 import numpy as np
 from scipy.ndimage import median_filter
 from scipy.stats import pearsonr
@@ -86,6 +87,7 @@ class CombIdentifier:
         max_width_factor: float = 1.0,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
+        reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
         self.baseline_window_nm = baseline_window_nm
@@ -96,6 +98,7 @@ class CombIdentifier:
         self.max_width_factor = max_width_factor
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
+        self.reference_temperature = reference_temperature
 
     def identify(
         self, wavelength: np.ndarray, intensity: np.ndarray
@@ -289,7 +292,13 @@ class CombIdentifier:
             element, wavelength_min=wl_min, wavelength_max=wl_max
         )
         if len(transitions) > self.max_lines_per_element:
-            transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+            kB_eV = 8.617e-5
+            kT = kB_eV * self.reference_temperature
+            transitions = sorted(
+                transitions,
+                key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),
+                reverse=True,
+            )
             transitions = transitions[: self.max_lines_per_element]
         return transitions
 

@@ -6,6 +6,7 @@ from experimental spectra using model spectrum correlation matching.
 """
 
 from typing import List, Optional, Tuple
+import math
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.stats import pearsonr
@@ -93,6 +94,7 @@ class CorrelationIdentifier:
         n_e_steps: int = 3,
         instrument_fwhm_nm: float = 0.05,
         max_lines_per_element: int = 100,
+        reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
         self.vector_index = vector_index
@@ -106,6 +108,7 @@ class CorrelationIdentifier:
         self.n_e_steps = n_e_steps
         self.instrument_fwhm_nm = instrument_fwhm_nm
         self.max_lines_per_element = max_lines_per_element
+        self.reference_temperature = reference_temperature
 
         self.saha_solver = SahaBoltzmannSolver(atomic_db)
 
@@ -168,7 +171,7 @@ class CorrelationIdentifier:
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
         if len(non_zero_scores) >= 2:
             median_score = np.median(non_zero_scores)
-            relative_threshold = 1.3 * median_score
+            relative_threshold = 1.1 * median_score
         else:
             relative_threshold = 0.0
 
@@ -252,9 +255,15 @@ class CorrelationIdentifier:
                 element_scores.append((element, 0.0, 0.0, [], []))
                 continue
 
-            # Cap to strongest lines by gA to avoid line-count disparity
+            # Cap to strongest lines by estimated emissivity to avoid line-count disparity
             if len(transitions) > self.max_lines_per_element:
-                transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+                kB_eV = 8.617e-5
+                kT = kB_eV * self.reference_temperature
+                transitions = sorted(
+                    transitions,
+                    key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),
+                    reverse=True,
+                )
                 transitions = transitions[: self.max_lines_per_element]
 
             # Compute correlations for each (T, n_e) point
