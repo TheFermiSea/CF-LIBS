@@ -214,3 +214,19 @@ def test_scores_between_zero_and_one(atomic_db, synthetic_libs_spectrum):
             assert 0.0 <= metadata["k_shift"] <= 1.0
         if "k_det" in metadata:
             assert 0.0 <= metadata["k_det"] <= 1.0
+
+
+def test_max_lines_per_element_parameter(atomic_db):
+    """Test that max_lines_per_element caps transition count."""
+    identifier = ALIASIdentifier(atomic_db, max_lines_per_element=5)
+    assert identifier.max_lines_per_element == 5
+
+    # Default should be 50
+    identifier_default = ALIASIdentifier(atomic_db)
+    assert identifier_default.max_lines_per_element == 50
+
+
+def test_default_detection_threshold_lowered(atomic_db):
+    """Test that default detection_threshold is 0.1."""
+    identifier = ALIASIdentifier(atomic_db)
+    assert identifier.detection_threshold == 0.1

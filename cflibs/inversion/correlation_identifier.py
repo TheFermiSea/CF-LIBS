@@ -86,12 +86,13 @@ class CorrelationIdentifier:
         elements: Optional[List[str]] = None,
         wavelength_tolerance_nm: float = 0.1,
         top_k: int = 10,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.05,
         T_range_K: Tuple[float, float] = (8000, 12000),
         n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
         T_steps: int = 5,
         n_e_steps: int = 3,
         instrument_fwhm_nm: float = 0.05,
+        max_lines_per_element: int = 100,
     ):
         self.atomic_db = atomic_db
         self.vector_index = vector_index
@@ -104,6 +105,7 @@ class CorrelationIdentifier:
         self.T_steps = T_steps
         self.n_e_steps = n_e_steps
         self.instrument_fwhm_nm = instrument_fwhm_nm
+        self.max_lines_per_element = max_lines_per_element
 
         self.saha_solver = SahaBoltzmannSolver(atomic_db)
 
@@ -240,6 +242,11 @@ class CorrelationIdentifier:
                 logger.debug(f"No transitions for {element} in wavelength range")
                 element_scores.append((element, 0.0, 0.0, [], []))
                 continue
+
+            # Cap to strongest lines by gA to avoid line-count disparity
+            if len(transitions) > self.max_lines_per_element:
+                transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+                transitions = transitions[: self.max_lines_per_element]
 
             # Compute correlations for each (T, n_e) point
             correlations = []

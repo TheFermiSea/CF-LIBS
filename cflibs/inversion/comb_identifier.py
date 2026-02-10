@@ -80,11 +80,12 @@ class CombIdentifier:
         atomic_db: AtomicDatabase,
         baseline_window_nm: float = 10.0,
         threshold_percentile: float = 85.0,
-        min_correlation: float = 0.5,
+        min_correlation: float = 0.15,
         max_shift_pts: int = 5,
         min_width_pts: int = 5,
         max_width_factor: float = 1.0,
         elements: Optional[List[str]] = None,
+        max_lines_per_element: int = 50,
     ):
         self.atomic_db = atomic_db
         self.baseline_window_nm = baseline_window_nm
@@ -94,6 +95,7 @@ class CombIdentifier:
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor
         self.elements = elements
+        self.max_lines_per_element = max_lines_per_element
 
     def identify(
         self, wavelength: np.ndarray, intensity: np.ndarray
@@ -286,6 +288,9 @@ class CombIdentifier:
         transitions = self.atomic_db.get_transitions(
             element, wavelength_min=wl_min, wavelength_max=wl_max
         )
+        if len(transitions) > self.max_lines_per_element:
+            transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+            transitions = transitions[: self.max_lines_per_element]
         return transitions
 
     def _estimate_baseline_threshold(

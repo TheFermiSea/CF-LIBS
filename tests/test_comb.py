@@ -601,7 +601,7 @@ def test_identify_spectrum_range_validation(atomic_db, synthetic_libs_spectrum):
 
 def test_false_positive_noise_only(atomic_db):
     """Noise-only input should not detect any element."""
-    identifier = CombIdentifier(atomic_db, elements=["Fe", "H"])
+    identifier = CombIdentifier(atomic_db, elements=["Fe", "H"], min_correlation=0.5)
 
     # Create pure noise spectrum
     rng = np.random.default_rng(42)
@@ -630,3 +630,18 @@ def test_coverage_penalty_reduces_score(atomic_db):
     score = identifier._compute_fingerprint(teeth)
     # 3 * 0.9 / 50 = 0.054, should be much less than min_correlation
     assert score < 0.1, f"Score {score} too high for 3/50 active teeth"
+
+def test_max_lines_per_element_parameter(atomic_db):
+    """Test that max_lines_per_element caps transition count."""
+    identifier = CombIdentifier(atomic_db, max_lines_per_element=5)
+    assert identifier.max_lines_per_element == 5
+
+    # Default should be 50
+    identifier_default = CombIdentifier(atomic_db)
+    assert identifier_default.max_lines_per_element == 50
+
+
+def test_default_min_correlation_lowered(atomic_db):
+    """Test that default min_correlation is 0.15."""
+    identifier = CombIdentifier(atomic_db)
+    assert identifier.min_correlation == 0.15

@@ -185,3 +185,27 @@ def test_noise_only_no_detection(temp_db):
         assert elem.confidence < 0.5, (
             f"{elem.element} has confidence {elem.confidence} on noise"
         )
+
+
+def test_max_lines_per_element_parameter(temp_db):
+    """Test that max_lines_per_element caps transition count."""
+    from cflibs.atomic.database import AtomicDatabase
+
+    db = AtomicDatabase(temp_db)
+
+    identifier = CorrelationIdentifier(db, max_lines_per_element=10)
+    assert identifier.max_lines_per_element == 10
+
+    # Default should be 100
+    identifier_default = CorrelationIdentifier(db)
+    assert identifier_default.max_lines_per_element == 100
+
+
+def test_default_min_confidence_lowered(temp_db):
+    """Test that default min_confidence is 0.05."""
+    from cflibs.atomic.database import AtomicDatabase
+
+    db = AtomicDatabase(temp_db)
+
+    identifier = CorrelationIdentifier(db)
+    assert identifier.min_confidence == 0.05

@@ -65,8 +65,9 @@ class ALIASIdentifier:
         T_steps: int = 5,
         n_e_steps: int = 3,
         intensity_threshold_factor: float = 4.0,
-        detection_threshold: float = 0.5,
+        detection_threshold: float = 0.1,
         elements: Optional[List[str]] = None,
+        max_lines_per_element: int = 50,
     ):
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
@@ -77,6 +78,7 @@ class ALIASIdentifier:
         self.intensity_threshold_factor = intensity_threshold_factor
         self.detection_threshold = detection_threshold
         self.elements = elements
+        self.max_lines_per_element = max_lines_per_element
 
         # Create Saha-Boltzmann solver
         self.solver = SahaBoltzmannSolver(atomic_db)
@@ -316,6 +318,11 @@ class ALIASIdentifier:
 
         if not transitions:
             return []
+
+        # Cap to strongest lines by gA to avoid line-count disparity
+        if len(transitions) > self.max_lines_per_element:
+            transitions = sorted(transitions, key=lambda t: t.A_ki * t.g_k, reverse=True)
+            transitions = transitions[: self.max_lines_per_element]
 
         # Compute emissivities
         line_data = []
