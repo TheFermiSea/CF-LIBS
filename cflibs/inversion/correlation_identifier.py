@@ -171,7 +171,7 @@ class CorrelationIdentifier:
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
         if len(non_zero_scores) >= 2:
             median_score = np.median(non_zero_scores)
-            relative_threshold = 1.1 * median_score
+            relative_threshold = 1.5 * median_score
         else:
             relative_threshold = 0.0
 
@@ -267,16 +267,31 @@ class CorrelationIdentifier:
                 transitions = transitions[: self.max_lines_per_element]
 
             # Compute correlations for each (T, n_e) point
+            # Paper (Labutin et al. 2013): correlate only in peak regions, not full spectrum
             correlations = []
             for T_K in T_grid:
                 T_eV = T_K * KB_EV
                 for n_e in n_e_grid:
-                    model_spectrum = self._generate_model_spectrum(intensity, 
+                    model_spectrum = self._generate_model_spectrum(intensity,
                         element, transitions, wavelength, T_eV, n_e
                     )
-                    # Pearson correlation
-                    if np.std(model_spectrum) > 1e-10 and np.std(intensity) > 1e-10:
-                        corr, _ = pearsonr(intensity, model_spectrum)
+                    # Peak-region mask: correlate only where signal is significant
+                    # Union of experimental and model peaks above normalized threshold
+                    i_min, i_max = intensity.min(), intensity.max()
+                    m_min, m_max = model_spectrum.min(), model_spectrum.max()
+                    sigma_threshold = 0.05
+                    if (i_max - i_min) > 1e-10 and (m_max - m_min) > 1e-10:
+                        exp_norm = (intensity - i_min) / (i_max - i_min)
+                        mod_norm = (model_spectrum - m_min) / (m_max - m_min)
+                        peak_mask = (exp_norm >= sigma_threshold) | (mod_norm >= sigma_threshold)
+                    else:
+                        peak_mask = np.ones(len(intensity), dtype=bool)
+
+                    # Pearson correlation on peak regions only
+                    exp_peaks = intensity[peak_mask]
+                    mod_peaks = model_spectrum[peak_mask]
+                    if len(exp_peaks) > 2 and np.std(mod_peaks) > 1e-10 and np.std(exp_peaks) > 1e-10:
+                        corr, _ = pearsonr(exp_peaks, mod_peaks)
                         correlations.append(corr)
                     else:
                         correlations.append(0.0)

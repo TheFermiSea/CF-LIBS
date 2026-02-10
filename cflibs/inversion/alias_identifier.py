@@ -52,7 +52,7 @@ class ALIASIdentifier:
     intensity_threshold_factor : float, optional
         Peak detection threshold = factor × noise_estimate (default: 4.0)
     detection_threshold : float, optional
-        Minimum confidence level for element detection (default: 0.5)
+        Minimum confidence level for element detection (default: 0.02)
     elements : Optional[List[str]], optional
         List of elements to search for. If None, searches all available (default: None)
     """
@@ -66,7 +66,7 @@ class ALIASIdentifier:
         T_steps: int = 5,
         n_e_steps: int = 3,
         intensity_threshold_factor: float = 4.0,
-        detection_threshold: float = 0.1,
+        detection_threshold: float = 0.02,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
@@ -274,12 +274,27 @@ class ALIASIdentifier:
         baseline = estimate_baseline(wavelength, intensity)
         noise_estimate = estimate_noise(intensity, baseline)
 
-        # Threshold
+        # Threshold in intensity domain (well-calibrated)
         threshold = noise_estimate * self.intensity_threshold_factor
 
-        # Find peaks in baseline-corrected signal
+        # Find peaks in baseline-corrected intensity
         corrected = intensity - baseline
         peak_indices, _ = find_peaks(corrected, height=threshold, prominence=threshold / 3)
+
+        # Paper (Noël et al. 2025): enhance peak detection using negative 2nd derivative
+        # Compute -d²I/dλ², zero negatives — true peaks have positive curvature here
+        d2 = -np.gradient(np.gradient(corrected, wavelength), wavelength)
+        d2[d2 < 0] = 0.0
+
+        # Filter: keep peaks where d2 > 0 in a ±2-point neighborhood around peak center
+        # This handles discretization effects where d2 peak may be slightly offset
+        confirmed = []
+        for idx in peak_indices:
+            lo = max(0, idx - 2)
+            hi = min(len(d2), idx + 3)
+            if np.max(d2[lo:hi]) > 0:
+                confirmed.append(idx)
+        peak_indices = np.array(confirmed, dtype=int) if confirmed else np.array([], dtype=int)
 
         # Return as list of (index, wavelength) tuples
         peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
@@ -739,7 +754,7 @@ class ALIASIdentifier:
         # P_ab: abundance prior (placeholder)
         P_ab = 1.0
 
-        # Confidence level
-        CL = k_det * P_SNR * P_ab
+        # Confidence level: CL = k_det × P_SNR × P_maj × P_ab (paper formula)
+        CL = k_det * P_SNR * P_maj * P_ab
 
         return k_det, CL

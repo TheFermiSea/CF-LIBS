@@ -41,7 +41,9 @@ class CombIdentifier:
     threshold_percentile : float, optional
         Percentile for peak detection threshold (default: 85.0)
     min_correlation : float, optional
-        Minimum correlation to count a tooth as active (default: 0.5)
+        Minimum fingerprint score for element detection (default: 0.10)
+    tooth_activation_threshold : float, optional
+        Per-tooth correlation threshold to count as active (default: 0.5)
     max_shift_pts : int, optional
         Maximum shift in data points for template matching (default: 5)
     min_width_pts : int, optional
@@ -82,6 +84,7 @@ class CombIdentifier:
         baseline_window_nm: float = 10.0,
         threshold_percentile: float = 85.0,
         min_correlation: float = 0.10,
+        tooth_activation_threshold: float = 0.5,
         max_shift_pts: int = 5,
         min_width_pts: int = 5,
         max_width_factor: float = 1.0,
@@ -92,7 +95,8 @@ class CombIdentifier:
         self.atomic_db = atomic_db
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
-        self.min_correlation = min_correlation
+        self.min_correlation = min_correlation  # fingerprint detection threshold
+        self.tooth_activation_threshold = tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
         self.max_shift_pts = max_shift_pts
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor
@@ -221,7 +225,31 @@ class CombIdentifier:
                             line.is_interfered = True
                             line.interfering_elements = tooth["interfering_elements"]
 
-        # Step 5: Split into detected and rejected
+        # Step 5: Apply relative threshold to reject elements that don't stand out
+        # Uses median of ALL non-zero scores as noise baseline; requires 3+ elements
+        # to form a meaningful noise floor (2 elements can't distinguish signal from noise)
+        non_zero_scores = [e.score for e in element_identifications if e.score > 0]
+        if len(non_zero_scores) >= 3:
+            median_score = np.median(non_zero_scores)
+            relative_threshold = 1.5 * median_score
+        else:
+            relative_threshold = 0.0
+
+        for i, element_id in enumerate(element_identifications):
+            if element_id.detected and element_id.score < relative_threshold:
+                element_identifications[i] = ElementIdentification(
+                    element=element_id.element,
+                    detected=False,
+                    score=element_id.score,
+                    confidence=element_id.confidence,
+                    n_matched_lines=element_id.n_matched_lines,
+                    n_total_lines=element_id.n_total_lines,
+                    matched_lines=element_id.matched_lines,
+                    unmatched_lines=element_id.unmatched_lines,
+                    metadata=element_id.metadata,
+                )
+
+        # Step 6: Split into detected and rejected
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
@@ -466,8 +494,9 @@ class CombIdentifier:
         segment = intensity[start:end] - baseline[start:end]
         peak_amplitude = np.max(segment) if len(segment) > 0 else 0.0
 
-        # Tooth is active only if BOTH correlation is high AND signal is present
-        active = best_correlation >= self.min_correlation and peak_amplitude > threshold
+        # Tooth is active only if BOTH correlation meets per-tooth threshold AND signal is present
+        # Paper (Gajarska et al. 2024): per-tooth activation uses separate threshold (0.5)
+        active = best_correlation >= self.tooth_activation_threshold and peak_amplitude > threshold
 
         return {
             "center_nm": center_nm,
@@ -522,11 +551,12 @@ class CombIdentifier:
 
     def _compute_fingerprint(self, teeth: List[dict]) -> float:
         """
-        Compute fingerprint as coverage-penalized mean correlation.
+        Compute fingerprint as coverage-penalized mean of active correlations.
 
-        Score = sum(active correlations) / total teeth count.
-        This penalizes elements with few active teeth out of many total,
-        preventing false positives when only a handful of lines match noise.
+        Paper formula (Gajarska et al. 2024): fingerprint = mean(active_correlations)
+        Hybrid: fingerprint = mean(active_corr) × (n_active / n_total)
+        The hybrid preserves the coverage penalty while using the correct mean,
+        preventing 1 lucky tooth from producing fingerprint = 0.9.
 
         Parameters
         ----------
@@ -543,7 +573,8 @@ class CombIdentifier:
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-        # Sum of active correlations divided by TOTAL teeth count
-        total_correlation = sum(t["best_correlation"] for t in active_teeth)
-        fingerprint = total_correlation / len(teeth)
+        # Hybrid: mean(active correlations) × coverage fraction
+        mean_active_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
+        coverage = len(active_teeth) / len(teeth)
+        fingerprint = mean_active_corr * coverage
         return fingerprint

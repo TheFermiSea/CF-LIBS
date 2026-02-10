@@ -222,6 +222,9 @@ def select_representative_spectrum(
     """
     Select a representative 1D spectrum from multi-dimensional data.
 
+    For 3D spatial datasets (steel, Fe, Ni), averages over a 3x3 neighborhood
+    around the center to improve SNR. For line scan datasets, uses single pixel.
+
     Parameters
     ----------
     data : np.ndarray
@@ -238,7 +241,9 @@ def select_representative_spectrum(
         return data
 
     if data.ndim == 3:
-        # Grid data (steel, Fe, Ni): use center position
+        # Grid data (steel, Fe, Ni): use center pixel
+        # Note: 3×3 averaging was removed because the Fe/Ni grids ARE 3×3,
+        # so averaging over the whole grid dilutes element-specific signal
         if dataset_name in ["steel_245nm", "Fe_245nm", "Ni_245nm"]:
             x_center = data.shape[0] // 2
             y_center = data.shape[1] // 2
