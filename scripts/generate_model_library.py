@@ -10,10 +10,10 @@ Supports three modes:
 """
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
-import h5py
 import numpy as np
 
 
@@ -50,12 +50,26 @@ def chunk_mode(
         Number of spectra to generate per chunk
     """
     try:
+        import h5py
+    except ImportError:
+        print("ERROR: h5py not available. Install h5py: pip install h5py")
+        sys.exit(1)
+    
+    try:
         from cflibs.inversion.manifold import ManifoldGenerator  # noqa: F401
     except ImportError:
         print("ERROR: ManifoldGenerator not available. Install cflibs first.")
         sys.exit(1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fix 9: Validate chunk_id bounds
+    if n_chunks < 1:
+        print(f"ERROR: n_chunks must be >= 1, got {n_chunks}")
+        sys.exit(1)
+    if not (0 <= chunk_id < n_chunks):
+        print(f"ERROR: chunk_id must be in range [0, {n_chunks}), got {chunk_id}")
+        sys.exit(1)
 
     # Divide temperature range into chunks
     t_range = np.linspace(t_min, t_max, n_chunks + 1)
@@ -99,6 +113,12 @@ def consolidate_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing chunk files
     """
+    try:
+        import h5py
+    except ImportError:
+        print("ERROR: h5py not available. Install h5py: pip install h5py")
+        sys.exit(1)
+    
     chunk_files = sorted(output_dir.glob("chunk_*.h5"))
     if not chunk_files:
         print(f"ERROR: No chunk files found in {output_dir}")
@@ -155,20 +175,17 @@ def build_index_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing model_library.h5
     """
-    print("Building FAISS index...")
-    print("NOTE: Index building not yet implemented.")
-    print("This is a placeholder for future FAISS integration.")
-
     library_file = output_dir / "model_library.h5"
     if not library_file.exists():
         print(f"ERROR: Library file not found: {library_file}")
         sys.exit(1)
 
-    # TODO: Implement FAISS index building
-    # 1. Load spectra from model_library.h5
-    # 2. Optionally apply dimensionality reduction (PCA, wavelength subset)
-    # 3. Build FAISS index (IVF or HNSW)
-    # 4. Save index to disk
+    raise NotImplementedError(
+        "FAISS index building not yet implemented. "
+        "This requires: (1) Load spectra from model_library.h5, "
+        "(2) Apply dimensionality reduction (PCA/wavelength subset), "
+        "(3) Build FAISS index (IVF/HNSW), (4) Save index to disk."
+    )
 
 
 def submit_mode(
@@ -232,7 +249,9 @@ python {script_path} chunk \\
     print(f"Submitted chunk job: {chunk_job_id}")
 
     # Consolidation job with dependency
-    consolidate_config = ArrayJobConfig(
+    from cflibs.hpc import SlurmJobConfig
+    
+    consolidate_config = SlurmJobConfig(
         job_name="cflibs_consolidate",
         partition=partition,
         cpus_per_task=1,
@@ -243,7 +262,7 @@ python {script_path} chunk \\
     )
 
     consolidate_script = f"""
-python {script_path} consolidate --output-dir {output_dir}
+python {shlex.quote(str(script_path))} consolidate --output-dir {shlex.quote(str(output_dir))}
 """
 
     print("Submitting consolidation job (depends on chunk completion)...")

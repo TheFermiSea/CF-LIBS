@@ -200,7 +200,6 @@ def test_submit_with_dependency_dry_run():
     assert job_id == "DRY_RUN_dependent_job"
 
     # Verify dependency directive would be added
-    script = manager.generate_sbatch_script(config, "echo test")
     # Note: dependency is added in submit_with_dependency via extra_sbatch
     # We test the mechanism separately
     config_with_dep = SlurmJobConfig(
@@ -208,6 +207,49 @@ def test_submit_with_dependency_dry_run():
     )
     script = manager.generate_sbatch_script(config_with_dep, "echo test")
     assert "#SBATCH --dependency=afterok:12345:67890" in script
+
+
+def test_submit_with_dependency_preserves_array_config():
+    """Test that submit_with_dependency preserves ArrayJobConfig fields."""
+    manager = SlurmJobManager(dry_run=True)
+    array_config = ArrayJobConfig(
+        job_name="array_dependent",
+        array_size=50,
+        max_concurrent=10,
+        partition="gpu",
+        mem_gb=16,
+    )
+
+    # Submit with dependencies
+    job_id = manager.submit_with_dependency(
+        array_config,
+        "python process.py $SLURM_ARRAY_TASK_ID",
+        depends_on=["12345"],
+        dependency_type="afterok",
+    )
+
+    assert job_id == "DRY_RUN_array_dependent"
+
+    # Verify array directives are preserved in the generated script
+    # We need to access the config after modification to verify
+    from dataclasses import replace
+
+    extra_sbatch_copy = array_config.extra_sbatch.copy()
+    extra_sbatch_copy["dependency"] = "afterok:12345"
+    config_copy = replace(
+        array_config,
+        extra_sbatch=extra_sbatch_copy,
+        env_vars=array_config.env_vars.copy(),
+        modules=array_config.modules.copy(),
+    )
+
+    script = manager.generate_sbatch_script(config_copy, "python process.py")
+
+    # Verify array directives are present
+    assert "#SBATCH --array=0-49%10" in script
+    assert "#SBATCH --partition=gpu" in script
+    assert "#SBATCH --mem=16G" in script
+    assert "#SBATCH --dependency=afterok:12345" in script
 
 
 def test_slurm_job_state_enum():
