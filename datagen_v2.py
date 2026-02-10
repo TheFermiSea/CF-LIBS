@@ -11,7 +11,7 @@ import os
 import io
 
 # --- CONFIGURATION ---
-DB_NAME = "libs_production.db"
+DB_NAME = "ASD_da/libs_production.db"
 
 # ULTRAFAST FILTER SETTINGS
 # Prune physics that don't exist in <10us cooling plasmas
@@ -238,6 +238,10 @@ def build_production_db():
                 if df.empty: continue
 
                 # Basic Cleaning
+                # Prefer observed wavelength, fallback to Ritz for UV lines
+                if 'ritz_wl_air(nm)' in df.columns:
+                    df['obs_wl_air(nm)'] = df['obs_wl_air(nm)'].fillna(df['ritz_wl_air(nm)'])
+
                 mask = df['obs_wl_air(nm)'].notna() & df['Aki(s^-1)'].notna() & df['Ek(cm-1)'].notna()
                 clean = df[mask].copy()
                 if clean.empty: continue
@@ -254,7 +258,10 @@ def build_production_db():
                     'ek_ev': clean['Ek(cm-1)'] * CM_TO_EV,
                     'gi': clean['g_i'],
                     'gk': clean['g_k'],
-                    'rel_int': pd.to_numeric(clean['intens'], errors='coerce').fillna(0),
+                    'rel_int': pd.to_numeric(
+                        clean['intens'].astype(str).str.extract(r'(\d+\.?\d*)')[0],
+                        errors='coerce'
+                    ).fillna(0),
                     'stark_w': None,
                     'stark_alpha': None,
                     'stark_shift': None,
