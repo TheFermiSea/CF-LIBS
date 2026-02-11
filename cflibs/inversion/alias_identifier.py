@@ -57,6 +57,18 @@ class ALIASIdentifier:
         List of elements to search for. If None, searches all available (default: None)
     """
 
+    # Crustal abundance in log10(ppm) — from CRC Handbook / USGS
+    CRUSTAL_ABUNDANCE_LOG_PPM = {
+        "O": 5.67, "Si": 5.44, "Al": 4.91, "Fe": 4.70, "Ca": 4.57,
+        "Na": 4.36, "Mg": 4.33, "K": 4.32, "Ti": 3.75, "H": 3.15,
+        "Mn": 2.98, "P": 2.97, "F": 2.80, "Ba": 2.70, "C": 2.30,
+        "Sr": 2.57, "S": 2.56, "Zr": 2.23, "V": 2.10, "Cl": 2.20,
+        "Cr": 2.00, "Ni": 1.88, "Zn": 1.88, "Cu": 1.78, "Co": 1.40,
+        "Li": 1.30, "N": 1.30, "Ga": 1.28, "Pb": 1.15, "Rb": 1.95,
+        "B": 1.00, "Sn": 0.35, "W": 0.18, "Mo": 0.18, "Ag": -0.62,
+        "Cd": -0.82, "Au": -2.40,
+    }
+
     def __init__(
         self,
         atomic_db: AtomicDatabase,
@@ -149,7 +161,7 @@ class ALIASIdentifier:
                 emissivity_threshold = -np.inf  # No matches, keep all for scoring
 
             # Step 6: Compute scores
-            k_sim, k_rate, k_shift = self._compute_scores(
+            k_sim, k_rate, k_shift, major_line_detected = self._compute_scores(
                 fused_lines, matched_mask, wavelength_shifts, intensity, peaks, emissivity_threshold
             )
 
@@ -161,7 +173,10 @@ class ALIASIdentifier:
                     >= 10**emissivity_threshold
                 )
             )
-            k_det, CL = self._decide(k_sim, k_rate, k_shift, N_X, intensity, peaks)
+            k_det, CL = self._decide(
+                k_sim, k_rate, k_shift, N_X, intensity, peaks,
+                element=element, major_line_detected=major_line_detected,
+            )
 
             # Build ElementIdentification
             detected = CL >= self.detection_threshold
@@ -210,6 +225,9 @@ class ALIASIdentifier:
                     "k_det": k_det,
                     "emissivity_threshold": emissivity_threshold,
                     "N_X": int(N_X),
+                    "P_maj": 1.0 if major_line_detected else 0.5,
+                    "P_ab": self._compute_P_ab(element),
+                    "major_line_detected": major_line_detected,
                 },
             )
 
@@ -601,9 +619,9 @@ class ALIASIdentifier:
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         emissivity_threshold: float,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[float, float, float, bool]:
         """
-        Compute k_sim, k_rate, k_shift scores.
+        Compute k_sim, k_rate, k_shift scores and major-line detection flag.
 
         Parameters
         ----------
@@ -622,11 +640,11 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[float, float, float]
-            (k_sim, k_rate, k_shift) scores in [0, 1]
+        Tuple[float, float, float, bool]
+            (k_sim, k_rate, k_shift, major_line_detected)
         """
         if not np.any(matched_mask):
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, False
 
         emissivities = np.array([line["avg_emissivity"] for line in fused_lines])
         above_threshold = emissivities >= 10**emissivity_threshold
@@ -636,7 +654,12 @@ class ALIASIdentifier:
         n_matched_above = np.sum(matched_above)
 
         if n_matched_above == 0:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, False
+
+        # Determine whether the strongest above-threshold line is matched
+        emissivities_above = emissivities * above_threshold
+        strongest_idx = int(np.argmax(emissivities_above))
+        major_line_detected = bool(matched_above[strongest_idx])
 
         # k_rate: emissivity-weighted detection rate
         total_emissivity_above = np.sum(emissivities[above_threshold])
@@ -659,19 +682,26 @@ class ALIASIdentifier:
             k_shift = 0.0
 
         # k_sim: cosine similarity between theoretical and experimental intensities
-        # For matched lines, compare emissivities to experimental peak heights
+        # Fix 1: Include ALL above-threshold lines, not just matched ones.
+        # Unmatched lines get experimental intensity = 0, penalising elements
+        # that predict lines the spectrum doesn't contain.
+        peak_wavelengths = np.array([p[1] for p in peaks])
         theoretical_intensities = []
         experimental_intensities = []
+        matched_peak_indices = set()
 
         for i, line in enumerate(fused_lines):
-            if matched_above[i]:
+            if above_threshold[i]:
                 theoretical_intensities.append(emissivities[i])
-
-                # Find closest peak
-                peak_idx = np.argmin(
-                    np.abs(np.array([p[1] for p in peaks]) - line["wavelength_nm"])
-                )
-                experimental_intensities.append(intensity[peaks[peak_idx][0]])
+                if matched_above[i]:
+                    peak_idx = int(
+                        np.argmin(np.abs(peak_wavelengths - line["wavelength_nm"]))
+                    )
+                    experimental_intensities.append(intensity[peaks[peak_idx][0]])
+                    matched_peak_indices.add(peak_idx)
+                else:
+                    # Unmatched theoretical line → experimental intensity = 0
+                    experimental_intensities.append(0.0)
 
         if len(theoretical_intensities) > 1:
             th_vec = np.array(theoretical_intensities)
@@ -684,14 +714,50 @@ class ALIASIdentifier:
 
             if norm_th > 0 and norm_exp > 0:
                 k_sim = dot_product / (norm_th * norm_exp)
-                k_sim = max(0.0, min(1.0, k_sim))  # Clamp to [0, 1]
+                k_sim = max(0.0, min(1.0, k_sim))
             else:
                 k_sim = 0.0
         else:
             # Not enough points for correlation
             k_sim = 0.5  # Neutral value
 
-        return k_sim, k_rate, k_shift
+        # Fix 2: Uniqueness penalty — multiple theoretical lines mapping to
+        # the same broad experimental peak should not inflate k_sim.
+        n_unique_peaks = len(matched_peak_indices)
+        n_total_matches = int(np.sum(matched_above))
+        if n_total_matches > 0:
+            uniqueness_factor = n_unique_peaks / n_total_matches
+            k_sim *= uniqueness_factor
+
+        return k_sim, k_rate, k_shift, major_line_detected
+
+    def _compute_P_ab(self, element: str) -> float:
+        """
+        Compute crustal-abundance prior P_ab for an element.
+
+        3-tier weighting (Noel et al. 2025):
+        - ppm >= 100    → 1.0  (common, > 0.01%)
+        - ppm >= 0.001  → 0.75 (intermediate)
+        - ppm < 0.001   → 0.5  (rare)
+
+        Parameters
+        ----------
+        element : str
+            Element symbol
+
+        Returns
+        -------
+        float
+            P_ab weighting factor
+        """
+        log_ppm = self.CRUSTAL_ABUNDANCE_LOG_PPM.get(element, 0.0)
+        ppm = 10**log_ppm
+        if ppm >= 100:
+            return 1.0
+        elif ppm >= 1e-3:
+            return 0.75
+        else:
+            return 0.5
 
     def _decide(
         self,
@@ -701,6 +767,8 @@ class ALIASIdentifier:
         N_X: int,
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
+        element: str = "",
+        major_line_detected: bool = False,
     ) -> Tuple[float, float]:
         """
         Compute detection score k_det and confidence level CL.
@@ -719,6 +787,10 @@ class ALIASIdentifier:
             Experimental intensity array
         peaks : List[Tuple[int, float]]
             Experimental peaks
+        element : str
+            Element symbol (for crustal abundance weighting)
+        major_line_detected : bool
+            Whether the strongest theoretical line was detected
 
         Returns
         -------
@@ -734,11 +806,8 @@ class ALIASIdentifier:
         else:
             k_det = 0.0
 
-        # P_maj: majority of strong lines matched
-        if k_rate > 0.5:
-            P_maj = 1.0
-        else:
-            P_maj = k_rate
+        # Fix 3: P_maj — strongest theoretical line detected → 1.0, else 0.5
+        P_maj = 1.0 if major_line_detected else 0.5
 
         # P_SNR: approximate SNR quality
         if len(peaks) > 0:
@@ -750,8 +819,8 @@ class ALIASIdentifier:
         else:
             P_SNR = 0.5
 
-        # P_ab: abundance prior (placeholder)
-        P_ab = 1.0
+        # Fix 4: P_ab — crustal abundance prior
+        P_ab = self._compute_P_ab(element)
 
         # Confidence level: CL = k_det × P_SNR × P_maj × P_ab (paper formula)
         CL = k_det * P_SNR * P_maj * P_ab

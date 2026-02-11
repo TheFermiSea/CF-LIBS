@@ -230,3 +230,147 @@ def test_default_detection_threshold_lowered(atomic_db):
     """Test that default detection_threshold is 0.02."""
     identifier = ALIASIdentifier(atomic_db)
     assert identifier.detection_threshold == 0.02
+
+
+# ---------------------------------------------------------------------------
+# Tests for the 4 bug-fixes (survivorship bias, uniqueness, P_maj, P_ab)
+# ---------------------------------------------------------------------------
+
+
+def test_k_sim_penalizes_unmatched_lines(atomic_db):
+    """Element with many unmatched theoretical lines should get lower k_sim."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # Scenario A: 2 lines, both matched → high k_sim
+    fused_a = [
+        {"transition": Transition("Fe", 1, 372.0, 1e7, 3.3, 0.0, 11, 9),
+         "avg_emissivity": 1000.0, "wavelength_nm": 372.0},
+        {"transition": Transition("Fe", 1, 374.0, 5e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 800.0, "wavelength_nm": 374.0},
+    ]
+    peaks = [(100, 372.01), (200, 374.01)]
+    wavelength = np.linspace(370, 380, 500)
+    intensity = np.full(500, 10.0)
+    intensity[100] = 500.0
+    intensity[200] = 400.0
+    matched_a = np.array([True, True])
+    shifts_a = np.array([0.01, 0.01])
+
+    k_sim_a, _, _, _ = identifier._compute_scores(
+        fused_a, matched_a, shifts_a, intensity, peaks, emissivity_threshold=-np.inf
+    )
+
+    # Scenario B: 10 lines but only 2 matched — identical matched intensities
+    fused_b = list(fused_a)  # first two are the same
+    for i in range(8):
+        wl = 375.0 + i * 0.5
+        fused_b.append({
+            "transition": Transition("Fe", 1, wl, 1e6, 3.3, 0.0, 7, 7),
+            "avg_emissivity": 600.0, "wavelength_nm": wl,
+        })
+    matched_b = np.array([True, True] + [False] * 8)
+    shifts_b = np.array([0.01, 0.01] + [0.0] * 8)
+
+    k_sim_b, _, _, _ = identifier._compute_scores(
+        fused_b, matched_b, shifts_b, intensity, peaks, emissivity_threshold=-np.inf
+    )
+
+    # k_sim_b should be strictly lower because the 8 unmatched lines
+    # contribute zeros to the experimental vector
+    assert k_sim_b < k_sim_a, (
+        f"k_sim should be lower when many lines unmatched: {k_sim_b} vs {k_sim_a}"
+    )
+
+
+def test_uniqueness_penalty(atomic_db):
+    """Many theoretical lines mapping to one peak should be penalised."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    # 4 theoretical lines all within ~0.1 nm → all map to a single broad peak
+    fused = []
+    for i in range(4):
+        wl = 400.0 + i * 0.02
+        fused.append({
+            "transition": Transition("Co", 1, wl, 1e7, 3.0, 0.0, 9, 7),
+            "avg_emissivity": 1000.0, "wavelength_nm": wl,
+        })
+    # Single experimental peak near 400.0
+    peaks = [(250, 400.01)]
+    wavelength = np.linspace(390, 410, 500)
+    intensity = np.full(500, 10.0)
+    intensity[250] = 800.0
+
+    matched = np.array([True, True, True, True])
+    shifts = np.array([0.01, -0.01, 0.01, -0.01])
+
+    k_sim, _, _, _ = identifier._compute_scores(
+        fused, matched, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    )
+
+    # uniqueness_factor = 1 unique peak / 4 matches = 0.25
+    # So k_sim should be at most 0.25 (cosine sim capped then scaled)
+    assert k_sim <= 0.30, (
+        f"Uniqueness penalty should reduce k_sim when many-to-one: got {k_sim}"
+    )
+
+
+def test_P_maj_strongest_line(atomic_db):
+    """P_maj=1.0 when strongest theoretical line matched, 0.5 otherwise."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db)
+
+    # Scenario: strongest line IS matched
+    fused = [
+        {"transition": Transition("Fe", 1, 372.0, 1e8, 3.3, 0.0, 11, 9),
+         "avg_emissivity": 5000.0, "wavelength_nm": 372.0},  # strongest
+        {"transition": Transition("Fe", 1, 374.0, 1e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 100.0, "wavelength_nm": 374.0},
+    ]
+    peaks = [(100, 372.01), (200, 374.01)]
+    intensity = np.full(500, 10.0)
+    intensity[100] = 1000.0
+    intensity[200] = 50.0
+
+    matched = np.array([True, True])
+    shifts = np.array([0.01, 0.01])
+
+    _, _, _, major_detected = identifier._compute_scores(
+        fused, matched, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    )
+    assert major_detected is True
+
+    # Scenario: strongest line NOT matched
+    matched_miss = np.array([False, True])
+    _, _, _, major_not_detected = identifier._compute_scores(
+        fused, matched_miss, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    )
+    assert major_not_detected is False
+
+
+def test_P_ab_tiers(atomic_db):
+    """P_ab should be 1.0 for common, 0.75 for intermediate, 0.5 for rare."""
+    identifier = ALIASIdentifier(atomic_db)
+
+    # Common elements (>100 ppm)
+    assert identifier._compute_P_ab("Fe") == 1.0
+    assert identifier._compute_P_ab("Al") == 1.0
+    assert identifier._compute_P_ab("Si") == 1.0
+    assert identifier._compute_P_ab("Ca") == 1.0
+
+    # Intermediate (0.001 - 100 ppm)
+    assert identifier._compute_P_ab("Co") == 0.75  # 10^1.40 ≈ 25 ppm
+    assert identifier._compute_P_ab("Cu") == 0.75  # 10^1.78 ≈ 60 ppm
+    assert identifier._compute_P_ab("Sn") == 0.75  # 10^0.35 ≈ 2.2 ppm
+
+    # Ag: 10^-0.62 ≈ 0.24 ppm → still intermediate (>= 0.001)
+    assert identifier._compute_P_ab("Ag") == 0.75
+    # Au: 10^-2.40 ≈ 0.004 ppm → still intermediate (>= 0.001)
+    assert identifier._compute_P_ab("Au") == 0.75
+
+    # Unknown element defaults to log_ppm=0.0 → 1 ppm → intermediate
+    assert identifier._compute_P_ab("Xx") == 0.75
