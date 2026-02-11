@@ -287,6 +287,10 @@ DATASETS = [
         "range": "286nm",
     },
     # --- Scipp datasets (new) ---
+    # All scipp datasets are from compact broadband spectrometers with RP≈500
+    # (FWHM ~0.6 nm). Auto-detection is unreliable on self-absorbed/blended
+    # features, so we set RP explicitly based on Gaussian fits to isolated
+    # Mg I 285.2 nm and Mn I 280.0 nm lines.
     {
         "name": "AA1100_substrate",
         "path": "AA1100_Substrate.h5",
@@ -294,6 +298,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": ["Al"],
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "Ti6Al4V_substrate",
@@ -302,6 +307,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": ["Ti", "Al", "V"],
         "range": "full",
+        "resolving_power": 500,
     },
     # --- 10000ppm blind tests ---
     {
@@ -311,6 +317,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "10000ppm_600W",
@@ -319,6 +326,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "10000ppm_800W",
@@ -327,6 +335,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "10000ppm_400W_depth",
@@ -335,6 +344,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "10000ppm_600W_depth",
@@ -343,6 +353,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "10000ppm_800W_depth",
@@ -351,6 +362,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     # --- 210000ppm blind tests ---
     {
@@ -360,6 +372,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "210000ppm_600W",
@@ -368,6 +381,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "210000ppm_800W",
@@ -376,6 +390,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "210000ppm_400W_depth",
@@ -384,6 +399,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "210000ppm_600W_depth",
@@ -392,6 +408,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
     {
         "name": "210000ppm_800W_depth",
@@ -400,6 +417,7 @@ DATASETS = [
         "elements": ["Fe", "Ti", "Ni", "Cr", "Mn", "Cu", "Si", "Al", "V", "Mg", "Co"],
         "expected": None,
         "range": "full",
+        "resolving_power": 500,
     },
 ]
 
@@ -474,11 +492,69 @@ def select_representative_spectrum(
 # ============================================================================
 
 
+def estimate_resolving_power(
+    wavelength: np.ndarray, intensity: np.ndarray
+) -> float:
+    """
+    Estimate instrument resolving power from isolated peaks.
+
+    Finds candidate peaks, fits Gaussians, and takes the median RP from
+    peaks with reasonable FWHM (avoiding broad blends). Falls back to
+    5000.0 if fitting fails.
+
+    Returns
+    -------
+    resolving_power : float
+    """
+    from scipy.signal import find_peaks
+    from scipy.optimize import curve_fit
+
+    norm = intensity / intensity.max()
+    peaks, _ = find_peaks(norm, height=0.1, prominence=0.05, distance=15)
+    if len(peaks) == 0:
+        return 5000.0
+
+    def gaussian(x, A, mu, sigma, bg):
+        return A * np.exp(-(x - mu) ** 2 / (2 * sigma**2)) + bg
+
+    rp_estimates = []
+    pixel_spacing = np.median(np.diff(wavelength))
+
+    for pk in peaks:
+        center_wl = wavelength[pk]
+        # Narrow window (±1 nm) to favor isolated peaks
+        mask = (wavelength > center_wl - 1.0) & (wavelength < center_wl + 1.0)
+        wl_win = wavelength[mask]
+        sp_win = intensity[mask]
+        if len(wl_win) < 10:
+            continue
+
+        try:
+            p0 = [intensity[pk], center_wl, 0.1, np.median(intensity)]
+            popt, _ = curve_fit(gaussian, wl_win, sp_win, p0=p0, maxfev=3000)
+            fwhm = 2.355 * abs(popt[2])
+            # Skip if FWHM is unreasonably narrow (<2 pixels) or broad (>2 nm)
+            if fwhm < 2 * pixel_spacing or fwhm > 2.0:
+                continue
+            rp = abs(popt[1]) / fwhm
+            rp_estimates.append(rp)
+        except Exception:
+            continue
+
+    if rp_estimates:
+        # Use median to reject outliers from blended features
+        rp = float(np.median(rp_estimates))
+        return max(100.0, min(rp, 20000.0))
+
+    return 5000.0
+
+
 def run_all_identifiers(
     wavelength: np.ndarray,
     intensity: np.ndarray,
     db: AtomicDatabase,
     elements: List[str],
+    resolving_power: float = 5000.0,
 ) -> Dict[str, Optional[ElementIdentificationResult]]:
     """
     Run ALIAS, Comb, and Correlation on same spectrum.
@@ -493,6 +569,8 @@ def run_all_identifiers(
         Atomic database instance
     elements : List[str]
         Elements to search for
+    resolving_power : float
+        Resolving power for ALIAS (default: 5000.0)
 
     Returns
     -------
@@ -502,7 +580,7 @@ def run_all_identifiers(
     results = {}
 
     algorithms = [
-        ("ALIAS", ALIASIdentifier, {"resolving_power": 5000.0}),
+        ("ALIAS", ALIASIdentifier, {"resolving_power": resolving_power}),
         ("Comb", CombIdentifier, {}),
         ("Correlation", CorrelationIdentifier, {}),
     ]
@@ -821,6 +899,7 @@ def report_depth_scan_robustness(
     db: AtomicDatabase,
     elements: List[str],
     dataset_name: str,
+    resolving_power: float = 5000.0,
 ):
     """
     Report per-iteration score variance for depth-scan datasets.
@@ -840,7 +919,7 @@ def report_depth_scan_robustness(
     print(f"  Positions: {n_pos}, Wavelengths: {n_wl}, Iterations: {n_iter}")
     print(f"  Using center position: {center}")
 
-    identifier = ALIASIdentifier(db, elements=elements, resolving_power=5000.0)
+    identifier = ALIASIdentifier(db, elements=elements, resolving_power=resolving_power)
 
     # Collect scores per element per iteration
     scores: Dict[str, List[float]] = {elem: [] for elem in elements}
@@ -1018,9 +1097,17 @@ def main():
         elements = args.elements if args.elements else dataset["elements"]
         expected = dataset["expected"]
 
+        # Determine resolving power: per-dataset override > auto-detect
+        if "resolving_power" in dataset:
+            rp = dataset["resolving_power"]
+            print(f"  Resolving power: {rp:.0f} (dataset config)")
+        else:
+            rp = estimate_resolving_power(wavelength, spectrum)
+            print(f"  Resolving power: {rp:.0f} (auto-detected)")
+
         # Run identifiers
         print(f"  Running identifiers for elements: {', '.join(elements)}")
-        results = run_all_identifiers(wavelength, spectrum, db, elements)
+        results = run_all_identifiers(wavelength, spectrum, db, elements, resolving_power=rp)
 
         # Print results table
         print_result_table(results, dataset["name"], expected)
@@ -1074,7 +1161,8 @@ def main():
         # Depth-scan robustness reporting
         if args.robustness and loader_name == "scipp_depth_scan":
             report_depth_scan_robustness(
-                str(data_path), db, elements, dataset["name"]
+                str(data_path), db, elements, dataset["name"],
+                resolving_power=rp,
             )
 
     # Print overall summary
