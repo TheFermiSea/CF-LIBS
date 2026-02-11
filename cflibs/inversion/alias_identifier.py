@@ -78,7 +78,7 @@ class ALIASIdentifier:
         T_steps: int = 5,
         n_e_steps: int = 3,
         intensity_threshold_factor: float = 4.0,
-        detection_threshold: float = 0.02,
+        detection_threshold: float = 0.03,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
