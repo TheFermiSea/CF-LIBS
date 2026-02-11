@@ -163,7 +163,7 @@ class ALIASIdentifier:
                 emissivity_threshold = -np.inf  # No matches, keep all for scoring
 
             # Step 6: Compute scores
-            k_sim, k_rate, k_shift, major_line_detected, N_expected = (
+            k_sim, k_rate, k_shift, P_maj, N_expected = (
                 self._compute_scores(
                     fused_lines, matched_mask, matched_peak_idx,
                     wavelength_shifts, intensity, peaks, emissivity_threshold,
@@ -180,7 +180,7 @@ class ALIASIdentifier:
             # gets weight when many lines predicted but few matched.
             k_det, CL = self._decide(
                 k_sim, k_rate, k_shift, N_expected, intensity, peaks,
-                element=element, major_line_detected=major_line_detected,
+                element=element, P_maj=P_maj,
             )
 
             # Build ElementIdentification
@@ -229,9 +229,12 @@ class ALIASIdentifier:
                     "emissivity_threshold": emissivity_threshold,
                     "N_expected": N_expected,
                     "N_matched": N_matched,
-                    "P_maj": 1.0 if major_line_detected else 0.5,
+                    "P_maj": P_maj,
                     "P_ab": self._compute_P_ab(element),
-                    "major_line_detected": major_line_detected,
+                    "N_penalty": (
+                        0.2 if N_expected <= 1
+                        else (0.5 if N_expected == 2 else 1.0)
+                    ),
                 },
             )
 
@@ -559,6 +562,29 @@ class ALIASIdentifier:
                 # Shift relative to uncorrected wavelength
                 wavelength_shifts[i] = peak_wavelengths[closest_idx] - line["wavelength_nm"]
 
+        # Enforce one-to-one: each experimental peak is assigned to at most
+        # one theoretical line (highest emissivity wins).  This prevents a
+        # single broad peak from "confirming" multiple theoretical lines,
+        # which inflates k_rate at low resolving power.
+        claimed_peaks: dict = {}  # peak_idx -> (line_idx, emissivity)
+        for i in range(n):
+            if not matched_mask[i]:
+                continue
+            pidx = int(matched_peak_idx[i])
+            emiss = fused_lines[i]["avg_emissivity"]
+            if pidx not in claimed_peaks or emiss > claimed_peaks[pidx][1]:
+                if pidx in claimed_peaks:
+                    old_i = claimed_peaks[pidx][0]
+                    matched_mask[old_i] = False
+                    wavelength_shifts[old_i] = 0.0
+                    matched_peak_idx[old_i] = -1
+                claimed_peaks[pidx] = (i, emiss)
+            else:
+                # Peak already claimed by a stronger line
+                matched_mask[i] = False
+                wavelength_shifts[i] = 0.0
+                matched_peak_idx[i] = -1
+
         return matched_mask, wavelength_shifts, matched_peak_idx
 
     def _determine_emissivity_threshold(
@@ -632,9 +658,9 @@ class ALIASIdentifier:
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         emissivity_threshold: float,
-    ) -> Tuple[float, float, float, bool, int]:
+    ) -> Tuple[float, float, float, float, int]:
         """
-        Compute k_sim, k_rate, k_shift scores, major-line flag, and N_expected.
+        Compute k_sim, k_rate, k_shift scores, P_maj, and N_expected.
 
         Parameters
         ----------
@@ -655,11 +681,11 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[float, float, float, bool, int]
-            (k_sim, k_rate, k_shift, major_line_detected, N_expected)
+        Tuple[float, float, float, float, int]
+            (k_sim, k_rate, k_shift, P_maj, N_expected)
         """
         if not np.any(matched_mask):
-            return 0.0, 0.0, 0.0, False, 0
+            return 0.0, 0.0, 0.0, 0.5, 0
 
         emissivities = np.array([line["avg_emissivity"] for line in fused_lines])
         above_threshold = emissivities >= 10**emissivity_threshold
@@ -674,19 +700,38 @@ class ALIASIdentifier:
         n_matched_above = int(np.sum(matched_above))
 
         if n_matched_above == 0:
-            return 0.0, 0.0, 0.0, False, N_expected
+            return 0.0, 0.0, 0.0, 0.5, N_expected
 
-        # Determine whether the strongest above-threshold line is matched
-        emissivities_above = emissivities * above_threshold
-        strongest_idx = int(np.argmax(emissivities_above))
-        major_line_detected = bool(matched_above[strongest_idx])
+        # Soft P_maj: weighted coverage of top-k strongest above-threshold
+        # lines.  Binary P_maj (strongest matched → 1.0, else 0.5) causes
+        # false negatives when the major line is obscured by matrix
+        # emission (e.g. V in Ti6Al4V where Ti dominates).
+        top_k = min(3, N_expected)
+        if top_k > 0:
+            above_emissivities = emissivities * above_threshold.astype(float)
+            sorted_indices = np.argsort(above_emissivities)[::-1][:top_k]
+            weights = np.sqrt(emissivities[sorted_indices])
+            matched_weights = float(np.sum(weights * matched_above[sorted_indices]))
+            total_weights = float(np.sum(weights))
+            P_maj = (
+                0.5 + 0.5 * (matched_weights / total_weights)
+                if total_weights > 0
+                else 0.5
+            )
+        else:
+            P_maj = 0.5
 
-        # k_rate: emissivity-weighted detection rate (paper formula)
+        # k_rate: geometric mean of emissivity-weighted and count-based rates.
+        # Emissivity-weighted alone lets a single high-emissivity match inflate
+        # k_rate to ~1.0 even when most lines are undetected.  The geometric
+        # mean with the count-based rate corrects this.
         total_emissivity_above = np.sum(emissivities[above_threshold])
         matched_emissivity = np.sum(emissivities[matched_above])
 
-        if total_emissivity_above > 0:
-            k_rate = matched_emissivity / total_emissivity_above
+        if total_emissivity_above > 0 and N_expected > 0:
+            k_rate_emissivity = matched_emissivity / total_emissivity_above
+            k_rate_count = n_matched_above / N_expected
+            k_rate = math.sqrt(k_rate_emissivity * k_rate_count)
         else:
             k_rate = 0.0
 
@@ -742,7 +787,7 @@ class ALIASIdentifier:
             uniqueness_factor = n_unique_peaks / n_matched_above
             k_sim *= uniqueness_factor
 
-        return k_sim, k_rate, k_shift, major_line_detected, N_expected
+        return k_sim, k_rate, k_shift, P_maj, N_expected
 
     def _compute_P_ab(self, element: str) -> float:
         """
@@ -781,7 +826,7 @@ class ALIASIdentifier:
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         element: str = "",
-        major_line_detected: bool = False,
+        P_maj: float = 0.5,
     ) -> Tuple[float, float]:
         """
         Compute detection score k_det and confidence level CL.
@@ -805,8 +850,9 @@ class ALIASIdentifier:
             Experimental peaks
         element : str
             Element symbol (for crustal abundance weighting)
-        major_line_detected : bool
-            Whether the strongest theoretical line was detected
+        P_maj : float
+            Major-line coverage factor (0.5–1.0), computed from top-k
+            strongest theoretical lines
 
         Returns
         -------
@@ -832,9 +878,6 @@ class ALIASIdentifier:
         else:
             k_det = 0.0
 
-        # Fix 3: P_maj — strongest theoretical line detected → 1.0, else 0.5
-        P_maj = 1.0 if major_line_detected else 0.5
-
         # P_SNR: approximate SNR quality
         if len(peaks) > 0:
             peak_intensities = [intensity[p[0]] for p in peaks]
@@ -848,7 +891,18 @@ class ALIASIdentifier:
         # Fix 4: P_ab — crustal abundance prior
         P_ab = self._compute_P_ab(element)
 
-        # Confidence level: CL = k_det × P_SNR × P_maj × P_ab (paper formula)
-        CL = k_det * P_SNR * P_maj * P_ab
+        # N_penalty: penalize sparse spectral evidence.  Elements with very
+        # few above-threshold lines in the spectral window cannot be confirmed
+        # by pattern matching; a single coincidental wavelength match should
+        # not yield a high confidence level.
+        if N_expected <= 1:
+            N_penalty = 0.2
+        elif N_expected == 2:
+            N_penalty = 0.5
+        else:
+            N_penalty = 1.0
+
+        # Confidence level: CL = k_det × P_SNR × P_maj × P_ab × N_penalty
+        CL = k_det * P_SNR * P_maj * P_ab * N_penalty
 
         return k_det, CL

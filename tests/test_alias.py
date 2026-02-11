@@ -328,13 +328,13 @@ def test_uniqueness_penalty(atomic_db):
     )
 
 
-def test_P_maj_strongest_line(atomic_db):
-    """P_maj=1.0 when strongest theoretical line matched, 0.5 otherwise."""
+def test_P_maj_soft_coverage(atomic_db):
+    """P_maj should be high when strongest line matched, lower when not."""
     from cflibs.atomic.structures import Transition
 
     identifier = ALIASIdentifier(atomic_db)
 
-    # Scenario: strongest line IS matched
+    # Scenario: strongest line IS matched → P_maj close to 1.0
     fused = [
         {"transition": Transition("Fe", 1, 372.0, 1e8, 3.3, 0.0, 11, 9),
          "avg_emissivity": 5000.0, "wavelength_nm": 372.0},  # strongest
@@ -350,20 +350,24 @@ def test_P_maj_strongest_line(atomic_db):
     peak_idx = np.array([0, 1])
     shifts = np.array([0.01, 0.01])
 
-    _, _, _, major_detected, _ = identifier._compute_scores(
+    _, _, _, P_maj_both, _ = identifier._compute_scores(
         fused, matched, peak_idx, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
-    assert major_detected is True
+    # Both matched including strongest → P_maj should be 1.0
+    assert P_maj_both > 0.9, f"P_maj should be ~1.0 when all matched: {P_maj_both}"
 
-    # Scenario: strongest line NOT matched
+    # Scenario: strongest line NOT matched → P_maj should be lower
     matched_miss = np.array([False, True])
     peak_idx_miss = np.array([-1, 1])
-    _, _, _, major_not_detected, _ = identifier._compute_scores(
+    _, _, _, P_maj_miss, _ = identifier._compute_scores(
         fused, matched_miss, peak_idx_miss, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
-    assert major_not_detected is False
+    assert P_maj_miss < P_maj_both, (
+        f"P_maj should decrease when strongest line missed: {P_maj_miss} vs {P_maj_both}"
+    )
+    assert P_maj_miss >= 0.5, f"P_maj should be at least 0.5: {P_maj_miss}"
 
 
 def test_N_expected_in_k_det_blend(atomic_db):
@@ -419,3 +423,136 @@ def test_P_ab_tiers(atomic_db):
 
     # Unknown element defaults to log_ppm=0.0 → 1 ppm → intermediate
     assert identifier._compute_P_ab("Xx") == 0.75
+
+
+def test_N_penalty_sparse_evidence(atomic_db):
+    """N_penalty should penalize elements with few above-threshold lines."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    def _make_scenario(n_lines, n_matched):
+        """Build fused lines, peaks, and masks for a given line count."""
+        fused = []
+        for i in range(n_lines):
+            wl = 300.0 + i * 2.0  # well-separated
+            fused.append({
+                "transition": Transition("Fe", 1, wl, 1e7, 3.0, 0.0, 9, 7),
+                "avg_emissivity": 1000.0,
+                "wavelength_nm": wl,
+            })
+        peaks_list = [
+            (50 + i * 10, 300.0 + i * 2.0 + 0.01) for i in range(n_matched)
+        ]
+        intensity = np.full(500, 10.0)
+        for idx, _ in peaks_list:
+            intensity[idx] = 800.0
+        matched = np.array(
+            [True] * n_matched + [False] * (n_lines - n_matched)
+        )
+        pidx = np.array(
+            list(range(n_matched)) + [-1] * (n_lines - n_matched)
+        )
+        shifts = np.array(
+            [0.01] * n_matched + [0.0] * (n_lines - n_matched)
+        )
+        return fused, peaks_list, intensity, matched, pidx, shifts
+
+    # N_expected=1, 1 matched → N_penalty=0.2
+    f1, p1, i1, m1, pi1, s1 = _make_scenario(1, 1)
+    k_sim1, k_rate1, k_shift1, P_maj1, N1 = identifier._compute_scores(
+        f1, m1, pi1, s1, i1, p1, emissivity_threshold=-np.inf,
+    )
+    _, CL1 = identifier._decide(
+        k_sim1, k_rate1, k_shift1, N1, i1, p1,
+        element="Co", P_maj=P_maj1,
+    )
+
+    # N_expected=5, 5 matched → N_penalty=1.0
+    f5, p5, i5, m5, pi5, s5 = _make_scenario(5, 5)
+    k_sim5, k_rate5, k_shift5, P_maj5, N5 = identifier._compute_scores(
+        f5, m5, pi5, s5, i5, p5, emissivity_threshold=-np.inf,
+    )
+    _, CL5 = identifier._decide(
+        k_sim5, k_rate5, k_shift5, N5, i5, p5,
+        element="Co", P_maj=P_maj5,
+    )
+
+    assert N1 == 1
+    assert N5 == 5
+    # CL for N=1 should be substantially lower than N=5 due to N_penalty
+    assert CL1 < CL5, (
+        f"N_penalty should reduce CL for N=1: CL1={CL1}, CL5={CL5}"
+    )
+
+
+def test_combined_k_rate(atomic_db):
+    """k_rate should use geometric mean of emissivity-weighted and count-based."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # 5 lines, only 1 matched — but it has highest emissivity
+    fused = [
+        {"transition": Transition("Ni", 1, 350.0, 1e8, 3.0, 0.0, 11, 9),
+         "avg_emissivity": 5000.0, "wavelength_nm": 350.0},  # matched
+    ]
+    for i in range(4):
+        wl = 352.0 + i * 2.0
+        fused.append({
+            "transition": Transition("Ni", 1, wl, 1e6, 3.0, 0.0, 7, 7),
+            "avg_emissivity": 100.0, "wavelength_nm": wl,
+        })
+    peaks = [(100, 350.01)]
+    intensity = np.full(500, 10.0)
+    intensity[100] = 1000.0
+
+    matched = np.array([True] + [False] * 4)
+    pidx = np.array([0] + [-1] * 4)
+    shifts = np.array([0.01] + [0.0] * 4)
+
+    _, k_rate, _, _, _ = identifier._compute_scores(
+        fused, matched, pidx, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
+    )
+
+    # Pure emissivity-weighted would give ~5000/5400 ≈ 0.93
+    # Count-based gives 1/5 = 0.2
+    # Geometric mean ≈ sqrt(0.93 * 0.2) ≈ 0.43
+    assert k_rate < 0.6, (
+        f"Combined k_rate should be pulled down by count rate: got {k_rate}"
+    )
+    assert k_rate > 0.1, (
+        f"Combined k_rate should still be positive: got {k_rate}"
+    )
+
+
+def test_one_to_one_peak_assignment(atomic_db):
+    """Each peak should match at most one theoretical line (highest emissivity wins)."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    # 3 lines near the same wavelength — all would match the same peak
+    # without one-to-one enforcement
+    fused = [
+        {"transition": Transition("Co", 1, 400.0, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 500.0, "wavelength_nm": 400.0},
+        {"transition": Transition("Co", 1, 400.3, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 1000.0, "wavelength_nm": 400.3},  # highest emissivity
+        {"transition": Transition("Co", 1, 400.5, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 200.0, "wavelength_nm": 400.5},
+    ]
+    # Single peak that's within delta_lambda of all three lines
+    peaks = [(250, 400.2)]
+
+    matched, _, peak_idx = identifier._match_lines(fused, peaks)
+
+    # Only one line should be matched (highest emissivity = line at 400.3)
+    assert int(np.sum(matched)) == 1, (
+        f"One-to-one should allow only 1 match per peak, got {int(np.sum(matched))}"
+    )
+    # The matched line should be index 1 (highest emissivity)
+    assert matched[1] is True or matched[1] == True, (
+        "Highest emissivity line should win the peak assignment"
+    )
