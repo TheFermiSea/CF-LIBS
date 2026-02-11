@@ -150,7 +150,9 @@ class ALIASIdentifier:
                 continue
 
             # Step 4: Match lines to experimental peaks
-            matched_mask, wavelength_shifts = self._match_lines(fused_lines, peaks)
+            matched_mask, wavelength_shifts, matched_peak_idx = self._match_lines(
+                fused_lines, peaks
+            )
 
             # Step 5: Determine emissivity threshold
             if np.any(matched_mask):
@@ -161,38 +163,39 @@ class ALIASIdentifier:
                 emissivity_threshold = -np.inf  # No matches, keep all for scoring
 
             # Step 6: Compute scores
-            k_sim, k_rate, k_shift, major_line_detected = self._compute_scores(
-                fused_lines, matched_mask, wavelength_shifts, intensity, peaks, emissivity_threshold
-            )
-
-            # Step 7: Decision
-            N_X = np.sum(
-                matched_mask
-                & (
-                    np.array([line["avg_emissivity"] for line in fused_lines])
-                    >= 10**emissivity_threshold
+            k_sim, k_rate, k_shift, major_line_detected, N_expected = (
+                self._compute_scores(
+                    fused_lines, matched_mask, matched_peak_idx,
+                    wavelength_shifts, intensity, peaks, emissivity_threshold,
                 )
             )
+
+            # N_matched: lines both above threshold AND matched (for metadata)
+            emissivities_arr = np.array([l["avg_emissivity"] for l in fused_lines])
+            N_matched = int(np.sum(
+                matched_mask & (emissivities_arr >= 10**emissivity_threshold)
+            ))
+
+            # Step 7: Decision — use N_expected in blend so k_sim always
+            # gets weight when many lines predicted but few matched.
             k_det, CL = self._decide(
-                k_sim, k_rate, k_shift, N_X, intensity, peaks,
+                k_sim, k_rate, k_shift, N_expected, intensity, peaks,
                 element=element, major_line_detected=major_line_detected,
             )
 
             # Build ElementIdentification
             detected = CL >= self.detection_threshold
 
-            # Create IdentifiedLine objects for matched lines
+            # Create IdentifiedLine objects using matched_peak_idx for
+            # consistent peak association (same peak _match_lines chose).
             matched_lines = []
             unmatched_lines = []
             for i, line_data in enumerate(fused_lines):
                 trans = line_data["transition"]
                 if matched_mask[i]:
-                    # Find closest peak
-                    peak_idx = np.argmin(
-                        np.abs(np.array([p[1] for p in peaks]) - line_data["wavelength_nm"])
-                    )
-                    peak_wl = peaks[peak_idx][1]
-                    peak_int = intensity[peaks[peak_idx][0]]
+                    pidx = matched_peak_idx[i]
+                    peak_wl = peaks[pidx][1]
+                    peak_int = intensity[peaks[pidx][0]]
 
                     matched_lines.append(
                         IdentifiedLine(
@@ -224,7 +227,8 @@ class ALIASIdentifier:
                     "k_shift": k_shift,
                     "k_det": k_det,
                     "emissivity_threshold": emissivity_threshold,
-                    "N_X": int(N_X),
+                    "N_expected": N_expected,
+                    "N_matched": N_matched,
                     "P_maj": 1.0 if major_line_detected else 0.5,
                     "P_ab": self._compute_P_ab(element),
                     "major_line_detected": major_line_detected,
@@ -487,7 +491,7 @@ class ALIASIdentifier:
 
     def _match_lines(
         self, fused_lines: List[dict], peaks: List[Tuple[int, float]]
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Match theoretical lines to experimental peaks.
 
@@ -500,12 +504,18 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray]
-            (matched_mask, wavelength_shifts) where matched_mask is bool array and
-            wavelength_shifts is float array of shifts in nm
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+            (matched_mask, wavelength_shifts, matched_peak_idx) where
+            matched_mask is bool array, wavelength_shifts is float array of
+            shifts in nm, and matched_peak_idx is int array (-1 if unmatched)
         """
+        n = len(fused_lines)
         if not peaks or not fused_lines:
-            return np.zeros(len(fused_lines), dtype=bool), np.zeros(len(fused_lines))
+            return (
+                np.zeros(n, dtype=bool),
+                np.zeros(n),
+                np.full(n, -1, dtype=int),
+            )
 
         peak_wavelengths = np.array([p[1] for p in peaks])
 
@@ -531,8 +541,9 @@ class ALIASIdentifier:
 
         global_shift = np.median(shifts) if shifts else 0.0
 
-        matched_mask = np.zeros(len(fused_lines), dtype=bool)
-        wavelength_shifts = np.zeros(len(fused_lines))
+        matched_mask = np.zeros(n, dtype=bool)
+        wavelength_shifts = np.zeros(n)
+        matched_peak_idx = np.full(n, -1, dtype=int)
 
         for i, line in enumerate(fused_lines):
             wl_th = line["wavelength_nm"] + global_shift  # Apply correction
@@ -543,11 +554,12 @@ class ALIASIdentifier:
 
             if np.any(within_window):
                 matched_mask[i] = True
-                # Shift to closest peak (relative to uncorrected wavelength)
-                closest_idx = np.argmin(distances)
+                closest_idx = int(np.argmin(distances))
+                matched_peak_idx[i] = closest_idx
+                # Shift relative to uncorrected wavelength
                 wavelength_shifts[i] = peak_wavelengths[closest_idx] - line["wavelength_nm"]
 
-        return matched_mask, wavelength_shifts
+        return matched_mask, wavelength_shifts, matched_peak_idx
 
     def _determine_emissivity_threshold(
         self, fused_lines: List[dict], matched_mask: np.ndarray
@@ -615,13 +627,14 @@ class ALIASIdentifier:
         self,
         fused_lines: List[dict],
         matched_mask: np.ndarray,
+        matched_peak_idx: np.ndarray,
         wavelength_shifts: np.ndarray,
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         emissivity_threshold: float,
-    ) -> Tuple[float, float, float, bool]:
+    ) -> Tuple[float, float, float, bool, int]:
         """
-        Compute k_sim, k_rate, k_shift scores and major-line detection flag.
+        Compute k_sim, k_rate, k_shift scores, major-line flag, and N_expected.
 
         Parameters
         ----------
@@ -629,6 +642,8 @@ class ALIASIdentifier:
             Fused theoretical lines
         matched_mask : np.ndarray
             Boolean mask of matched lines
+        matched_peak_idx : np.ndarray
+            Index of matched peak per line (-1 if unmatched)
         wavelength_shifts : np.ndarray
             Wavelength shifts in nm
         intensity : np.ndarray
@@ -640,28 +655,33 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[float, float, float, bool]
-            (k_sim, k_rate, k_shift, major_line_detected)
+        Tuple[float, float, float, bool, int]
+            (k_sim, k_rate, k_shift, major_line_detected, N_expected)
         """
         if not np.any(matched_mask):
-            return 0.0, 0.0, 0.0, False
+            return 0.0, 0.0, 0.0, False, 0
 
         emissivities = np.array([line["avg_emissivity"] for line in fused_lines])
         above_threshold = emissivities >= 10**emissivity_threshold
 
-        # Filter to lines above threshold
+        # N_expected: ALL above-threshold theoretical lines (matched or not).
+        # Used in k_det blend so k_sim always gets weight when many lines
+        # are predicted but few matched (prevents N_X=1 singularity).
+        N_expected = int(np.sum(above_threshold))
+
+        # Filter to lines above threshold that are also matched
         matched_above = matched_mask & above_threshold
-        n_matched_above = np.sum(matched_above)
+        n_matched_above = int(np.sum(matched_above))
 
         if n_matched_above == 0:
-            return 0.0, 0.0, 0.0, False
+            return 0.0, 0.0, 0.0, False, N_expected
 
         # Determine whether the strongest above-threshold line is matched
         emissivities_above = emissivities * above_threshold
         strongest_idx = int(np.argmax(emissivities_above))
         major_line_detected = bool(matched_above[strongest_idx])
 
-        # k_rate: emissivity-weighted detection rate
+        # k_rate: emissivity-weighted detection rate (paper formula)
         total_emissivity_above = np.sum(emissivities[above_threshold])
         matched_emissivity = np.sum(emissivities[matched_above])
 
@@ -682,32 +702,27 @@ class ALIASIdentifier:
             k_shift = 0.0
 
         # k_sim: cosine similarity between theoretical and experimental intensities
-        # Fix 1: Include ALL above-threshold lines, not just matched ones.
-        # Unmatched lines get experimental intensity = 0, penalising elements
-        # that predict lines the spectrum doesn't contain.
-        peak_wavelengths = np.array([p[1] for p in peaks])
+        # Include ALL above-threshold lines; unmatched get experimental = 0,
+        # penalising elements that predict lines the spectrum doesn't contain.
+        # Use matched_peak_idx (from _match_lines) for consistent peak mapping.
         theoretical_intensities = []
         experimental_intensities = []
-        matched_peak_indices = set()
+        unique_peak_set: set = set()
 
-        for i, line in enumerate(fused_lines):
+        for i in range(len(fused_lines)):
             if above_threshold[i]:
                 theoretical_intensities.append(emissivities[i])
                 if matched_above[i]:
-                    peak_idx = int(
-                        np.argmin(np.abs(peak_wavelengths - line["wavelength_nm"]))
-                    )
-                    experimental_intensities.append(intensity[peaks[peak_idx][0]])
-                    matched_peak_indices.add(peak_idx)
+                    pidx = matched_peak_idx[i]
+                    experimental_intensities.append(intensity[peaks[pidx][0]])
+                    unique_peak_set.add(pidx)
                 else:
-                    # Unmatched theoretical line → experimental intensity = 0
                     experimental_intensities.append(0.0)
 
         if len(theoretical_intensities) > 1:
             th_vec = np.array(theoretical_intensities)
             exp_vec = np.array(experimental_intensities)
 
-            # Cosine similarity
             dot_product = np.dot(th_vec, exp_vec)
             norm_th = np.linalg.norm(th_vec)
             norm_exp = np.linalg.norm(exp_vec)
@@ -718,18 +733,16 @@ class ALIASIdentifier:
             else:
                 k_sim = 0.0
         else:
-            # Not enough points for correlation
-            k_sim = 0.5  # Neutral value
+            # Single above-threshold line: cosine similarity undefined → 0
+            k_sim = 0.0
 
-        # Fix 2: Uniqueness penalty — multiple theoretical lines mapping to
-        # the same broad experimental peak should not inflate k_sim.
-        n_unique_peaks = len(matched_peak_indices)
-        n_total_matches = int(np.sum(matched_above))
-        if n_total_matches > 0:
-            uniqueness_factor = n_unique_peaks / n_total_matches
+        # Uniqueness penalty: many-to-one mapping lowers k_sim
+        n_unique_peaks = len(unique_peak_set)
+        if n_matched_above > 0:
+            uniqueness_factor = n_unique_peaks / n_matched_above
             k_sim *= uniqueness_factor
 
-        return k_sim, k_rate, k_shift, major_line_detected
+        return k_sim, k_rate, k_shift, major_line_detected, N_expected
 
     def _compute_P_ab(self, element: str) -> float:
         """
@@ -764,7 +777,7 @@ class ALIASIdentifier:
         k_sim: float,
         k_rate: float,
         k_shift: float,
-        N_X: int,
+        N_expected: int,
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         element: str = "",
@@ -781,8 +794,11 @@ class ALIASIdentifier:
             Detection rate score
         k_shift : float
             Wavelength shift score
-        N_X : int
-            Number of matched lines above threshold
+        N_expected : int
+            Number of above-threshold theoretical lines (matched or not).
+            Using expected count (not matched count) prevents the N=1
+            singularity where k_sim gets zero weight from a single
+            coincidental match.
         intensity : np.ndarray
             Experimental intensity array
         peaks : List[Tuple[int, float]]
@@ -797,9 +813,19 @@ class ALIASIdentifier:
         Tuple[float, float]
             (k_det, CL) detection score and confidence level
         """
-        # k_det formula
-        if N_X > 0:
-            k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+        # k_det formula — uses N_expected (above-threshold count) so that
+        # k_sim always receives weight when many lines are predicted.
+        if N_expected > 1:
+            k_det = k_rate * (
+                (1.0 / N_expected) * k_shift
+                + ((N_expected - 1.0) / N_expected) * k_sim
+            )
+        elif N_expected == 1:
+            # Single above-threshold line: statistically insufficient for
+            # pattern confirmation.  Apply a 50/50 blend of k_shift and
+            # k_sim (which is 0 in this regime) so a single coincidental
+            # wavelength match cannot produce a near-perfect score.
+            k_det = k_rate * (0.5 * k_shift + 0.5 * k_sim)
         elif k_rate > 0:
             # Partial credit: some lines matched but below emissivity threshold
             k_det = k_rate * 0.3

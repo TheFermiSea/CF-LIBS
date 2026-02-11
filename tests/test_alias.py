@@ -88,7 +88,9 @@ def test_match_lines(atomic_db):
     # Create peaks near theoretical wavelengths
     peaks = [(100, 372.01), (200, 373.49)]  # (index, wavelength)
 
-    matched_mask, wavelength_shifts = identifier._match_lines(fused_lines, peaks)
+    matched_mask, wavelength_shifts, matched_peak_idx = identifier._match_lines(
+        fused_lines, peaks
+    )
 
     # Both lines should match
     assert matched_mask[0] == True
@@ -97,6 +99,10 @@ def test_match_lines(atomic_db):
     # Shifts should be small
     assert abs(wavelength_shifts[0]) < 0.1
     assert abs(wavelength_shifts[1]) < 0.1
+
+    # Peak indices should be valid
+    assert matched_peak_idx[0] >= 0
+    assert matched_peak_idx[1] >= 0
 
 
 def test_identify_basic(atomic_db, synthetic_libs_spectrum):
@@ -251,15 +257,16 @@ def test_k_sim_penalizes_unmatched_lines(atomic_db):
          "avg_emissivity": 800.0, "wavelength_nm": 374.0},
     ]
     peaks = [(100, 372.01), (200, 374.01)]
-    wavelength = np.linspace(370, 380, 500)
     intensity = np.full(500, 10.0)
     intensity[100] = 500.0
     intensity[200] = 400.0
     matched_a = np.array([True, True])
+    peak_idx_a = np.array([0, 1])
     shifts_a = np.array([0.01, 0.01])
 
-    k_sim_a, _, _, _ = identifier._compute_scores(
-        fused_a, matched_a, shifts_a, intensity, peaks, emissivity_threshold=-np.inf
+    k_sim_a, _, _, _, _ = identifier._compute_scores(
+        fused_a, matched_a, peak_idx_a, shifts_a, intensity, peaks,
+        emissivity_threshold=-np.inf,
     )
 
     # Scenario B: 10 lines but only 2 matched — identical matched intensities
@@ -271,10 +278,12 @@ def test_k_sim_penalizes_unmatched_lines(atomic_db):
             "avg_emissivity": 600.0, "wavelength_nm": wl,
         })
     matched_b = np.array([True, True] + [False] * 8)
+    peak_idx_b = np.array([0, 1] + [-1] * 8)
     shifts_b = np.array([0.01, 0.01] + [0.0] * 8)
 
-    k_sim_b, _, _, _ = identifier._compute_scores(
-        fused_b, matched_b, shifts_b, intensity, peaks, emissivity_threshold=-np.inf
+    k_sim_b, _, _, _, _ = identifier._compute_scores(
+        fused_b, matched_b, peak_idx_b, shifts_b, intensity, peaks,
+        emissivity_threshold=-np.inf,
     )
 
     # k_sim_b should be strictly lower because the 8 unmatched lines
@@ -300,15 +309,16 @@ def test_uniqueness_penalty(atomic_db):
         })
     # Single experimental peak near 400.0
     peaks = [(250, 400.01)]
-    wavelength = np.linspace(390, 410, 500)
     intensity = np.full(500, 10.0)
     intensity[250] = 800.0
 
     matched = np.array([True, True, True, True])
+    peak_idx = np.array([0, 0, 0, 0])  # all map to same peak
     shifts = np.array([0.01, -0.01, 0.01, -0.01])
 
-    k_sim, _, _, _ = identifier._compute_scores(
-        fused, matched, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    k_sim, _, _, _, _ = identifier._compute_scores(
+        fused, matched, peak_idx, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
     )
 
     # uniqueness_factor = 1 unique peak / 4 matches = 0.25
@@ -337,19 +347,54 @@ def test_P_maj_strongest_line(atomic_db):
     intensity[200] = 50.0
 
     matched = np.array([True, True])
+    peak_idx = np.array([0, 1])
     shifts = np.array([0.01, 0.01])
 
-    _, _, _, major_detected = identifier._compute_scores(
-        fused, matched, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    _, _, _, major_detected, _ = identifier._compute_scores(
+        fused, matched, peak_idx, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
     )
     assert major_detected is True
 
     # Scenario: strongest line NOT matched
     matched_miss = np.array([False, True])
-    _, _, _, major_not_detected = identifier._compute_scores(
-        fused, matched_miss, shifts, intensity, peaks, emissivity_threshold=-np.inf
+    peak_idx_miss = np.array([-1, 1])
+    _, _, _, major_not_detected, _ = identifier._compute_scores(
+        fused, matched_miss, peak_idx_miss, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
     )
     assert major_not_detected is False
+
+
+def test_N_expected_in_k_det_blend(atomic_db):
+    """N_expected (not N_matched) should be used in k_det blend formula."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    # 10 theoretical lines above threshold, only 1 matched
+    fused = []
+    for i in range(10):
+        wl = 300.0 + i * 1.0
+        fused.append({
+            "transition": Transition("Co", 1, wl, 1e7, 3.0, 0.0, 9, 7),
+            "avg_emissivity": 1000.0, "wavelength_nm": wl,
+        })
+    peaks = [(50, 300.01)]
+    intensity = np.full(500, 10.0)
+    intensity[50] = 800.0
+
+    matched = np.array([True] + [False] * 9)
+    peak_idx = np.array([0] + [-1] * 9)
+    shifts = np.array([0.01] + [0.0] * 9)
+
+    _, _, _, _, N_expected = identifier._compute_scores(
+        fused, matched, peak_idx, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
+    )
+
+    # N_expected should be 10 (all above threshold), not 1 (matched)
+    assert N_expected == 10, f"N_expected should be 10 but got {N_expected}"
 
 
 def test_P_ab_tiers(atomic_db):
