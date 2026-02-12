@@ -10,6 +10,7 @@ from typing import List, Tuple, Optional
 import math
 import numpy as np
 from scipy.signal import find_peaks
+from scipy.stats import binom
 
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
@@ -53,6 +54,9 @@ class ALIASIdentifier:
         Peak detection threshold = factor × noise_estimate (default: 4.0)
     detection_threshold : float, optional
         Minimum confidence level for element detection (default: 0.02)
+    chance_window_scale : float, optional
+        Scale factor for chance-coincidence windows used in fill-factor estimation.
+        The chance half-window is `chance_window_scale * (lambda / R)`.
     elements : Optional[List[str]], optional
         List of elements to search for. If None, searches all available (default: None)
     """
@@ -79,6 +83,7 @@ class ALIASIdentifier:
         n_e_steps: int = 3,
         intensity_threshold_factor: float = 4.0,
         detection_threshold: float = 0.03,
+        chance_window_scale: float = 0.4,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
@@ -91,6 +96,7 @@ class ALIASIdentifier:
         self.n_e_steps = n_e_steps
         self.intensity_threshold_factor = intensity_threshold_factor
         self.detection_threshold = detection_threshold
+        self.chance_window_scale = chance_window_scale
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
@@ -171,16 +177,23 @@ class ALIASIdentifier:
             )
 
             # N_matched: lines both above threshold AND matched (for metadata)
-            emissivities_arr = np.array([l["avg_emissivity"] for l in fused_lines])
+            emissivities_arr = np.array([line["avg_emissivity"] for line in fused_lines])
             N_matched = int(np.sum(
                 matched_mask & (emissivities_arr >= 10**emissivity_threshold)
             ))
+
+            P_sig, fill_factor, p_chance, p_tail = self._compute_random_match_significance(
+                peaks=peaks,
+                wavelength=wavelength,
+                N_expected=N_expected,
+                N_matched=N_matched,
+            )
 
             # Step 7: Decision — use N_expected in blend so k_sim always
             # gets weight when many lines predicted but few matched.
             k_det, CL = self._decide(
                 k_sim, k_rate, k_shift, N_expected, intensity, peaks,
-                element=element, P_maj=P_maj,
+                element=element, P_maj=P_maj, P_sig=P_sig,
             )
 
             # Build ElementIdentification
@@ -231,6 +244,10 @@ class ALIASIdentifier:
                     "N_matched": N_matched,
                     "P_maj": P_maj,
                     "P_ab": self._compute_P_ab(element),
+                    "P_sig": P_sig,
+                    "p_tail": p_tail,
+                    "p_chance": p_chance,
+                    "fill_factor": fill_factor,
                     "N_penalty": (
                         0.2 if N_expected <= 1
                         else (0.5 if N_expected == 2 else 1.0)
@@ -817,6 +834,108 @@ class ALIASIdentifier:
         else:
             return 0.5
 
+    def _compute_fill_factor(
+        self,
+        peaks: List[Tuple[int, float]],
+        wavelength: np.ndarray,
+    ) -> float:
+        """
+        Compute spectral fill factor from merged peak-match windows.
+
+        Each peak contributes an interval centered at its wavelength with half-width:
+            chance_window_scale * (lambda / resolving_power)
+        Overlapping intervals are merged before computing covered span fraction.
+
+        Parameters
+        ----------
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+        wavelength : np.ndarray
+            Full spectral wavelength axis in nm.
+
+        Returns
+        -------
+        float
+            Fraction of spectral span covered by merged intervals in [0, 1].
+        """
+        if len(peaks) == 0 or len(wavelength) < 2:
+            return 0.0
+
+        wl_min = float(np.min(wavelength))
+        wl_max = float(np.max(wavelength))
+        span = wl_max - wl_min
+        if span <= 0:
+            return 0.0
+
+        intervals: List[Tuple[float, float]] = []
+        for _, peak_wl in peaks:
+            half_window = self.chance_window_scale * (peak_wl / self.resolving_power)
+            if half_window <= 0:
+                continue
+            start = max(wl_min, peak_wl - half_window)
+            end = min(wl_max, peak_wl + half_window)
+            if end > start:
+                intervals.append((start, end))
+
+        if not intervals:
+            return 0.0
+
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for start, end in intervals[1:]:
+            last_start, last_end = merged[-1]
+            if start <= last_end:
+                merged[-1] = (last_start, max(last_end, end))
+            else:
+                merged.append((start, end))
+
+        covered = sum(end - start for start, end in merged)
+        return float(np.clip(covered / span, 0.0, 1.0))
+
+    def _compute_random_match_significance(
+        self,
+        peaks: List[Tuple[int, float]],
+        wavelength: np.ndarray,
+        N_expected: int,
+        N_matched: int,
+    ) -> Tuple[float, float, float, float]:
+        """
+        Compute chance-coincidence significance from a binomial tail test.
+
+        Parameters
+        ----------
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+        wavelength : np.ndarray
+            Full spectral wavelength axis in nm.
+        N_expected : int
+            Number of above-threshold theoretical lines.
+        N_matched : int
+            Number of above-threshold lines matched to peaks.
+
+        Returns
+        -------
+        Tuple[float, float, float, float]
+            (P_sig, fill_factor, p_chance, p_tail), where:
+            - fill_factor is merged-window coverage fraction
+            - p_chance is per-line random-match probability
+            - p_tail = P(X >= N_matched | n=N_expected, p=p_chance)
+            - P_sig = 1 - p_tail
+        """
+        fill_factor = self._compute_fill_factor(peaks, wavelength)
+        p_chance = float(np.clip(fill_factor, 1e-6, 1.0 - 1e-6))
+
+        if N_expected <= 0 or N_matched <= 0:
+            return 1.0, fill_factor, p_chance, 1.0
+
+        n_trials = max(N_expected, N_matched)
+        n_success = min(N_matched, n_trials)
+
+        p_tail = float(binom.sf(n_success - 1, n_trials, p_chance))
+        P_sig = float(np.clip(1.0 - p_tail, 0.0, 1.0))
+
+        return P_sig, fill_factor, p_chance, p_tail
+
     def _decide(
         self,
         k_sim: float,
@@ -827,6 +946,7 @@ class ALIASIdentifier:
         peaks: List[Tuple[int, float]],
         element: str = "",
         P_maj: float = 0.5,
+        P_sig: float = 1.0,
     ) -> Tuple[float, float]:
         """
         Compute detection score k_det and confidence level CL.
@@ -853,6 +973,9 @@ class ALIASIdentifier:
         P_maj : float
             Major-line coverage factor (0.5–1.0), computed from top-k
             strongest theoretical lines
+        P_sig : float
+            Statistical significance factor against random coincidence
+            (computed from a binomial survival test)
 
         Returns
         -------
@@ -902,7 +1025,8 @@ class ALIASIdentifier:
         else:
             N_penalty = 1.0
 
-        # Confidence level: CL = k_det × P_SNR × P_maj × P_ab × N_penalty
-        CL = k_det * P_SNR * P_maj * P_ab * N_penalty
+        # Confidence level:
+        # CL = k_det × P_SNR × P_maj × P_ab × N_penalty × P_sig
+        CL = k_det * P_SNR * P_maj * P_ab * N_penalty * P_sig
 
         return k_det, CL

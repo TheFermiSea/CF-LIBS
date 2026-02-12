@@ -556,3 +556,35 @@ def test_one_to_one_peak_assignment(atomic_db):
     assert matched[1] is True or matched[1] == True, (
         "Highest emissivity line should win the peak assignment"
     )
+
+
+def test_fill_factor_and_P_sig(atomic_db):
+    """Fill factor should be reasonable and P_sig should penalize random matches."""
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    # Sparse peaks → low fill factor → high P_sig
+    wavelength_sparse = np.linspace(280, 320, 2000)
+    peaks_sparse = [(100, 290.0), (500, 300.0), (900, 310.0)]  # only 3 peaks
+    ff_sparse = identifier._compute_fill_factor(peaks_sparse, wavelength_sparse)
+    assert ff_sparse < 0.2, f"Sparse peaks should have low fill factor: {ff_sparse}"
+
+    # P_sig for significant excess matches
+    P_sig_good, _, _, _ = identifier._compute_random_match_significance(
+        peaks_sparse, wavelength_sparse, N_expected=5, N_matched=4,
+    )
+    assert P_sig_good > 0.5, f"Excess matches should give high P_sig: {P_sig_good}"
+
+    # Dense peaks → high fill factor → lower P_sig for same match ratio
+    peaks_dense = [(i * 50, 280.0 + i * 1.3) for i in range(30)]
+    ff_dense = identifier._compute_fill_factor(peaks_dense, wavelength_sparse)
+    assert ff_dense > ff_sparse, (
+        f"Dense peaks should have higher fill factor: {ff_dense} vs {ff_sparse}"
+    )
+
+    P_sig_dense, _, _, _ = identifier._compute_random_match_significance(
+        peaks_dense, wavelength_sparse, N_expected=10, N_matched=3,
+    )
+    # With high fill factor and few matches relative to expected, P_sig should be low
+    assert P_sig_dense < P_sig_good, (
+        f"Dense spectrum with few matches should have lower P_sig: {P_sig_dense}"
+    )
