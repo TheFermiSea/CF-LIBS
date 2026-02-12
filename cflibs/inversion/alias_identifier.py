@@ -982,6 +982,14 @@ class ALIASIdentifier:
         Tuple[float, float]
             (k_det, CL) detection score and confidence level
         """
+        # k_sim gate: require minimum intensity-pattern correlation.
+        # Pure wavelength coincidences with uncorrelated intensities should
+        # not yield a detection.  For N_expected >= 2, require k_sim >= 0.15.
+        # For N_expected == 1, k_sim is 0 by construction (cosine similarity
+        # undefined for single point), so rely on N_penalty instead.
+        if N_expected >= 2 and k_sim < 0.15:
+            return 0.0, 0.0
+
         # k_det formula — uses N_expected (above-threshold count) so that
         # k_sim always receives weight when many lines are predicted.
         if N_expected > 1:
