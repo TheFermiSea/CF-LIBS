@@ -296,10 +296,11 @@ class ALIASIdentifier:
                 k_det = cand["k_det"]
                 CL = cand["initial_CL"]
 
-            # Apply NNLS mixture attribution: floor of 0.2 prevents NNLS
-            # from zeroing out elements with very few lines.
+            # Apply NNLS mixture attribution as linear floor.
+            # P_mix is an absolute explained-variance fraction (partial R^2).
+            # Elements contributing nothing get P_mix ~ 0 → CL *= 0.2.
             P_mix = cand.get("P_mix", 1.0)
-            CL *= (0.2 + 0.8 * P_mix)
+            CL *= (0.2 + 0.8 * min(P_mix, 1.0))
 
             detected = CL >= self.detection_threshold
 
@@ -852,15 +853,16 @@ class ALIASIdentifier:
         delta_lambda = mean_wl / self.resolving_power
 
         shifts_matched = np.abs(wavelength_shifts[matched_above])
-        if len(shifts_matched) > 0:
-            mean_shift_frac = np.mean(shifts_matched) / delta_lambda
-            k_shift = max(0.0, 1.0 - mean_shift_frac)
+        emiss_matched = emissivities[matched_above]
+        if len(shifts_matched) > 0 and np.sum(emiss_matched) > 0:
+            weighted_shift = np.average(shifts_matched, weights=emiss_matched)
+            k_shift = max(0.0, 1.0 - weighted_shift / delta_lambda)
         else:
             k_shift = 0.0
 
         # k_sim: cosine similarity between theoretical and experimental
         # intensities over MATCHED lines only (paper-faithful).
-        # Coverage penalty is handled separately by P_cov.
+        # Coverage is handled exclusively by k_rate.
         theoretical_intensities = []
         experimental_intensities = []
         unique_peak_set: set = set()
@@ -995,12 +997,22 @@ class ALIASIdentifier:
 
         Each column is an element's expected peak contribution based on
         Gaussian kernels at instrument resolution centered on each
-        theoretical line position.
+        theoretical line position.  Three fixes over the original:
+
+        1. **Per-peak sigma** — ``sigma_i = lambda_i / RP / 2.355`` varies
+           across the spectral window instead of using the mean wavelength.
+        2. **Per-element shift** — median wavelength shift from the matching
+           phase is applied to each line position so the template aligns
+           with the actual peak locations.
+        3. **3-sigma proximity filter** — only peaks within 3 sigma of a
+           line receive its contribution.  At 3 sigma the Gaussian is
+           ``exp(-4.5) ~ 0.011``, so excluded contributions are < 1%.
 
         Parameters
         ----------
         candidates : List[dict]
-            Candidate dicts with 'fused_lines' key.
+            Candidate dicts with ``fused_lines``, ``matched_mask``, and
+            ``wavelength_shifts`` keys.
         peaks : List[Tuple[int, float]]
             Experimental peaks as (index, wavelength) tuples.
 
@@ -1013,16 +1025,29 @@ class ALIASIdentifier:
         n_cands = len(candidates)
         A = np.zeros((n_peaks, n_cands))
         peak_wls = np.array([p[1] for p in peaks])
-        # Instrument sigma from resolving power (FWHM = lambda/R, sigma = FWHM/2.355).
-        # Assumes Gaussian peak profiles; real LIBS peaks are Voigt, but NNLS
-        # P_mix ratios are robust to moderate template mismatch.
-        sigma = np.mean(peak_wls) / self.resolving_power / 2.355
+
+        # Per-peak sigma (FWHM = lambda/R, sigma = FWHM/2.355)
+        peak_sigmas = peak_wls / self.resolving_power / 2.355
 
         for j, cand in enumerate(candidates):
+            # Per-element global shift from matching phase
+            mm = cand["matched_mask"]
+            ws = cand["wavelength_shifts"]
+            shifts = ws[mm] if np.any(mm) else np.array([0.0])
+            shift = float(np.median(shifts))
+
             for line in cand["fused_lines"]:
-                wl = line["wavelength_nm"]
+                wl_shifted = line["wavelength_nm"] + shift
                 eps = line["avg_emissivity"]
-                A[:, j] += eps * np.exp(-0.5 * ((peak_wls - wl) / sigma) ** 2)
+
+                # 3-sigma proximity filter: only contribute to nearby peaks
+                diffs = np.abs(peak_wls - wl_shifted)
+                relevant = diffs < (3.0 * peak_sigmas)
+                if np.any(relevant):
+                    A[relevant, j] += eps * np.exp(
+                        -0.5
+                        * ((peak_wls[relevant] - wl_shifted) / peak_sigmas[relevant]) ** 2
+                    )
         return A
 
     def _compute_nnls_attribution(
@@ -1031,10 +1056,13 @@ class ALIASIdentifier:
         peak_intensities: np.ndarray,
     ) -> np.ndarray:
         """
-        Solve NNLS and return per-element P_mix factors via leave-one-out.
+        Solve NNLS and return per-element P_mix via leave-one-out.
 
-        P_mix[j] measures how much removing element j increases the residual,
-        normalized so the most important element gets P_mix=1.0.
+        P_mix[j] is the fraction of total peak energy (``sum(I^2)``)
+        uniquely explained by element *j* — i.e. the partial-R^2
+        contribution.  Unlike the previous max-normalized version, this
+        is an **absolute** measure: FP elements that contribute nothing
+        get P_mix ~ 0 regardless of what other elements score.
 
         Parameters
         ----------
@@ -1046,18 +1074,22 @@ class ALIASIdentifier:
         Returns
         -------
         np.ndarray
-            P_mix values in [0, 1] for each candidate.
+            P_mix values in [0, inf) for each candidate.  Dominant
+            elements typically score 0.3–0.9; absent elements ~ 0.
         """
         n_cands = A.shape[1]
         if n_cands == 0 or np.all(A == 0):
             return np.ones(n_cands)
 
         c, _ = nnls(A, peak_intensities)
-
-        # Full-model RSS
         total_rss = float(np.sum((peak_intensities - A @ c) ** 2))
 
-        # Leave-one-out: how much does removing element j increase residual?
+        # Total signal energy (denominator for partial R^2)
+        total_energy = float(np.sum(peak_intensities ** 2))
+        if total_energy == 0:
+            return np.ones(n_cands)
+
+        # Leave-one-out: fraction of total energy explained by element j
         P_mix = np.zeros(n_cands)
         for j in range(n_cands):
             A_reduced = np.delete(A, j, axis=1)
@@ -1065,15 +1097,11 @@ class ALIASIdentifier:
                 P_mix[j] = 1.0
                 continue
             c_reduced, _ = nnls(A_reduced, peak_intensities)
-            rss_without = float(np.sum((peak_intensities - A_reduced @ c_reduced) ** 2))
-            P_mix[j] = rss_without - total_rss
+            rss_without = float(
+                np.sum((peak_intensities - A_reduced @ c_reduced) ** 2)
+            )
+            P_mix[j] = (rss_without - total_rss) / total_energy
 
-        # Normalize to [0, 1].  If all delta-RSS are zero (redundant
-        # elements that don't improve the fit), all P_mix become 0.0,
-        # which triggers the 0.2 floor in the CL calculation — correct
-        # behavior for equally spurious candidates.
-        max_delta = np.max(P_mix) if np.max(P_mix) > 0 else 1.0
-        P_mix = P_mix / max_delta
         return P_mix
 
     def _compute_random_match_significance(
@@ -1192,19 +1220,9 @@ class ALIASIdentifier:
         Tuple[float, float]
             (k_det, CL) detection score and confidence level
         """
-        # N_expected gate: a single above-threshold line at RP=500 is
-        # statistically meaningless — reject outright.
-        if N_expected < 2:
-            return 0.0, 0.0
-
-        # k_sim gate: require minimum intensity-pattern correlation.
-        # Pure wavelength coincidences with uncorrelated intensities should
-        # not yield a detection.
-        if k_sim < 0.15:
-            return 0.0, 0.0
-
         # k_det formula — uses N_matched (paper: N_X = matched count)
-        # for the blend weighting.  N_matched >= 1 when k_sim > 0.15.
+        # for the blend weighting.  Single-line elements (N_X=1) naturally
+        # reduce to k_rate × k_shift via the blend formula.
         N_X = max(N_matched, 1)
         k_det = k_rate * (
             (1.0 / N_X) * k_shift
@@ -1227,14 +1245,10 @@ class ALIASIdentifier:
         # P_ab — crustal abundance prior
         P_ab = self._compute_P_ab(element)
 
-        # N_penalty: penalize sparse spectral evidence.  N_expected < 2 is
-        # already rejected by the gate above; N_expected == 2 gets a 50%
-        # penalty since two-line confirmation is marginal.
-        N_penalty = 0.5 if N_expected == 2 else 1.0
-
-        # Confidence level — P_cov replaces triple-counting as the single
-        # channel for penalizing missing lines:
-        # CL = k_det × P_SNR × P_maj × P_ab × P_cov × N_penalty × P_sig
-        CL = k_det * P_SNR * P_maj * P_ab * P_cov * N_penalty * P_sig
+        # Confidence level — paper formula (Noel et al. 2025):
+        # CL = k_det × P_SNR × P_maj × P_ab
+        # P_cov, N_penalty, P_sig are stored in metadata for diagnostics
+        # but no longer multiply into CL.  NNLS P_mix is applied later.
+        CL = k_det * P_SNR * P_maj * P_ab
 
         return k_det, CL
