@@ -982,32 +982,24 @@ class ALIASIdentifier:
         Tuple[float, float]
             (k_det, CL) detection score and confidence level
         """
+        # N_expected gate: a single above-threshold line at RP=500 is
+        # statistically meaningless — reject outright.
+        if N_expected < 2:
+            return 0.0, 0.0
+
         # k_sim gate: require minimum intensity-pattern correlation.
         # Pure wavelength coincidences with uncorrelated intensities should
-        # not yield a detection.  For N_expected >= 2, require k_sim >= 0.15.
-        # For N_expected == 1, k_sim is 0 by construction (cosine similarity
-        # undefined for single point), so rely on N_penalty instead.
-        if N_expected >= 2 and k_sim < 0.15:
+        # not yield a detection.
+        if k_sim < 0.15:
             return 0.0, 0.0
 
         # k_det formula — uses N_expected (above-threshold count) so that
         # k_sim always receives weight when many lines are predicted.
-        if N_expected > 1:
-            k_det = k_rate * (
-                (1.0 / N_expected) * k_shift
-                + ((N_expected - 1.0) / N_expected) * k_sim
-            )
-        elif N_expected == 1:
-            # Single above-threshold line: statistically insufficient for
-            # pattern confirmation.  Apply a 50/50 blend of k_shift and
-            # k_sim (which is 0 in this regime) so a single coincidental
-            # wavelength match cannot produce a near-perfect score.
-            k_det = k_rate * (0.5 * k_shift + 0.5 * k_sim)
-        elif k_rate > 0:
-            # Partial credit: some lines matched but below emissivity threshold
-            k_det = k_rate * 0.3
-        else:
-            k_det = 0.0
+        # N_expected >= 2 is guaranteed here (gate above rejects < 2).
+        k_det = k_rate * (
+            (1.0 / N_expected) * k_shift
+            + ((N_expected - 1.0) / N_expected) * k_sim
+        )
 
         # P_SNR: approximate SNR quality
         if len(peaks) > 0:
@@ -1022,16 +1014,10 @@ class ALIASIdentifier:
         # Fix 4: P_ab — crustal abundance prior
         P_ab = self._compute_P_ab(element)
 
-        # N_penalty: penalize sparse spectral evidence.  Elements with very
-        # few above-threshold lines in the spectral window cannot be confirmed
-        # by pattern matching; a single coincidental wavelength match should
-        # not yield a high confidence level.
-        if N_expected <= 1:
-            N_penalty = 0.2
-        elif N_expected == 2:
-            N_penalty = 0.5
-        else:
-            N_penalty = 1.0
+        # N_penalty: penalize sparse spectral evidence.  N_expected < 2 is
+        # already rejected by the gate above; N_expected == 2 gets a 50%
+        # penalty since two-line confirmation is marginal.
+        N_penalty = 0.5 if N_expected == 2 else 1.0
 
         # Confidence level:
         # CL = k_det × P_SNR × P_maj × P_ab × N_penalty × P_sig
