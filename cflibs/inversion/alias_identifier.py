@@ -211,16 +211,23 @@ class ALIASIdentifier:
 
         # ── Phase 1.5: NNLS peak-space mixture attribution ────────────
         # Non-negative least squares fit of all candidate templates against
-        # observed peak intensities.  Leave-one-out delta-RSS gives P_mix.
+        # observed peak intensities.  Returns three metrics:
+        #   P_mix  — leave-one-out partial R^2 (global)
+        #   P_local — local explanation score (what fraction of claimed
+        #             peaks' intensity does this element actually explain?)
         if candidates and peaks:
             peak_intensities_arr = np.array([intensity[p[0]] for p in peaks])
             A = self._build_nnls_templates(candidates, peaks)
-            P_mix_arr = self._compute_nnls_attribution(A, peak_intensities_arr)
+            P_mix_arr, P_local_arr, _ = self._compute_nnls_attribution(
+                A, peak_intensities_arr
+            )
             for i, cand in enumerate(candidates):
                 cand["P_mix"] = float(P_mix_arr[i])
+                cand["P_local"] = float(P_local_arr[i])
         else:
             for cand in candidates:
                 cand["P_mix"] = 1.0
+                cand["P_local"] = 1.0
 
         # ── Phase 2: Global peak competition ──────────────────────────
         # Only active at RP >= 2000 where peaks are narrow enough for
@@ -296,11 +303,41 @@ class ALIASIdentifier:
                 k_det = cand["k_det"]
                 CL = cand["initial_CL"]
 
-            # Apply NNLS mixture attribution as linear floor.
-            # P_mix is an absolute explained-variance fraction (partial R^2).
-            # Elements contributing nothing get P_mix ~ 0 → CL *= 0.2.
+            # ── Post-CL discriminators ──────────────────────────────────
+            # Two NNLS-derived gates suppress false positives whose peaks
+            # ride on a dominant element's lines:
+            #
+            # 1. P_local (NNLS peak ownership): fraction of claimed peaks'
+            #    intensity that this element's NNLS coefficient explains.
+            #    FP elements ride on dominant-element peaks → P_local ~ 0.
+            # 2. P_mix (leave-one-out partial R²): how much total spectrum
+            #    energy is uniquely attributable to this element.
+            #    FP elements add nothing → P_mix ~ 0.
+            #
+            # R_rat (intensity-ratio consistency) provides a soft additional
+            # check: do observed ratios match predicted emissivity ratios?
+            #
+            # NOTE: P_sig (binomial significance) is deliberately excluded.
+            # At low RP (high fill factor), line-rich elements like Fe have
+            # match counts BELOW random expectation, giving P_sig → 0 for
+            # true positives. P_sig only works at high RP / low fill factor.
+
             P_mix = cand.get("P_mix", 1.0)
-            CL *= (0.2 + 0.8 * min(P_mix, 1.0))
+            P_local = cand.get("P_local", 1.0)
+
+            R_rat = self._compute_ratio_consistency(
+                fused_lines, matched_mask, matched_peak_idx,
+                intensity, peaks,
+            )
+
+            # Gate 1: P_local — ramp from 0.1 (floor) to 1.0
+            CL *= float(np.clip(2.0 * P_local, 0.1, 1.0))
+
+            # Gate 2: P_mix — linear ramp (0.1 at P_mix=0, 1.0 at P_mix=1)
+            CL *= (0.1 + 0.9 * min(P_mix, 1.0))
+
+            # Gate 3: R_rat — soft consistency check (0.5 min, 1.0 max)
+            CL *= (0.5 + 0.5 * R_rat)
 
             detected = CL >= self.detection_threshold
 
@@ -347,6 +384,8 @@ class ALIASIdentifier:
                     "P_ab": self._compute_P_ab(element),
                     "P_cov": P_cov,
                     "P_mix": P_mix,
+                    "P_local": P_local,
+                    "R_rat": R_rat,
                     "P_sig": P_sig,
                     "p_tail": p_tail,
                     "p_chance": p_chance,
@@ -1054,15 +1093,18 @@ class ALIASIdentifier:
         self,
         A: np.ndarray,
         peak_intensities: np.ndarray,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Solve NNLS and return per-element P_mix via leave-one-out.
+        Solve NNLS and return per-element attribution metrics.
 
-        P_mix[j] is the fraction of total peak energy (``sum(I^2)``)
-        uniquely explained by element *j* — i.e. the partial-R^2
-        contribution.  Unlike the previous max-normalized version, this
-        is an **absolute** measure: FP elements that contribute nothing
-        get P_mix ~ 0 regardless of what other elements score.
+        Returns three arrays:
+
+        * **P_mix** — leave-one-out partial-R^2 (absolute).
+        * **P_local** — local explanation score: what fraction of the
+          observed intensity at claimed peaks is explained by this
+          element's NNLS contribution?  FP elements that merely ride on
+          a dominant element's peaks get P_local ~ 0.
+        * **c** — raw NNLS coefficients (useful for diagnostics).
 
         Parameters
         ----------
@@ -1073,13 +1115,12 @@ class ALIASIdentifier:
 
         Returns
         -------
-        np.ndarray
-            P_mix values in [0, inf) for each candidate.  Dominant
-            elements typically score 0.3–0.9; absent elements ~ 0.
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+            (P_mix, P_local, c) arrays of length n_candidates.
         """
         n_cands = A.shape[1]
         if n_cands == 0 or np.all(A == 0):
-            return np.ones(n_cands)
+            return np.ones(n_cands), np.ones(n_cands), np.zeros(n_cands)
 
         c, _ = nnls(A, peak_intensities)
         total_rss = float(np.sum((peak_intensities - A @ c) ** 2))
@@ -1087,9 +1128,9 @@ class ALIASIdentifier:
         # Total signal energy (denominator for partial R^2)
         total_energy = float(np.sum(peak_intensities ** 2))
         if total_energy == 0:
-            return np.ones(n_cands)
+            return np.ones(n_cands), np.ones(n_cands), c
 
-        # Leave-one-out: fraction of total energy explained by element j
+        # ── P_mix: leave-one-out partial R^2 ──
         P_mix = np.zeros(n_cands)
         for j in range(n_cands):
             A_reduced = np.delete(A, j, axis=1)
@@ -1102,7 +1143,103 @@ class ALIASIdentifier:
             )
             P_mix[j] = (rss_without - total_rss) / total_energy
 
-        return P_mix
+        # ── P_local: local explanation score ──
+        # For each element, compute what fraction of the observed
+        # intensity at its claimed peaks is explained by its own
+        # NNLS contribution.  This discriminates FP elements
+        # (tiny coefficient on dominant-element peaks) from real
+        # minor elements (significant coefficient on their own peaks).
+        P_local = np.zeros(n_cands)
+        for j in range(n_cands):
+            # Peaks where element j has meaningful template presence
+            claimed = A[:, j] > 1e-6
+            if not np.any(claimed):
+                P_local[j] = 0.0
+                continue
+            obs_at_claimed = np.sum(peak_intensities[claimed])
+            if obs_at_claimed <= 0:
+                P_local[j] = 0.0
+                continue
+            elem_contribution = np.sum(A[claimed, j] * c[j])
+            P_local[j] = float(np.clip(elem_contribution / obs_at_claimed, 0.0, 1.0))
+
+        return P_mix, P_local, c
+
+    @staticmethod
+    def _compute_ratio_consistency(
+        fused_lines: List[dict],
+        matched_mask: np.ndarray,
+        matched_peak_idx: np.ndarray,
+        intensity: np.ndarray,
+        peaks: List[Tuple[int, float]],
+    ) -> float:
+        """
+        Intensity-ratio consistency between matched lines.
+
+        For real elements, the pairwise log-ratios of observed peak
+        intensities should correlate with theoretical emissivity
+        log-ratios (both follow the same Boltzmann distribution).
+        Coincidental matches hit peaks belonging to a *different*
+        element, so the ratios are uncorrelated.
+
+        Parameters
+        ----------
+        fused_lines : List[dict]
+            Fused lines with 'avg_emissivity' keys.
+        matched_mask : np.ndarray
+            Boolean mask of matched lines.
+        matched_peak_idx : np.ndarray
+            Peak indices for matched lines.
+        intensity : np.ndarray
+            Experimental intensity array.
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+
+        Returns
+        -------
+        float
+            R_rat in [0, 1].  1.0 = perfect ratio match, 0.0 = anti-
+            correlated.  Returns 0.5 (neutral) with < 3 matched lines.
+        """
+        matched_indices = np.where(matched_mask)[0]
+        if len(matched_indices) < 3:
+            return 0.5  # Too few pairs for meaningful correlation
+
+        emissivities = np.array([fused_lines[i]["avg_emissivity"]
+                                 for i in matched_indices])
+        obs_intensities = np.array([intensity[peaks[matched_peak_idx[i]][0]]
+                                    for i in matched_indices])
+
+        # Guard against zeros
+        valid = (emissivities > 0) & (obs_intensities > 0)
+        if np.sum(valid) < 3:
+            return 0.5
+
+        log_th = np.log(emissivities[valid])
+        log_obs = np.log(obs_intensities[valid])
+
+        # Build all pairwise log-ratio differences
+        n = len(log_th)
+        th_ratios = []
+        exp_ratios = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                th_ratios.append(log_th[i] - log_th[j])
+                exp_ratios.append(log_obs[i] - log_obs[j])
+
+        if len(th_ratios) < 3:
+            return 0.5
+
+        th_arr = np.array(th_ratios)
+        exp_arr = np.array(exp_ratios)
+
+        # Pearson correlation of log-ratios
+        corr = np.corrcoef(th_arr, exp_arr)[0, 1]
+        if np.isnan(corr):
+            return 0.5
+
+        # Map [-1, 1] → [0, 1]; negative correlation is worse than zero
+        return float(max(0.0, (corr + 1.0) / 2.0))
 
     def _compute_random_match_significance(
         self,

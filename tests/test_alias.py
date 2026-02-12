@@ -740,12 +740,15 @@ def test_nnls_attribution(atomic_db):
     peak_intensities = np.array([800.0, 600.0])
 
     A = identifier._build_nnls_templates([cand_a, cand_b], peaks)
-    P_mix = identifier._compute_nnls_attribution(A, peak_intensities)
+    P_mix, P_local, c = identifier._compute_nnls_attribution(A, peak_intensities)
 
     assert P_mix[0] > P_mix[1], (
         f"Dominant element should have higher P_mix: {P_mix[0]} vs {P_mix[1]}"
     )
     assert P_mix[0] > 0.1, f"Dominant element P_mix should be substantial: {P_mix[0]}"
+    # P_local: dominant element should explain its peaks
+    assert P_local[0] > 0.3, f"Dominant P_local should be high: {P_local[0]}"
+    assert P_local[1] < 0.01, f"FP P_local should be near zero: {P_local[1]}"
 
 
 def test_P_SNR_erf_formula(atomic_db):
@@ -1238,11 +1241,58 @@ def test_p_mix_with_dominant_element(atomic_db):
     peak_intensities = np.array([800.0, 600.0])
 
     A = identifier._build_nnls_templates([cand_a, cand_b], peaks)
-    P_mix = identifier._compute_nnls_attribution(A, peak_intensities)
+    P_mix, P_local, c = identifier._compute_nnls_attribution(A, peak_intensities)
 
     # Element A (dominant) should have substantial P_mix
     assert P_mix[0] > 0.1, f"Dominant element P_mix should be high: {P_mix[0]}"
     # Element B (FP, no matching peaks) should have P_mix ~ 0
     assert P_mix[1] < 0.01, (
         f"FP element P_mix should be near zero: {P_mix[1]}"
+    )
+    # P_local should strongly separate dominant from FP
+    assert P_local[0] > 0.3, f"Dominant P_local should be high: {P_local[0]}"
+    assert P_local[1] < 0.01, f"FP P_local should be near zero: {P_local[1]}"
+
+
+def test_ratio_consistency(atomic_db):
+    """R_rat should be high for consistent ratios, low for random ratios."""
+    from cflibs.atomic.structures import Transition
+    from cflibs.inversion.alias_identifier import ALIASIdentifier
+
+    # Consistent ratios: emissivities [1000, 500, 250], observed [800, 400, 200]
+    # log-ratios should be perfectly correlated
+    fused = [
+        {"transition": Transition("Fe", 1, 372.0, 1e7, 3.3, 0.0, 11, 9),
+         "avg_emissivity": 1000.0, "wavelength_nm": 372.0},
+        {"transition": Transition("Fe", 1, 374.0, 5e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 500.0, "wavelength_nm": 374.0},
+        {"transition": Transition("Fe", 1, 376.0, 2.5e6, 3.3, 0.0, 7, 7),
+         "avg_emissivity": 250.0, "wavelength_nm": 376.0},
+    ]
+    peaks = [(100, 372.01), (200, 374.01), (300, 376.01)]
+    intensity = np.full(500, 10.0)
+    intensity[100] = 800.0
+    intensity[200] = 400.0
+    intensity[300] = 200.0
+
+    matched = np.array([True, True, True])
+    pidx = np.array([0, 1, 2])
+
+    R_rat_good = ALIASIdentifier._compute_ratio_consistency(
+        fused, matched, pidx, intensity, peaks,
+    )
+    assert R_rat_good > 0.8, f"Consistent ratios should give high R_rat: {R_rat_good}"
+
+    # Inconsistent ratios: emissivities [1000, 500, 250], observed [200, 800, 400]
+    # log-ratios should be anti-correlated
+    intensity2 = np.full(500, 10.0)
+    intensity2[100] = 200.0  # weakest where strongest predicted
+    intensity2[200] = 800.0  # strongest where medium predicted
+    intensity2[300] = 400.0
+
+    R_rat_bad = ALIASIdentifier._compute_ratio_consistency(
+        fused, matched, pidx, intensity2, peaks,
+    )
+    assert R_rat_bad < R_rat_good, (
+        f"Inconsistent ratios should give lower R_rat: {R_rat_bad} vs {R_rat_good}"
     )
