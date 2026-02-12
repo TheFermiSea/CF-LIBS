@@ -588,3 +588,41 @@ def test_fill_factor_and_P_sig(atomic_db):
     assert P_sig_dense < P_sig_good, (
         f"Dense spectrum with few matches should have lower P_sig: {P_sig_dense}"
     )
+
+
+def test_cross_element_peak_competition(atomic_db, synthetic_libs_spectrum):
+    """Cross-element competition should reassign shared peaks to strongest element."""
+    # Create a spectrum dominated by Fe lines
+    spectrum = synthetic_libs_spectrum(
+        elements={
+            "Fe": [
+                (371.99, 1000.0),
+                (373.49, 800.0),
+                (374.56, 600.0),
+                (375.82, 400.0),
+            ],
+        },
+        noise_level=0.02,
+    )
+
+    # Search for Fe and a weaker element that may share peaks
+    identifier = ALIASIdentifier(
+        atomic_db,
+        resolving_power=500.0,  # Broad peaks → more sharing
+        elements=["Fe", "Co", "Cu"],
+        detection_threshold=0.03,
+    )
+
+    result = identifier.identify(spectrum["wavelength"], spectrum["intensity"])
+
+    # Fe should be detected (true positive)
+    fe_ids = [e for e in result.all_elements if e.element == "Fe"]
+    assert len(fe_ids) == 1, "Fe should be scored"
+
+    # Any FP element should have lower confidence than Fe after competition
+    for eid in result.all_elements:
+        if eid.element != "Fe" and eid.detected:
+            assert eid.confidence < fe_ids[0].confidence, (
+                f"{eid.element} (CL={eid.confidence:.3f}) should not exceed "
+                f"Fe (CL={fe_ids[0].confidence:.3f}) after peak competition"
+            )

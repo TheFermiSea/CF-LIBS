@@ -7,6 +7,7 @@ calculation, line fusion, matching, threshold determination, scoring, and decisi
 """
 
 from typing import List, Tuple, Optional
+from collections import defaultdict
 import math
 import numpy as np
 from scipy.signal import find_peaks
@@ -112,7 +113,15 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> ElementIdentificationResult:
         """
-        Identify elements in experimental spectrum.
+        Identify elements in experimental spectrum with cross-element peak
+        competition.
+
+        Three-phase algorithm:
+        1. Score all elements independently (same as before).
+        2. Global peak competition: each disputed experimental peak is
+           assigned to the element with the highest initial confidence
+           level (CL).  Losers have their match revoked.
+        3. Rescore elements that lost peaks and build final results.
 
         Parameters
         ----------
@@ -134,89 +143,170 @@ class ALIASIdentifier:
 
         # Get elements to search
         if self.elements is None:
-            # Get all available elements from database
-            # For now, use common LIBS elements as default
             search_elements = ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"]
         else:
             search_elements = self.elements
 
-        all_element_ids = []
+        # ── Phase 1: Independent scoring ──────────────────────────────
+        candidates: List[dict] = []
 
         for element in search_elements:
-            # Step 2: Compute theoretical emissivities
             element_lines = self._compute_element_emissivities(element, wl_min, wl_max)
-
             if not element_lines:
                 continue
 
-            # Step 3: Fuse nearby lines
             fused_lines = self._fuse_lines(element_lines, wavelength)
-
             if not fused_lines:
                 continue
 
-            # Step 4: Match lines to experimental peaks
             matched_mask, wavelength_shifts, matched_peak_idx = self._match_lines(
                 fused_lines, peaks
             )
 
-            # Step 5: Determine emissivity threshold
             if np.any(matched_mask):
                 emissivity_threshold = self._determine_emissivity_threshold(
                     fused_lines, matched_mask
                 )
             else:
-                emissivity_threshold = -np.inf  # No matches, keep all for scoring
+                emissivity_threshold = -np.inf
 
-            # Step 6: Compute scores
-            k_sim, k_rate, k_shift, P_maj, N_expected = (
-                self._compute_scores(
-                    fused_lines, matched_mask, matched_peak_idx,
-                    wavelength_shifts, intensity, peaks, emissivity_threshold,
-                )
+            k_sim, k_rate, k_shift, P_maj, N_expected = self._compute_scores(
+                fused_lines, matched_mask, matched_peak_idx,
+                wavelength_shifts, intensity, peaks, emissivity_threshold,
             )
 
-            # N_matched: lines both above threshold AND matched (for metadata)
             emissivities_arr = np.array([line["avg_emissivity"] for line in fused_lines])
             N_matched = int(np.sum(
                 matched_mask & (emissivities_arr >= 10**emissivity_threshold)
             ))
 
-            P_sig, fill_factor, p_chance, p_tail = self._compute_random_match_significance(
-                peaks=peaks,
-                wavelength=wavelength,
-                N_expected=N_expected,
-                N_matched=N_matched,
+            P_sig, fill_factor, p_chance, p_tail = (
+                self._compute_random_match_significance(
+                    peaks=peaks,
+                    wavelength=wavelength,
+                    N_expected=N_expected,
+                    N_matched=N_matched,
+                )
             )
 
-            # Step 7: Decision — use N_expected in blend so k_sim always
-            # gets weight when many lines predicted but few matched.
             k_det, CL = self._decide(
                 k_sim, k_rate, k_shift, N_expected, intensity, peaks,
                 element=element, P_maj=P_maj, P_sig=P_sig,
             )
 
-            # Build ElementIdentification
+            candidates.append({
+                "element": element,
+                "fused_lines": fused_lines,
+                "matched_mask": matched_mask,
+                "matched_peak_idx": matched_peak_idx,
+                "wavelength_shifts": wavelength_shifts,
+                "emissivity_threshold": emissivity_threshold,
+                "initial_CL": CL,
+                # Cache phase 1 scores for reuse when competition is skipped
+                "scores": (k_sim, k_rate, k_shift, P_maj, N_expected),
+                "N_matched": N_matched,
+                "P_sig_data": (P_sig, fill_factor, p_chance, p_tail),
+                "k_det": k_det,
+            })
+
+        # ── Phase 2: Global peak competition ──────────────────────────
+        # Only active at RP >= 2000 where peaks are narrow enough for
+        # meaningful exclusivity.  At low RP (broadband spectrometers),
+        # shared peaks are the norm and winner-take-all competition
+        # causes false negatives for real minor elements.
+        # TODO: replace hard revocation with NNLS mixture model that
+        # apportions shared peaks via non-negative joint fit.
+        if self.resolving_power >= 2000:
+            peak_claims: dict = defaultdict(list)
+
+            for c_idx, cand in enumerate(candidates):
+                mask = cand["matched_mask"]
+                pidx_arr = cand["matched_peak_idx"]
+                for l_idx in range(len(mask)):
+                    if mask[l_idx]:
+                        pidx = int(pidx_arr[l_idx])
+                        peak_claims[pidx].append(
+                            (cand["initial_CL"], c_idx, l_idx)
+                        )
+
+            # Resolve: highest initial CL wins; losers get unmatched
+            for pidx, claims in peak_claims.items():
+                if len(claims) <= 1:
+                    continue
+                claims.sort(key=lambda x: x[0], reverse=True)
+                for i in range(1, len(claims)):
+                    _, loser_c, loser_l = claims[i]
+                    candidates[loser_c]["matched_mask"][loser_l] = False
+                    candidates[loser_c]["matched_peak_idx"][loser_l] = -1
+                    candidates[loser_c]["wavelength_shifts"][loser_l] = 0.0
+
+        # ── Phase 3: Rescore & build results ──────────────────────────
+        competition_ran = self.resolving_power >= 2000
+        all_element_ids = []
+
+        for cand in candidates:
+            element = cand["element"]
+            fused_lines = cand["fused_lines"]
+            matched_mask = cand["matched_mask"]
+            matched_peak_idx = cand["matched_peak_idx"]
+            wavelength_shifts = cand["wavelength_shifts"]
+            emissivity_threshold = cand["emissivity_threshold"]
+
+            if competition_ran:
+                # Rescore with post-competition matches
+                k_sim, k_rate, k_shift, P_maj, N_expected = (
+                    self._compute_scores(
+                        fused_lines, matched_mask, matched_peak_idx,
+                        wavelength_shifts, intensity, peaks,
+                        emissivity_threshold,
+                    )
+                )
+
+                emissivities_arr = np.array(
+                    [line["avg_emissivity"] for line in fused_lines]
+                )
+                N_matched = int(np.sum(
+                    matched_mask
+                    & (emissivities_arr >= 10**emissivity_threshold)
+                ))
+
+                P_sig, fill_factor, p_chance, p_tail = (
+                    self._compute_random_match_significance(
+                        peaks=peaks,
+                        wavelength=wavelength,
+                        N_expected=N_expected,
+                        N_matched=N_matched,
+                    )
+                )
+
+                k_det, CL = self._decide(
+                    k_sim, k_rate, k_shift, N_expected, intensity, peaks,
+                    element=element, P_maj=P_maj, P_sig=P_sig,
+                )
+            else:
+                # No competition — reuse phase 1 scores
+                k_sim, k_rate, k_shift, P_maj, N_expected = cand["scores"]
+                N_matched = cand["N_matched"]
+                P_sig, fill_factor, p_chance, p_tail = cand["P_sig_data"]
+                k_det = cand["k_det"]
+                CL = cand["initial_CL"]
+
             detected = CL >= self.detection_threshold
 
-            # Create IdentifiedLine objects using matched_peak_idx for
-            # consistent peak association (same peak _match_lines chose).
+            # Build IdentifiedLine objects
             matched_lines = []
             unmatched_lines = []
             for i, line_data in enumerate(fused_lines):
                 trans = line_data["transition"]
                 if matched_mask[i]:
                     pidx = matched_peak_idx[i]
-                    peak_wl = peaks[pidx][1]
-                    peak_int = intensity[peaks[pidx][0]]
-
                     matched_lines.append(
                         IdentifiedLine(
-                            wavelength_exp_nm=peak_wl,
+                            wavelength_exp_nm=peaks[pidx][1],
                             wavelength_th_nm=line_data["wavelength_nm"],
                             element=element,
                             ionization_stage=trans.ionization_stage,
-                            intensity_exp=peak_int,
+                            intensity_exp=intensity[peaks[pidx][0]],
                             emissivity_th=line_data["avg_emissivity"],
                             transition=trans,
                             correlation=k_sim,
@@ -230,7 +320,7 @@ class ALIASIdentifier:
                 detected=detected,
                 score=k_det,
                 confidence=CL,
-                n_matched_lines=np.sum(matched_mask),
+                n_matched_lines=int(np.sum(matched_mask)),
                 n_total_lines=len(fused_lines),
                 matched_lines=matched_lines,
                 unmatched_lines=unmatched_lines,
@@ -261,18 +351,14 @@ class ALIASIdentifier:
         detected_elements = [e for e in all_element_ids if e.detected]
         rejected_elements = [e for e in all_element_ids if not e.detected]
 
-        # Count matched peaks (peak matched if any element matched it)
-        matched_peak_indices = set()
+        # Count matched peaks across detected elements
+        matched_peak_indices: set = set()
         for element_id in detected_elements:
             for line in element_id.matched_lines:
-                # Find peak index
                 peak_idx = np.argmin(
                     np.abs(np.array([p[1] for p in peaks]) - line.wavelength_exp_nm)
                 )
-                matched_peak_indices.add(peak_idx)
-
-        n_matched_peaks = len(matched_peak_indices)
-        n_unmatched_peaks = len(peaks) - n_matched_peaks
+                matched_peak_indices.add(int(peak_idx))
 
         return ElementIdentificationResult(
             detected_elements=detected_elements,
@@ -280,8 +366,8 @@ class ALIASIdentifier:
             all_elements=all_element_ids,
             experimental_peaks=peaks,
             n_peaks=len(peaks),
-            n_matched_peaks=n_matched_peaks,
-            n_unmatched_peaks=n_unmatched_peaks,
+            n_matched_peaks=len(matched_peak_indices),
+            n_unmatched_peaks=len(peaks) - len(matched_peak_indices),
             algorithm="alias",
             parameters={
                 "resolving_power": self.resolving_power,
