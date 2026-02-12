@@ -836,3 +836,58 @@ def test_triple_counting_eliminated(atomic_db):
         element="V", P_maj=P_maj, N_matched=N_matched, P_cov=P_cov,
     )
     assert k_det > 0.3, f"k_det should be substantial: {k_det}"
+
+
+def test_P_sig_overmatch_defensive(atomic_db):
+    """P_sig should handle N_matched > N_expected defensively."""
+    identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
+
+    wavelength = np.linspace(280, 320, 2000)
+    peaks = [(i * 50, 280.0 + i * 1.3) for i in range(8)]
+
+    # N_matched > N_expected: should return max significance, not crash
+    P_sig, _, _, p_tail = identifier._compute_random_match_significance(
+        peaks, wavelength, N_expected=5, N_matched=8,
+    )
+    assert P_sig == 1.0, f"Overmatch should give P_sig=1.0: {P_sig}"
+    assert p_tail == 0.0, f"Overmatch should give p_tail=0.0: {p_tail}"
+
+    # Normal case: N_matched <= N_expected
+    P_sig_normal, _, _, _ = identifier._compute_random_match_significance(
+        peaks, wavelength, N_expected=10, N_matched=3,
+    )
+    assert 0.0 <= P_sig_normal <= 1.0, f"Normal P_sig out of range: {P_sig_normal}"
+
+
+def test_k_sim_single_line_neutral(atomic_db):
+    """Single matched line should get k_sim=0.5 (neutral), not 0."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # 3 above-threshold lines, only 1 matched
+    fused = [
+        {"transition": Transition("V", 1, 350.0, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 1000.0, "wavelength_nm": 350.0},
+        {"transition": Transition("V", 1, 355.0, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 800.0, "wavelength_nm": 355.0},
+        {"transition": Transition("V", 1, 360.0, 1e7, 3.0, 0.0, 9, 7),
+         "avg_emissivity": 600.0, "wavelength_nm": 360.0},
+    ]
+    peaks = [(100, 350.01)]
+    intensity = np.full(500, 10.0)
+    intensity[100] = 800.0
+
+    matched = np.array([True, False, False])
+    pidx = np.array([0, -1, -1])
+    shifts = np.array([0.01, 0.0, 0.0])
+
+    k_sim, _, _, _, N_expected, N_matched, _ = identifier._compute_scores(
+        fused, matched, pidx, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
+    )
+
+    # Single matched line → k_sim should be 0.5 (neutral), not 0
+    assert k_sim == 0.5, f"Single-line k_sim should be 0.5 (neutral): {k_sim}"
+    assert N_matched == 1
+    assert N_expected == 3

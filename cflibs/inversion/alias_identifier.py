@@ -350,10 +350,7 @@ class ALIASIdentifier:
                     "p_tail": p_tail,
                     "p_chance": p_chance,
                     "fill_factor": fill_factor,
-                    "N_penalty": (
-                        0.2 if N_expected <= 1
-                        else (0.5 if N_expected == 2 else 1.0)
-                    ),
+                    "N_penalty": 0.5 if N_expected == 2 else 1.0,
                 },
             )
 
@@ -830,6 +827,8 @@ class ALIASIdentifier:
         if top_k > 0:
             above_emissivities = emissivities * above_threshold.astype(float)
             sorted_indices = np.argsort(above_emissivities)[::-1][:top_k]
+            # sqrt: softer than linear, prevents single dominant line
+            # from driving P_maj to 1.0 alone
             weights = np.sqrt(emissivities[sorted_indices])
             matched_weights = float(np.sum(weights * matched_above[sorted_indices]))
             total_weights = float(np.sum(weights))
@@ -887,8 +886,10 @@ class ALIASIdentifier:
             else:
                 k_sim = 0.0
         else:
-            # Single matched line: cosine similarity undefined → 0
-            k_sim = 0.0
+            # Single matched line: cosine similarity undefined.
+            # Use neutral value so penalty comes from k_rate and P_cov,
+            # not an outright rejection via the k_sim >= 0.15 gate.
+            k_sim = 0.5
 
         # Uniqueness penalty: many-to-one mapping lowers k_sim
         n_unique_peaks = len(unique_peak_set)
@@ -1012,7 +1013,9 @@ class ALIASIdentifier:
         n_cands = len(candidates)
         A = np.zeros((n_peaks, n_cands))
         peak_wls = np.array([p[1] for p in peaks])
-        # Instrument sigma from resolving power (FWHM = lambda/R, sigma = FWHM/2.355)
+        # Instrument sigma from resolving power (FWHM = lambda/R, sigma = FWHM/2.355).
+        # Assumes Gaussian peak profiles; real LIBS peaks are Voigt, but NNLS
+        # P_mix ratios are robust to moderate template mismatch.
         sigma = np.mean(peak_wls) / self.resolving_power / 2.355
 
         for j, cand in enumerate(candidates):
@@ -1065,7 +1068,10 @@ class ALIASIdentifier:
             rss_without = float(np.sum((peak_intensities - A_reduced @ c_reduced) ** 2))
             P_mix[j] = rss_without - total_rss
 
-        # Normalize to [0, 1]
+        # Normalize to [0, 1].  If all delta-RSS are zero (redundant
+        # elements that don't improve the fit), all P_mix become 0.0,
+        # which triggers the 0.2 floor in the CL calculation — correct
+        # behavior for equally spurious candidates.
         max_delta = np.max(P_mix) if np.max(P_mix) > 0 else 1.0
         P_mix = P_mix / max_delta
         return P_mix
@@ -1115,14 +1121,23 @@ class ALIASIdentifier:
         else:
             mean_wl = 0.5 * (wl_min + wl_max)
             line_window = mean_wl / self.resolving_power  # delta_lambda
+            # Each line occupies ±line_window around its center
             theoretical_coverage = N_expected * 2 * line_window / span
             p_chance = float(np.clip(theoretical_coverage, 1e-6, 1.0 - 1e-6))
 
         if N_expected <= 0 or N_matched <= 0:
             return 1.0, fill_factor, p_chance, 1.0
 
-        n_trials = max(N_expected, N_matched)
-        n_success = min(N_matched, n_trials)
+        # Binomial test: "Given N_expected opportunities, what's the
+        # probability of N_matched or more matches by chance?"
+        n_trials = N_expected
+        n_success = N_matched
+
+        if n_success > n_trials:
+            # More matches than theoretical lines — extremely unlikely
+            # by chance.  Can happen with fused-line bookkeeping; treat
+            # as maximally significant.
+            return 1.0, fill_factor, p_chance, 0.0
 
         p_tail = float(binom.sf(n_success - 1, n_trials, p_chance))
         P_sig = float(np.clip(1.0 - p_tail, 0.0, 1.0))
