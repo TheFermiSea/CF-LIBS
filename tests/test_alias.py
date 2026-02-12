@@ -243,8 +243,13 @@ def test_default_detection_threshold(atomic_db):
 # ---------------------------------------------------------------------------
 
 
-def test_k_sim_penalizes_unmatched_lines(atomic_db):
-    """Element with many unmatched theoretical lines should get lower k_sim."""
+def test_k_sim_matched_only(atomic_db):
+    """k_sim should be computed over matched lines only (paper-faithful).
+
+    With matched-only cosine, both scenarios should have IDENTICAL k_sim
+    because the matched lines and their intensities are the same.
+    Coverage penalty is now handled by P_cov, not k_sim.
+    """
     from cflibs.atomic.structures import Transition
 
     identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
@@ -264,7 +269,7 @@ def test_k_sim_penalizes_unmatched_lines(atomic_db):
     peak_idx_a = np.array([0, 1])
     shifts_a = np.array([0.01, 0.01])
 
-    k_sim_a, _, _, _, _ = identifier._compute_scores(
+    k_sim_a, _, _, _, _, _, _ = identifier._compute_scores(
         fused_a, matched_a, peak_idx_a, shifts_a, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
@@ -281,15 +286,19 @@ def test_k_sim_penalizes_unmatched_lines(atomic_db):
     peak_idx_b = np.array([0, 1] + [-1] * 8)
     shifts_b = np.array([0.01, 0.01] + [0.0] * 8)
 
-    k_sim_b, _, _, _, _ = identifier._compute_scores(
+    k_sim_b, _, _, _, _, _, P_cov_b = identifier._compute_scores(
         fused_b, matched_b, peak_idx_b, shifts_b, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
 
-    # k_sim_b should be strictly lower because the 8 unmatched lines
-    # contribute zeros to the experimental vector
-    assert k_sim_b < k_sim_a, (
-        f"k_sim should be lower when many lines unmatched: {k_sim_b} vs {k_sim_a}"
+    # Matched-only k_sim: same matched lines → same k_sim
+    assert abs(k_sim_a - k_sim_b) < 0.01, (
+        f"Matched-only k_sim should be equal: {k_sim_a} vs {k_sim_b}"
+    )
+
+    # But P_cov should penalize scenario B (only 2/10 lines matched)
+    assert P_cov_b < 0.5, (
+        f"P_cov should penalize many unmatched lines: {P_cov_b}"
     )
 
 
@@ -316,7 +325,7 @@ def test_uniqueness_penalty(atomic_db):
     peak_idx = np.array([0, 0, 0, 0])  # all map to same peak
     shifts = np.array([0.01, -0.01, 0.01, -0.01])
 
-    k_sim, _, _, _, _ = identifier._compute_scores(
+    k_sim, _, _, _, _, _, _ = identifier._compute_scores(
         fused, matched, peak_idx, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
@@ -350,7 +359,7 @@ def test_P_maj_soft_coverage(atomic_db):
     peak_idx = np.array([0, 1])
     shifts = np.array([0.01, 0.01])
 
-    _, _, _, P_maj_both, _ = identifier._compute_scores(
+    _, _, _, P_maj_both, _, _, _ = identifier._compute_scores(
         fused, matched, peak_idx, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
@@ -360,7 +369,7 @@ def test_P_maj_soft_coverage(atomic_db):
     # Scenario: strongest line NOT matched → P_maj should be lower
     matched_miss = np.array([False, True])
     peak_idx_miss = np.array([-1, 1])
-    _, _, _, P_maj_miss, _ = identifier._compute_scores(
+    _, _, _, P_maj_miss, _, _, _ = identifier._compute_scores(
         fused, matched_miss, peak_idx_miss, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
@@ -370,8 +379,8 @@ def test_P_maj_soft_coverage(atomic_db):
     assert P_maj_miss >= 0.5, f"P_maj should be at least 0.5: {P_maj_miss}"
 
 
-def test_N_expected_in_k_det_blend(atomic_db):
-    """N_expected (not N_matched) should be used in k_det blend formula."""
+def test_N_matched_in_k_det_blend(atomic_db):
+    """N_matched should be used in k_det blend, N_expected for gates/penalties."""
     from cflibs.atomic.structures import Transition
 
     identifier = ALIASIdentifier(atomic_db, resolving_power=500.0)
@@ -392,13 +401,15 @@ def test_N_expected_in_k_det_blend(atomic_db):
     peak_idx = np.array([0] + [-1] * 9)
     shifts = np.array([0.01] + [0.0] * 9)
 
-    _, _, _, _, N_expected = identifier._compute_scores(
+    _, _, _, _, N_expected, N_matched, _ = identifier._compute_scores(
         fused, matched, peak_idx, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
 
-    # N_expected should be 10 (all above threshold), not 1 (matched)
+    # N_expected should be 10 (all above threshold)
     assert N_expected == 10, f"N_expected should be 10 but got {N_expected}"
+    # N_matched should be 1 (only one line matched)
+    assert N_matched == 1, f"N_matched should be 1 but got {N_matched}"
 
 
 def test_P_ab_tiers(atomic_db):
@@ -460,22 +471,22 @@ def test_N_penalty_sparse_evidence(atomic_db):
 
     # N_expected=1, 1 matched → N_penalty=0.2
     f1, p1, i1, m1, pi1, s1 = _make_scenario(1, 1)
-    k_sim1, k_rate1, k_shift1, P_maj1, N1 = identifier._compute_scores(
+    k_sim1, k_rate1, k_shift1, P_maj1, N1, Nm1, Pcov1 = identifier._compute_scores(
         f1, m1, pi1, s1, i1, p1, emissivity_threshold=-np.inf,
     )
     _, CL1 = identifier._decide(
         k_sim1, k_rate1, k_shift1, N1, i1, p1,
-        element="Co", P_maj=P_maj1,
+        element="Co", P_maj=P_maj1, N_matched=Nm1, P_cov=Pcov1,
     )
 
     # N_expected=5, 5 matched → N_penalty=1.0
     f5, p5, i5, m5, pi5, s5 = _make_scenario(5, 5)
-    k_sim5, k_rate5, k_shift5, P_maj5, N5 = identifier._compute_scores(
+    k_sim5, k_rate5, k_shift5, P_maj5, N5, Nm5, Pcov5 = identifier._compute_scores(
         f5, m5, pi5, s5, i5, p5, emissivity_threshold=-np.inf,
     )
     _, CL5 = identifier._decide(
         k_sim5, k_rate5, k_shift5, N5, i5, p5,
-        element="Co", P_maj=P_maj5,
+        element="Co", P_maj=P_maj5, N_matched=Nm5, P_cov=Pcov5,
     )
 
     assert N1 == 1
@@ -486,8 +497,8 @@ def test_N_penalty_sparse_evidence(atomic_db):
     )
 
 
-def test_combined_k_rate(atomic_db):
-    """k_rate should use geometric mean of emissivity-weighted and count-based."""
+def test_k_rate_emissivity_weighted(atomic_db):
+    """k_rate should be pure emissivity-weighted (paper formula)."""
     from cflibs.atomic.structures import Transition
 
     identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
@@ -511,19 +522,15 @@ def test_combined_k_rate(atomic_db):
     pidx = np.array([0] + [-1] * 4)
     shifts = np.array([0.01] + [0.0] * 4)
 
-    _, k_rate, _, _, _ = identifier._compute_scores(
+    _, k_rate, _, _, _, _, _ = identifier._compute_scores(
         fused, matched, pidx, shifts, intensity, peaks,
         emissivity_threshold=-np.inf,
     )
 
-    # Pure emissivity-weighted would give ~5000/5400 ≈ 0.93
-    # Count-based gives 1/5 = 0.2
-    # Geometric mean ≈ sqrt(0.93 * 0.2) ≈ 0.43
-    assert k_rate < 0.6, (
-        f"Combined k_rate should be pulled down by count rate: got {k_rate}"
-    )
-    assert k_rate > 0.1, (
-        f"Combined k_rate should still be positive: got {k_rate}"
+    # Pure emissivity-weighted: 5000 / (5000 + 4*100) = 5000/5400 ≈ 0.926
+    expected_k_rate = 5000.0 / 5400.0
+    assert abs(k_rate - expected_k_rate) < 0.01, (
+        f"k_rate should be emissivity-weighted ~{expected_k_rate:.3f}: got {k_rate}"
     )
 
 
@@ -626,3 +633,206 @@ def test_cross_element_peak_competition(atomic_db, synthetic_libs_spectrum):
                 f"{eid.element} (CL={eid.confidence:.3f}) should not exceed "
                 f"Fe (CL={fe_ids[0].confidence:.3f}) after peak competition"
             )
+
+
+# ---------------------------------------------------------------------------
+# New tests for refactored scoring (Round 1-3)
+# ---------------------------------------------------------------------------
+
+
+def test_P_cov_emissivity_weighted(atomic_db):
+    """Missing a strong line should penalize P_cov more than missing a weak line."""
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # 3 lines: one very strong (5000), two weak (100 each)
+    fused = [
+        {"transition": Transition("Fe", 1, 372.0, 1e8, 3.3, 0.0, 11, 9),
+         "avg_emissivity": 5000.0, "wavelength_nm": 372.0},
+        {"transition": Transition("Fe", 1, 374.0, 1e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 100.0, "wavelength_nm": 374.0},
+        {"transition": Transition("Fe", 1, 376.0, 1e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 100.0, "wavelength_nm": 376.0},
+    ]
+    peaks = [(100, 372.01), (200, 374.01), (300, 376.01)]
+    intensity = np.full(500, 10.0)
+    intensity[100] = 1000.0
+    intensity[200] = 50.0
+    intensity[300] = 50.0
+
+    # Scenario A: strong line missed, weak lines matched
+    matched_miss_strong = np.array([False, True, True])
+    pidx_miss_strong = np.array([-1, 1, 2])
+    shifts = np.array([0.0, 0.01, 0.01])
+    _, _, _, _, _, _, P_cov_miss_strong = identifier._compute_scores(
+        fused, matched_miss_strong, pidx_miss_strong, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
+    )
+
+    # Scenario B: weak line missed, strong line matched
+    matched_miss_weak = np.array([True, False, True])
+    pidx_miss_weak = np.array([0, -1, 2])
+    _, _, _, _, _, _, P_cov_miss_weak = identifier._compute_scores(
+        fused, matched_miss_weak, pidx_miss_weak, shifts, intensity, peaks,
+        emissivity_threshold=-np.inf,
+    )
+
+    # Missing the strong line should hurt P_cov much more
+    assert P_cov_miss_strong < P_cov_miss_weak, (
+        f"Missing strong line should lower P_cov more: "
+        f"{P_cov_miss_strong} vs {P_cov_miss_weak}"
+    )
+    # P_cov_miss_strong ~ 200/5200 ~ 0.038
+    assert P_cov_miss_strong < 0.1, (
+        f"P_cov should be very low when strong line missed: {P_cov_miss_strong}"
+    )
+
+
+def test_nnls_attribution(atomic_db):
+    """NNLS should assign high P_mix to dominant element, low to spurious."""
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # Build fake candidates: Element A has peaks matching observations,
+    # Element B has peaks at wrong positions
+    from cflibs.atomic.structures import Transition
+
+    cand_a = {
+        "fused_lines": [
+            {"wavelength_nm": 400.0, "avg_emissivity": 1000.0,
+             "transition": Transition("Fe", 1, 400.0, 1e7, 3.0, 0.0, 9, 7)},
+            {"wavelength_nm": 405.0, "avg_emissivity": 800.0,
+             "transition": Transition("Fe", 1, 405.0, 5e6, 3.0, 0.0, 7, 7)},
+        ],
+    }
+    cand_b = {
+        "fused_lines": [
+            {"wavelength_nm": 420.0, "avg_emissivity": 500.0,
+             "transition": Transition("Co", 1, 420.0, 1e7, 3.0, 0.0, 9, 7)},
+            {"wavelength_nm": 425.0, "avg_emissivity": 300.0,
+             "transition": Transition("Co", 1, 425.0, 5e6, 3.0, 0.0, 7, 7)},
+        ],
+    }
+
+    # Peaks near element A's lines, nothing near element B's
+    peaks = [(100, 400.01), (200, 405.02)]
+    peak_intensities = np.array([800.0, 600.0])
+
+    A = identifier._build_nnls_templates([cand_a, cand_b], peaks)
+    P_mix = identifier._compute_nnls_attribution(A, peak_intensities)
+
+    assert P_mix[0] > P_mix[1], (
+        f"Dominant element should have higher P_mix: {P_mix[0]} vs {P_mix[1]}"
+    )
+    assert P_mix[0] > 0.5, f"Dominant element P_mix should be high: {P_mix[0]}"
+
+
+def test_P_SNR_erf_formula(atomic_db):
+    """P_SNR should use erf formula and return values in [0, 1]."""
+    import math
+    from scipy.special import erf
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # High-SNR scenario
+    intensity_high = np.full(500, 10.0)
+    intensity_high[100] = 500.0
+    intensity_high[200] = 400.0
+    peaks_high = [(100, 372.0), (200, 374.0)]
+
+    # Low-SNR scenario
+    rng = np.random.default_rng(42)
+    intensity_low = 100.0 + rng.normal(0, 50, 500)
+    intensity_low[100] = 120.0  # barely above noise
+    peaks_low = [(100, 372.0)]
+
+    from cflibs.atomic.structures import Transition
+    fused = [
+        {"transition": Transition("Fe", 1, 372.0, 1e7, 3.3, 0.0, 11, 9),
+         "avg_emissivity": 1000.0, "wavelength_nm": 372.0},
+        {"transition": Transition("Fe", 1, 374.0, 5e6, 3.3, 0.0, 9, 9),
+         "avg_emissivity": 800.0, "wavelength_nm": 374.0},
+    ]
+    matched = np.array([True, True])
+    pidx = np.array([0, 1])
+    shifts = np.array([0.01, 0.01])
+
+    # Get k_det for high SNR
+    k_sim_h, k_rate_h, k_shift_h, P_maj_h, N_exp_h, N_m_h, P_cov_h = (
+        identifier._compute_scores(
+            fused, matched, pidx, shifts, intensity_high, peaks_high,
+            emissivity_threshold=-np.inf,
+        )
+    )
+    k_det_h, CL_h = identifier._decide(
+        k_sim_h, k_rate_h, k_shift_h, N_exp_h, intensity_high, peaks_high,
+        element="Fe", P_maj=P_maj_h, N_matched=N_m_h, P_cov=P_cov_h,
+    )
+
+    # CL should be valid
+    assert 0.0 <= CL_h <= 1.0, f"CL should be in [0,1]: {CL_h}"
+
+    # Verify erf formula behavior: high SNR → P_SNR close to 1
+    noise_h = max(np.median(np.abs(intensity_high - np.median(intensity_high))) * 1.4826, 1e-10)
+    median_peak_h = np.median([intensity_high[p[0]] for p in peaks_high])
+    z_h = (median_peak_h - noise_h) / (noise_h * math.sqrt(2))
+    expected_P_SNR = 0.5 * (1.0 + float(erf(z_h)))
+    assert expected_P_SNR > 0.9, f"High-SNR P_SNR should be near 1: {expected_P_SNR}"
+
+
+def test_triple_counting_eliminated(atomic_db):
+    """Element with many predicted/few matched lines shouldn't get crushed.
+
+    Before the refactoring, unmatched lines were penalized in k_sim (zeros),
+    k_rate (geometric mean with count), AND k_det blend (N_expected weight).
+    Now k_sim and k_rate are matched-only, with P_cov as the single penalty.
+    """
+    from cflibs.atomic.structures import Transition
+
+    identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
+
+    # Element with 5 lines, 3 matched (realistic minor element scenario)
+    fused = []
+    for i in range(5):
+        wl = 350.0 + i * 3.0  # well-separated
+        fused.append({
+            "transition": Transition("V", 1, wl, 1e7, 3.0, 0.0, 9, 7),
+            "avg_emissivity": 1000.0, "wavelength_nm": wl,
+        })
+
+    peaks = [(50, 350.01), (100, 353.01), (150, 356.01)]
+    intensity = np.full(500, 10.0)
+    intensity[50] = 600.0
+    intensity[100] = 500.0
+    intensity[150] = 400.0
+
+    matched = np.array([True, True, True, False, False])
+    pidx = np.array([0, 1, 2, -1, -1])
+    shifts = np.array([0.01, 0.01, 0.01, 0.0, 0.0])
+
+    k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
+        identifier._compute_scores(
+            fused, matched, pidx, shifts, intensity, peaks,
+            emissivity_threshold=-np.inf,
+        )
+    )
+
+    # k_sim should be high (matched lines have consistent intensities)
+    assert k_sim > 0.7, f"Matched-only k_sim should be high: {k_sim}"
+
+    # k_rate should be 0.6 (3000/5000 matched emissivity)
+    assert abs(k_rate - 0.6) < 0.01, f"k_rate should be ~0.6: {k_rate}"
+
+    # P_cov should also be 0.6 (single penalty channel)
+    assert abs(P_cov - 0.6) < 0.01, f"P_cov should be ~0.6: {P_cov}"
+
+    # N_matched used in blend, not N_expected
+    assert N_matched == 3
+    assert N_expected == 5
+
+    # The combined CL should be reasonable (not crushed to near-zero)
+    k_det, CL = identifier._decide(
+        k_sim, k_rate, k_shift, N_expected, intensity, peaks,
+        element="V", P_maj=P_maj, N_matched=N_matched, P_cov=P_cov,
+    )
+    assert k_det > 0.3, f"k_det should be substantial: {k_det}"
