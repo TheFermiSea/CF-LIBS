@@ -584,7 +584,13 @@ def run_all_identifiers(
     algorithms = [
         ("ALIAS", ALIASIdentifier, {"resolving_power": resolving_power}),
         ("Comb", CombIdentifier, {"resolving_power": resolving_power}),
-        ("Correlation", CorrelationIdentifier, {}),
+        ("Correlation", CorrelationIdentifier, {
+            "resolving_power": resolving_power,
+            "T_range_K": (5000, 15000),
+            "T_steps": 7,
+            "n_e_range_cm3": (1e15, 5e17),
+            "n_e_steps": 4,
+        }),
     ]
 
     for name, Cls, kwargs in algorithms:

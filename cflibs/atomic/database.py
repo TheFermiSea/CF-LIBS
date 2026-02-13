@@ -136,7 +136,113 @@ class AtomicDatabase(AtomicDataSource):
             logger.info("Migrating schema: Adding atomic_mass to species_physics table")
             cursor.execute("ALTER TABLE species_physics ADD COLUMN atomic_mass REAL")
 
+        # 4. Auto-populate energy_levels from lines table if empty
+        cursor.execute("SELECT COUNT(*) FROM energy_levels")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("SELECT COUNT(*) FROM lines")
+            n_lines = cursor.fetchone()[0]
+            if n_lines > 0:
+                logger.info("Populating energy_levels from lines table...")
+                self._populate_energy_levels(cursor)
+
+        # 5. Auto-populate species_physics with NIST IPs if empty
+        cursor.execute("SELECT COUNT(*) FROM species_physics")
+        if cursor.fetchone()[0] == 0:
+            logger.info("Populating species_physics with NIST ionization potentials...")
+            self._populate_species_physics(cursor)
+
         conn.commit()
+
+    @staticmethod
+    def _populate_energy_levels(cursor: sqlite3.Cursor):
+        """Extract unique energy levels from the lines table."""
+        # Lower levels
+        cursor.execute("""
+            INSERT INTO energy_levels (element, sp_num, g_level, energy_ev)
+            SELECT DISTINCT element, sp_num, CAST(gi AS INTEGER), ROUND(ei_ev, 8)
+            FROM lines
+            WHERE gi IS NOT NULL AND ei_ev IS NOT NULL
+        """)
+        # Upper levels (avoid duplicates)
+        cursor.execute("""
+            INSERT OR IGNORE INTO energy_levels (element, sp_num, g_level, energy_ev)
+            SELECT DISTINCT element, sp_num, CAST(gk AS INTEGER), ROUND(ek_ev, 8)
+            FROM lines
+            WHERE gk IS NOT NULL AND ek_ev IS NOT NULL
+        """)
+        # Deduplicate by (element, sp_num, energy_ev)
+        cursor.execute("""
+            DELETE FROM energy_levels
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM energy_levels
+                GROUP BY element, sp_num, ROUND(energy_ev, 5)
+            )
+        """)
+        cursor.execute("SELECT COUNT(*) FROM energy_levels")
+        n = cursor.fetchone()[0]
+        logger.info(f"Populated {n} energy levels from lines table")
+
+    @staticmethod
+    def _populate_species_physics(cursor: sqlite3.Cursor):
+        """Populate species_physics with NIST ionization potentials and atomic masses."""
+        # NIST recommended values: (element, mass, IP_I, IP_II)
+        # fmt: off
+        nist_data = [
+            ("H", 1.008, 13.598, None), ("He", 4.003, 24.587, 54.418),
+            ("Li", 6.94, 5.392, 75.640), ("Be", 9.012, 9.323, 18.211),
+            ("B", 10.81, 8.298, 25.155), ("C", 12.011, 11.260, 24.383),
+            ("N", 14.007, 14.534, 29.601), ("O", 15.999, 13.618, 35.117),
+            ("F", 18.998, 17.422, 34.970), ("Ne", 20.180, 21.564, 40.962),
+            ("Na", 22.990, 5.139, 47.286), ("Mg", 24.305, 7.646, 15.035),
+            ("Al", 26.982, 5.986, 18.828), ("Si", 28.085, 8.151, 16.345),
+            ("P", 30.974, 10.486, 19.769), ("S", 32.06, 10.360, 23.337),
+            ("Cl", 35.45, 12.967, 23.814), ("Ar", 39.948, 15.759, 27.629),
+            ("K", 39.098, 4.341, 31.63), ("Ca", 40.078, 6.113, 11.871),
+            ("Sc", 44.956, 6.561, 12.800), ("Ti", 47.867, 6.828, 13.575),
+            ("V", 50.942, 6.746, 14.618), ("Cr", 51.996, 6.766, 16.498),
+            ("Mn", 54.938, 7.434, 15.640), ("Fe", 55.845, 7.902, 16.187),
+            ("Co", 58.933, 7.881, 17.083), ("Ni", 58.693, 7.639, 18.168),
+            ("Cu", 63.546, 7.726, 20.292), ("Zn", 65.38, 9.394, 17.964),
+            ("Ga", 69.723, 5.999, 20.514), ("Ge", 72.63, 7.899, 15.934),
+            ("As", 74.922, 9.788, 18.633), ("Se", 78.971, 9.752, 21.19),
+            ("Br", 79.904, 11.814, 21.8), ("Kr", 83.798, 13.999, 24.359),
+            ("Rb", 85.468, 4.177, 27.285), ("Sr", 87.62, 5.695, 11.030),
+            ("Y", 88.906, 6.217, 12.24), ("Zr", 91.224, 6.634, 13.13),
+            ("Nb", 92.906, 6.759, 14.32), ("Mo", 95.95, 7.092, 16.16),
+            ("Ru", 101.07, 7.361, 16.76), ("Rh", 102.91, 7.459, 18.08),
+            ("Pd", 106.42, 8.337, 19.43), ("Ag", 107.87, 7.576, 21.49),
+            ("Cd", 112.41, 8.993, 16.908), ("In", 114.82, 5.786, 18.869),
+            ("Sn", 118.71, 7.344, 14.632), ("Sb", 121.76, 8.608, 16.53),
+            ("Te", 127.60, 9.010, 18.60), ("I", 126.90, 10.451, 19.131),
+            ("Xe", 131.29, 12.130, 20.975), ("Cs", 132.91, 3.894, 23.157),
+            ("Ba", 137.33, 5.211, 10.004), ("La", 138.91, 5.577, 11.06),
+            ("Ce", 140.12, 5.539, 10.85), ("Pr", 140.91, 5.473, 10.55),
+            ("Nd", 144.24, 5.525, 10.72), ("Sm", 150.36, 5.643, 11.07),
+            ("Eu", 151.96, 5.670, 11.241), ("Gd", 157.25, 6.150, 12.09),
+            ("Tb", 158.93, 5.864, 11.52), ("Dy", 162.50, 5.939, 11.67),
+            ("Ho", 164.93, 6.022, 11.80), ("Er", 167.26, 6.108, 11.93),
+            ("Tm", 168.93, 6.184, 12.05), ("Yb", 173.05, 6.254, 12.176),
+            ("Lu", 174.97, 5.426, 13.9), ("Hf", 178.49, 6.825, 14.9),
+            ("Ta", 180.95, 7.549, 16.2), ("W", 183.84, 7.864, 16.1),
+            ("Re", 186.21, 7.834, 16.6), ("Os", 190.23, 8.438, 17.0),
+            ("Ir", 192.22, 8.967, 17.0), ("Pt", 195.08, 8.959, 18.563),
+            ("Au", 196.97, 9.225, 20.5), ("Hg", 200.59, 10.437, 18.756),
+            ("Tl", 204.38, 6.108, 20.428), ("Pb", 207.2, 7.416, 15.032),
+            ("Bi", 208.98, 7.285, 16.69), ("Th", 232.04, 6.307, 11.5),
+            ("U", 238.03, 6.194, 11.6),
+        ]
+        # fmt: on
+        for elem, mass, ip1, ip2 in nist_data:
+            cursor.execute(
+                "INSERT OR REPLACE INTO species_physics VALUES (?,?,?,?)",
+                (elem, 1, ip1, mass),
+            )
+            if ip2 is not None:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO species_physics VALUES (?,?,?,?)",
+                    (elem, 2, ip2, mass),
+                )
 
     @cached_transitions
     def get_transitions(
