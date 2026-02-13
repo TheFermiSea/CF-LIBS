@@ -581,7 +581,7 @@ def run_all_identifiers(
 
     algorithms = [
         ("ALIAS", ALIASIdentifier, {"resolving_power": resolving_power}),
-        ("Comb", CombIdentifier, {}),
+        ("Comb", CombIdentifier, {"resolving_power": resolving_power}),
         ("Correlation", CorrelationIdentifier, {}),
     ]
 

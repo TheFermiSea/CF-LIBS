@@ -82,6 +82,7 @@ class CombIdentifier:
     def __init__(
         self,
         atomic_db: AtomicDatabase,
+        resolving_power: Optional[float] = None,
         baseline_window_nm: float = 10.0,
         threshold_percentile: float = 85.0,
         min_correlation: float = 0.10,
@@ -94,6 +95,7 @@ class CombIdentifier:
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
+        self.resolving_power = resolving_power
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
         self.min_correlation = min_correlation  # fingerprint detection threshold
@@ -230,7 +232,7 @@ class CombIdentifier:
         # Uses median of ALL non-zero scores as noise baseline; requires 3+ elements
         # to form a meaningful noise floor (2 elements can't distinguish signal from noise)
         non_zero_scores = [e.score for e in element_identifications if e.score > 0]
-        if len(non_zero_scores) >= 3:
+        if len(non_zero_scores) >= 2:
             median_score = np.median(non_zero_scores)
             relative_threshold = min(1.0, 1.5 * median_score)
         else:
@@ -440,8 +442,11 @@ class CombIdentifier:
 
         # Estimate resolution element from wavelength spacing
         dwl = np.median(np.diff(wavelength))
-        # Assume typical LIBS resolution of ~0.1 nm
-        resolution_nm = 0.1
+        # Derive resolution from resolving power if available, else fallback
+        if self.resolving_power:
+            resolution_nm = center_nm / self.resolving_power
+        else:
+            resolution_nm = 0.1
         max_width_pts = int((resolution_nm * self.max_width_factor) / dwl)
         max_width_pts = max(self.min_width_pts, max_width_pts)
 
@@ -573,8 +578,11 @@ class CombIdentifier:
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-        # Hybrid: mean(active correlations) × coverage fraction
-        mean_active_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
+        # Hybrid: mean of active correlations × sqrt coverage penalty.
+        # sqrt softens the linear coverage penalty to avoid crushing
+        # elements with many theoretical lines but few visible peaks
+        # (common at low RP where lines merge).
+        mean_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
         coverage = len(active_teeth) / len(teeth)
-        fingerprint = mean_active_corr * coverage
+        fingerprint = mean_corr * math.sqrt(coverage)
         return fingerprint

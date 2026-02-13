@@ -544,8 +544,9 @@ def test_k_rate_emissivity_weighted(atomic_db):
         emissivity_threshold=-np.inf,
     )
 
-    # Pure emissivity-weighted: 5000 / (5000 + 4*100) = 5000/5400 ≈ 0.926
-    expected_k_rate = 5000.0 / 5400.0
+    # Emissivity-weighted rate: 5000 / 5400 ≈ 0.926
+    raw_rate = 5000.0 / 5400.0
+    expected_k_rate = raw_rate
     assert abs(k_rate - expected_k_rate) < 0.01, (
         f"k_rate should be emissivity-weighted ~{expected_k_rate:.3f}: got {k_rate}"
     )
@@ -844,7 +845,7 @@ def test_triple_counting_eliminated(atomic_db):
     # k_sim should be high (matched lines have consistent intensities)
     assert k_sim > 0.7, f"Matched-only k_sim should be high: {k_sim}"
 
-    # k_rate should be 0.6 (3000/5000 matched emissivity)
+    # k_rate should be 0.6 (emissivity-weighted rate)
     assert abs(k_rate - 0.6) < 0.01, f"k_rate should be ~0.6: {k_rate}"
 
     # P_cov should also be 0.6 (still computed for diagnostics)

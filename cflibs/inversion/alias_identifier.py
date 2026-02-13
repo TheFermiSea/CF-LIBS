@@ -80,11 +80,11 @@ class ALIASIdentifier:
         self,
         atomic_db: AtomicDatabase,
         resolving_power: float = 5000.0,
-        T_range_K: Tuple[float, float] = (8000.0, 12000.0),
-        n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
-        T_steps: int = 5,
+        T_range_K: Tuple[float, float] = (5000.0, 15000.0),
+        n_e_range_cm3: Tuple[float, float] = (1e16, 5e17),
+        T_steps: int = 7,
         n_e_steps: int = 3,
-        intensity_threshold_factor: float = 4.0,
+        intensity_threshold_factor: float = 3.0,
         detection_threshold: float = 0.03,
         chance_window_scale: float = 0.4,
         elements: Optional[List[str]] = None,
@@ -330,11 +330,15 @@ class ALIASIdentifier:
                 intensity, peaks,
             )
 
-            # Gate 1: P_local — ramp from 0.1 (floor) to 1.0
-            CL *= float(np.clip(2.0 * P_local, 0.1, 1.0))
+            # Post-CL discriminators with raised floors to prevent
+            # minor elements from being crushed when their peaks overlap
+            # with dominant-element emission.
 
-            # Gate 2: P_mix — linear ramp (0.1 at P_mix=0, 1.0 at P_mix=1)
-            CL *= (0.1 + 0.9 * min(P_mix, 1.0))
+            # Gate 1: P_local — ramp from 0.25 (floor) to 1.0
+            CL *= float(np.clip(2.0 * P_local, 0.25, 1.0))
+
+            # Gate 2: P_mix — linear ramp (0.25 at P_mix=0, 1.0 at P_mix=1)
+            CL *= (0.25 + 0.75 * min(P_mix, 1.0))
 
             # Gate 3: R_rat — soft consistency check (0.5 min, 1.0 max)
             CL *= (0.5 + 0.5 * R_rat)
@@ -880,8 +884,7 @@ class ALIASIdentifier:
         else:
             P_maj = 0.5
 
-        # k_rate: paper-faithful emissivity-weighted detection rate only.
-        # Paper formula: k_rate = Σ(t_i × eps_i) / Σ(eps_i)
+        # k_rate: emissivity-weighted detection rate.
         if total_emissivity_above > 0:
             k_rate = matched_emissivity / total_emissivity_above
         else:

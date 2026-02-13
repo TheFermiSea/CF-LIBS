@@ -89,6 +89,7 @@ class CorrelationIdentifier:
         atomic_db: AtomicDatabase,
         vector_index=None,
         elements: Optional[List[str]] = None,
+        resolving_power: Optional[float] = None,
         wavelength_tolerance_nm: float = 0.1,
         top_k: int = 10,
         min_confidence: float = 0.03,
@@ -101,6 +102,7 @@ class CorrelationIdentifier:
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
+        self.resolving_power = resolving_power
         self.vector_index = vector_index
         self.elements = elements
         self.wavelength_tolerance_nm = wavelength_tolerance_nm
@@ -414,7 +416,7 @@ class CorrelationIdentifier:
         except Exception:
             stage_densities = None
 
-        sigma = self.instrument_fwhm_nm / 2.355
+        default_sigma = self.instrument_fwhm_nm / 2.355
 
         for trans in transitions:
             # Partition function
@@ -430,6 +432,12 @@ class CorrelationIdentifier:
 
             # Boltzmann factor weighted by ionization fraction
             eps = W_q * trans.A_ki * trans.g_k * np.exp(-trans.E_k_ev / T_eV) / U
+
+            # Per-transition sigma from RP if available, else fixed default
+            if self.resolving_power:
+                sigma = (trans.wavelength_nm / self.resolving_power) / 2.355
+            else:
+                sigma = default_sigma
 
             gaussian = np.exp(-0.5 * ((wavelength - trans.wavelength_nm) / sigma) ** 2)
             model_spectrum += eps * gaussian
