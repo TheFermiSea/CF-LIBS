@@ -905,13 +905,22 @@ class ALIASIdentifier:
         # k_sim: cosine similarity between theoretical and experimental
         # intensities over MATCHED lines only (paper-faithful).
         # Coverage is handled exclusively by k_rate.
+        #
+        # Self-absorption correction: resonance lines (E_i < 0.1 eV) are
+        # systematically weaker than optically-thin predictions. Damping
+        # the theoretical emissivity avoids penalizing the cosine angle.
+        SA_DAMPING = 0.3  # resonance lines ~3× weaker than thin prediction
         theoretical_intensities = []
         experimental_intensities = []
         unique_peak_set: set = set()
 
         for i in range(len(fused_lines)):
             if matched_above[i]:
-                theoretical_intensities.append(emissivities[i])
+                eps_th = emissivities[i]
+                trans = fused_lines[i]["transition"]
+                if getattr(trans, "E_i_ev", 1.0) < 0.1:
+                    eps_th *= SA_DAMPING
+                theoretical_intensities.append(eps_th)
                 pidx = matched_peak_idx[i]
                 experimental_intensities.append(intensity[peaks[pidx][0]])
                 unique_peak_set.add(pidx)
@@ -1208,8 +1217,17 @@ class ALIASIdentifier:
         if len(matched_indices) < 3:
             return 0.5  # Too few pairs for meaningful correlation
 
-        emissivities = np.array([fused_lines[i]["avg_emissivity"]
-                                 for i in matched_indices])
+        # Apply self-absorption damping to resonance lines so theoretical
+        # log-ratios better match observed ratios for strong transitions.
+        SA_DAMPING = 0.3
+        raw_emiss = np.array([fused_lines[i]["avg_emissivity"]
+                              for i in matched_indices])
+        damping = np.array([
+            SA_DAMPING if getattr(fused_lines[i]["transition"], "E_i_ev", 1.0) < 0.1
+            else 1.0
+            for i in matched_indices
+        ])
+        emissivities = raw_emiss * damping
         obs_intensities = np.array([intensity[peaks[matched_peak_idx[i]][0]]
                                     for i in matched_indices])
 

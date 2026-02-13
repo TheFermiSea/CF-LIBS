@@ -467,22 +467,24 @@ def select_representative_spectrum(
         return data
 
     if data.ndim == 2:
-        # 2D scipp data (N_pos, N_wavelength): use center position
-        center = data.shape[0] // 2
-        return data[center, :]
+        # 2D scipp data (N_pos, N_wavelength): average all positions for SNR
+        return np.mean(data, axis=0)
 
     if data.ndim == 3:
-        # Grid data (steel, Fe, Ni): use center pixel
-        # Note: 3×3 averaging was removed because the Fe/Ni grids ARE 3×3,
-        # so averaging over the whole grid dilutes element-specific signal
-        if dataset_name in ["steel_245nm", "Fe_245nm", "Ni_245nm"]:
-            x_center = data.shape[0] // 2
-            y_center = data.shape[1] // 2
-            return data[x_center, y_center, :]
+        nx, ny, nw = data.shape
 
-        # Line scan (FeNi_380nm, FeNi_480nm, 20shot): use first position, squeeze Y
-        else:
-            return data[0, 0, :]
+        if ny > 1:
+            # Small grid (e.g. 3×3): center pixel — averaging brings up
+            # noise artefacts that cause false positives on minor elements.
+            if nx * ny <= 16:
+                return data[nx // 2, ny // 2, :]
+            # Larger grid: average all positions
+            return np.mean(data.reshape(-1, nw), axis=0)
+
+        # Line scan (N, 1, W): average central positions for SNR
+        n_avg = min(nx, 5)
+        start = max(0, nx // 2 - n_avg // 2)
+        return np.mean(data[start : start + n_avg, 0, :], axis=0)
 
     raise ValueError(f"Unexpected data shape: {data.shape}")
 
