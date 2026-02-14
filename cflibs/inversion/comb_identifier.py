@@ -232,7 +232,7 @@ class CombIdentifier:
         # Uses median of ALL non-zero scores as noise baseline; requires 3+ elements
         # to form a meaningful noise floor (2 elements can't distinguish signal from noise)
         non_zero_scores = [e.score for e in element_identifications if e.score > 0]
-        if len(non_zero_scores) >= 2:
+        if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
             relative_threshold = min(1.0, 1.5 * median_score)
         else:

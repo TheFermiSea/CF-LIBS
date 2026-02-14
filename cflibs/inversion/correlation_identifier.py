@@ -173,9 +173,9 @@ class CorrelationIdentifier:
             raise ValueError(f"Unknown mode: {mode}")
 
         # Relative score filter: require score to stand out from median
-        # Only apply when comparing 2+ elements (single-element has nothing to compare)
+        # Only apply when comparing 3+ elements (fewer can't form a noise floor)
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
-        if len(non_zero_scores) >= 2:
+        if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
             relative_threshold = min(1.0, 1.5 * median_score)
         else:
