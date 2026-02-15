@@ -27,6 +27,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional, Union
 import json
+
+from cflibs.benchmark.dataset import BenchmarkDataset
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
@@ -48,7 +50,7 @@ PathLike = Union[str, Path]
 def load_benchmark(
     path: PathLike,
     format: Optional[BenchmarkFormat] = None,
-) -> "BenchmarkDataset":
+) -> BenchmarkDataset:
     """
     Load a benchmark dataset from file.
 
@@ -71,7 +73,6 @@ def load_benchmark(
     ValueError
         If format is not supported or file is corrupt
     """
-    from cflibs.benchmark.dataset import BenchmarkDataset
 
     path = Path(path)
 

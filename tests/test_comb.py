@@ -72,7 +72,7 @@ def test_correlate_tooth_with_peak(atomic_db):
     # Should have high correlation
     assert tooth["center_nm"] == center_nm
     assert tooth["best_correlation"] > 0.5
-    assert tooth["active"] == True  # Use == instead of 'is' for numpy bool
+    assert tooth["active"]  # Use == instead of 'is' for numpy bool
     assert abs(tooth["best_shift"]) <= identifier.max_shift_pts
 
 
@@ -192,7 +192,10 @@ def test_fingerprint_computation(atomic_db):
     ]
 
     fingerprint = identifier._compute_fingerprint(teeth)
-    expected = (0.8 + 0.6 + 0.7) / 4  # Divide by total teeth (4), not active (3)
+    # Hybrid formula: mean(active_corr) * sqrt(coverage)
+    mean_corr = (0.8 + 0.6 + 0.7) / 3
+    coverage = 3 / 4
+    expected = mean_corr * (coverage ** 0.5)
     assert abs(fingerprint - expected) < 1e-6
 
     # Test with no active teeth
@@ -459,7 +462,10 @@ def test_fingerprint_with_mixed_correlations(atomic_db):
     ]
 
     fingerprint = identifier._compute_fingerprint(teeth)
-    expected = (0.9 + 0.7 + 0.5) / 5  # Divide by total teeth (5)
+    # Hybrid formula: mean(active_corr) * sqrt(coverage)
+    mean_corr = (0.9 + 0.7 + 0.5) / 3
+    coverage = 3 / 5
+    expected = mean_corr * (coverage ** 0.5)
     np.testing.assert_allclose(fingerprint, expected)
 
 
@@ -630,8 +636,8 @@ def test_coverage_penalty_reduces_score(atomic_db):
             teeth.append({"active": False, "best_correlation": 0.1})
 
     score = identifier._compute_fingerprint(teeth)
-    # 3 * 0.9 / 50 = 0.054, should be much less than min_correlation
-    assert score < 0.1, f"Score {score} too high for 3/50 active teeth"
+    # mean(0.9) * sqrt(3/50) = 0.9 * 0.245 ≈ 0.22, still penalized by low coverage
+    assert score < 0.25, f"Score {score} too high for 3/50 active teeth"
 
 def test_max_lines_per_element_parameter(atomic_db):
     """Test that max_lines_per_element caps transition count."""

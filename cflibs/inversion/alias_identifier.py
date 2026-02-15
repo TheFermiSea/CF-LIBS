@@ -7,9 +7,13 @@ calculation, line fusion, matching, threshold determination, scoring, and decisi
 """
 
 from typing import List, Tuple, Optional
+from collections import defaultdict
 import math
 import numpy as np
+from scipy.optimize import nnls
 from scipy.signal import find_peaks
+from scipy.special import erf
+from scipy.stats import binom
 
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
@@ -53,32 +57,53 @@ class ALIASIdentifier:
         Peak detection threshold = factor × noise_estimate (default: 4.0)
     detection_threshold : float, optional
         Minimum confidence level for element detection (default: 0.02)
+    chance_window_scale : float, optional
+        Scale factor for chance-coincidence windows used in fill-factor estimation.
+        The chance half-window is `chance_window_scale * (lambda / R)`.
     elements : Optional[List[str]], optional
         List of elements to search for. If None, searches all available (default: None)
     """
+
+    # Crustal abundance in log10(ppm) — from CRC Handbook / USGS
+    CRUSTAL_ABUNDANCE_LOG_PPM = {
+        "O": 5.67, "Si": 5.44, "Al": 4.91, "Fe": 4.70, "Ca": 4.57,
+        "Na": 4.36, "Mg": 4.33, "K": 4.32, "Ti": 3.75, "H": 3.15,
+        "Mn": 2.98, "P": 2.97, "F": 2.80, "Ba": 2.70, "C": 2.30,
+        "Sr": 2.57, "S": 2.56, "Zr": 2.23, "V": 2.10, "Cl": 2.20,
+        "Cr": 2.00, "Ni": 1.88, "Zn": 1.88, "Cu": 1.78, "Co": 1.40,
+        "Li": 1.30, "N": 1.30, "Ga": 1.28, "Pb": 1.15, "Rb": 1.95,
+        "B": 1.00, "Sn": 0.35, "W": 0.18, "Mo": 0.18, "Ag": -0.62,
+        "Cd": -0.82, "Au": -2.40,
+    }
 
     def __init__(
         self,
         atomic_db: AtomicDatabase,
         resolving_power: float = 5000.0,
-        T_range_K: Tuple[float, float] = (8000.0, 12000.0),
-        n_e_range_cm3: Tuple[float, float] = (3e16, 3e17),
-        T_steps: int = 5,
+        T_range_K: Tuple[float, float] = (5000.0, 15000.0),
+        n_e_range_cm3: Tuple[float, float] = (1e16, 5e17),
+        T_steps: int = 7,
         n_e_steps: int = 3,
-        intensity_threshold_factor: float = 4.0,
-        detection_threshold: float = 0.02,
+        intensity_threshold_factor: float = 3.0,
+        detection_threshold: float = 0.03,
+        chance_window_scale: float = 0.4,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
-        self.resolving_power = resolving_power
+        if not (np.isfinite(resolving_power) and resolving_power > 0):
+            raise ValueError(
+                f"resolving_power must be finite and > 0, got {resolving_power!r}"
+            )
+        self.resolving_power = float(resolving_power)
         self.T_range_K = T_range_K
         self.n_e_range_cm3 = n_e_range_cm3
         self.T_steps = T_steps
         self.n_e_steps = n_e_steps
         self.intensity_threshold_factor = intensity_threshold_factor
         self.detection_threshold = detection_threshold
+        self.chance_window_scale = chance_window_scale
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
@@ -94,7 +119,15 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> ElementIdentificationResult:
         """
-        Identify elements in experimental spectrum.
+        Identify elements in experimental spectrum with cross-element peak
+        competition.
+
+        Three-phase algorithm:
+        1. Score all elements independently (same as before).
+        2. Global peak competition: each disputed experimental peak is
+           assigned to the element with the highest initial confidence
+           level (CL).  Losers have their match revoked.
+        3. Rescore elements that lost peaks and build final results.
 
         Parameters
         ----------
@@ -116,76 +149,220 @@ class ALIASIdentifier:
 
         # Get elements to search
         if self.elements is None:
-            # Get all available elements from database
-            # For now, use common LIBS elements as default
             search_elements = ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"]
         else:
             search_elements = self.elements
 
-        all_element_ids = []
+        # ── Phase 1: Independent scoring ──────────────────────────────
+        candidates: List[dict] = []
 
         for element in search_elements:
-            # Step 2: Compute theoretical emissivities
             element_lines = self._compute_element_emissivities(element, wl_min, wl_max)
-
             if not element_lines:
                 continue
 
-            # Step 3: Fuse nearby lines
             fused_lines = self._fuse_lines(element_lines, wavelength)
-
             if not fused_lines:
                 continue
 
-            # Step 4: Match lines to experimental peaks
-            matched_mask, wavelength_shifts = self._match_lines(fused_lines, peaks)
+            matched_mask, wavelength_shifts, matched_peak_idx = self._match_lines(
+                fused_lines, peaks
+            )
 
-            # Step 5: Determine emissivity threshold
             if np.any(matched_mask):
                 emissivity_threshold = self._determine_emissivity_threshold(
                     fused_lines, matched_mask
                 )
             else:
-                emissivity_threshold = -np.inf  # No matches, keep all for scoring
+                emissivity_threshold = -np.inf
 
-            # Step 6: Compute scores
-            k_sim, k_rate, k_shift = self._compute_scores(
-                fused_lines, matched_mask, wavelength_shifts, intensity, peaks, emissivity_threshold
-            )
-
-            # Step 7: Decision
-            N_X = np.sum(
-                matched_mask
-                & (
-                    np.array([line["avg_emissivity"] for line in fused_lines])
-                    >= 10**emissivity_threshold
+            k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
+                self._compute_scores(
+                    fused_lines, matched_mask, matched_peak_idx,
+                    wavelength_shifts, intensity, peaks, emissivity_threshold,
                 )
             )
-            k_det, CL = self._decide(k_sim, k_rate, k_shift, N_X, intensity, peaks)
 
-            # Build ElementIdentification
+            P_sig, fill_factor, p_chance, p_tail = (
+                self._compute_random_match_significance(
+                    peaks=peaks,
+                    wavelength=wavelength,
+                    N_expected=N_expected,
+                    N_matched=N_matched,
+                )
+            )
+
+            k_det, CL = self._decide(
+                k_sim, k_rate, k_shift, N_expected, intensity, peaks,
+                element=element, P_maj=P_maj, P_sig=P_sig,
+                N_matched=N_matched, P_cov=P_cov,
+            )
+
+            candidates.append({
+                "element": element,
+                "fused_lines": fused_lines,
+                "matched_mask": matched_mask,
+                "matched_peak_idx": matched_peak_idx,
+                "wavelength_shifts": wavelength_shifts,
+                "emissivity_threshold": emissivity_threshold,
+                "initial_CL": CL,
+                # Cache phase 1 scores for reuse when competition is skipped
+                "scores": (k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov),
+                "N_matched": N_matched,
+                "P_sig_data": (P_sig, fill_factor, p_chance, p_tail),
+                "k_det": k_det,
+            })
+
+        # ── Phase 1.5: NNLS peak-space mixture attribution ────────────
+        # Non-negative least squares fit of all candidate templates against
+        # observed peak intensities.  Returns three metrics:
+        #   P_mix  — leave-one-out partial R^2 (global)
+        #   P_local — local explanation score (what fraction of claimed
+        #             peaks' intensity does this element actually explain?)
+        if candidates and peaks:
+            peak_intensities_arr = np.array([intensity[p[0]] for p in peaks])
+            A = self._build_nnls_templates(candidates, peaks)
+            P_mix_arr, P_local_arr, _ = self._compute_nnls_attribution(
+                A, peak_intensities_arr
+            )
+            for i, cand in enumerate(candidates):
+                cand["P_mix"] = float(P_mix_arr[i])
+                cand["P_local"] = float(P_local_arr[i])
+        else:
+            for cand in candidates:
+                cand["P_mix"] = 1.0
+                cand["P_local"] = 1.0
+
+        # ── Phase 2: Global peak competition ──────────────────────────
+        # Only active at RP >= 2000 where peaks are narrow enough for
+        # meaningful exclusivity.  At low RP (broadband spectrometers),
+        # shared peaks are the norm and winner-take-all competition
+        # causes false negatives for real minor elements.
+        if self.resolving_power >= 2000:
+            peak_claims: dict = defaultdict(list)
+
+            for c_idx, cand in enumerate(candidates):
+                mask = cand["matched_mask"]
+                pidx_arr = cand["matched_peak_idx"]
+                for l_idx in range(len(mask)):
+                    if mask[l_idx]:
+                        pidx = int(pidx_arr[l_idx])
+                        peak_claims[pidx].append(
+                            (cand["initial_CL"], c_idx, l_idx)
+                        )
+
+            # Resolve: highest initial CL wins; losers get unmatched
+            for pidx, claims in peak_claims.items():
+                if len(claims) <= 1:
+                    continue
+                claims.sort(key=lambda x: x[0], reverse=True)
+                for i in range(1, len(claims)):
+                    _, loser_c, loser_l = claims[i]
+                    candidates[loser_c]["matched_mask"][loser_l] = False
+                    candidates[loser_c]["matched_peak_idx"][loser_l] = -1
+                    candidates[loser_c]["wavelength_shifts"][loser_l] = 0.0
+
+        # ── Phase 3: Rescore & build results ──────────────────────────
+        competition_ran = self.resolving_power >= 2000
+        all_element_ids = []
+
+        for cand in candidates:
+            element = cand["element"]
+            fused_lines = cand["fused_lines"]
+            matched_mask = cand["matched_mask"]
+            matched_peak_idx = cand["matched_peak_idx"]
+            wavelength_shifts = cand["wavelength_shifts"]
+            emissivity_threshold = cand["emissivity_threshold"]
+
+            if competition_ran:
+                # Rescore with post-competition matches
+                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
+                    self._compute_scores(
+                        fused_lines, matched_mask, matched_peak_idx,
+                        wavelength_shifts, intensity, peaks,
+                        emissivity_threshold,
+                    )
+                )
+
+                P_sig, fill_factor, p_chance, p_tail = (
+                    self._compute_random_match_significance(
+                        peaks=peaks,
+                        wavelength=wavelength,
+                        N_expected=N_expected,
+                        N_matched=N_matched,
+                    )
+                )
+
+                k_det, CL = self._decide(
+                    k_sim, k_rate, k_shift, N_expected, intensity, peaks,
+                    element=element, P_maj=P_maj, P_sig=P_sig,
+                    N_matched=N_matched, P_cov=P_cov,
+                )
+            else:
+                # No competition — reuse phase 1 scores
+                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
+                    cand["scores"]
+                )
+                P_sig, fill_factor, p_chance, p_tail = cand["P_sig_data"]
+                k_det = cand["k_det"]
+                CL = cand["initial_CL"]
+
+            # ── Post-CL discriminators ──────────────────────────────────
+            # Two NNLS-derived gates suppress false positives whose peaks
+            # ride on a dominant element's lines:
+            #
+            # 1. P_local (NNLS peak ownership): fraction of claimed peaks'
+            #    intensity that this element's NNLS coefficient explains.
+            #    FP elements ride on dominant-element peaks → P_local ~ 0.
+            # 2. P_mix (leave-one-out partial R²): how much total spectrum
+            #    energy is uniquely attributable to this element.
+            #    FP elements add nothing → P_mix ~ 0.
+            #
+            # R_rat (intensity-ratio consistency) provides a soft additional
+            # check: do observed ratios match predicted emissivity ratios?
+            #
+            # NOTE: P_sig (binomial significance) is deliberately excluded.
+            # At low RP (high fill factor), line-rich elements like Fe have
+            # match counts BELOW random expectation, giving P_sig → 0 for
+            # true positives. P_sig only works at high RP / low fill factor.
+
+            P_mix = cand.get("P_mix", 1.0)
+            P_local = cand.get("P_local", 1.0)
+
+            R_rat = self._compute_ratio_consistency(
+                fused_lines, matched_mask, matched_peak_idx,
+                intensity, peaks,
+            )
+
+            # Post-CL discriminators with raised floors to prevent
+            # minor elements from being crushed when their peaks overlap
+            # with dominant-element emission.
+
+            # Gate 1: P_local — ramp from 0.25 (floor) to 1.0
+            CL *= float(np.clip(2.0 * P_local, 0.25, 1.0))
+
+            # Gate 2: P_mix — linear ramp (0.25 at P_mix=0, 1.0 at P_mix=1)
+            CL *= (0.25 + 0.75 * min(P_mix, 1.0))
+
+            # Gate 3: R_rat — soft consistency check (0.5 min, 1.0 max)
+            CL *= (0.5 + 0.5 * R_rat)
+
             detected = CL >= self.detection_threshold
 
-            # Create IdentifiedLine objects for matched lines
+            # Build IdentifiedLine objects
             matched_lines = []
             unmatched_lines = []
             for i, line_data in enumerate(fused_lines):
                 trans = line_data["transition"]
                 if matched_mask[i]:
-                    # Find closest peak
-                    peak_idx = np.argmin(
-                        np.abs(np.array([p[1] for p in peaks]) - line_data["wavelength_nm"])
-                    )
-                    peak_wl = peaks[peak_idx][1]
-                    peak_int = intensity[peaks[peak_idx][0]]
-
+                    pidx = matched_peak_idx[i]
                     matched_lines.append(
                         IdentifiedLine(
-                            wavelength_exp_nm=peak_wl,
+                            wavelength_exp_nm=peaks[pidx][1],
                             wavelength_th_nm=line_data["wavelength_nm"],
                             element=element,
                             ionization_stage=trans.ionization_stage,
-                            intensity_exp=peak_int,
+                            intensity_exp=intensity[peaks[pidx][0]],
                             emissivity_th=line_data["avg_emissivity"],
                             transition=trans,
                             correlation=k_sim,
@@ -199,7 +376,7 @@ class ALIASIdentifier:
                 detected=detected,
                 score=k_det,
                 confidence=CL,
-                n_matched_lines=np.sum(matched_mask),
+                n_matched_lines=int(np.sum(matched_mask)),
                 n_total_lines=len(fused_lines),
                 matched_lines=matched_lines,
                 unmatched_lines=unmatched_lines,
@@ -209,7 +386,19 @@ class ALIASIdentifier:
                     "k_shift": k_shift,
                     "k_det": k_det,
                     "emissivity_threshold": emissivity_threshold,
-                    "N_X": int(N_X),
+                    "N_expected": N_expected,
+                    "N_matched": N_matched,
+                    "P_maj": P_maj,
+                    "P_ab": self._compute_P_ab(element),
+                    "P_cov": P_cov,
+                    "P_mix": P_mix,
+                    "P_local": P_local,
+                    "R_rat": R_rat,
+                    "P_sig": P_sig,
+                    "p_tail": p_tail,
+                    "p_chance": p_chance,
+                    "fill_factor": fill_factor,
+                    "N_penalty": 0.5 if N_expected == 2 else 1.0,
                 },
             )
 
@@ -219,18 +408,14 @@ class ALIASIdentifier:
         detected_elements = [e for e in all_element_ids if e.detected]
         rejected_elements = [e for e in all_element_ids if not e.detected]
 
-        # Count matched peaks (peak matched if any element matched it)
-        matched_peak_indices = set()
+        # Count matched peaks across detected elements
+        matched_peak_indices: set = set()
         for element_id in detected_elements:
             for line in element_id.matched_lines:
-                # Find peak index
                 peak_idx = np.argmin(
                     np.abs(np.array([p[1] for p in peaks]) - line.wavelength_exp_nm)
                 )
-                matched_peak_indices.add(peak_idx)
-
-        n_matched_peaks = len(matched_peak_indices)
-        n_unmatched_peaks = len(peaks) - n_matched_peaks
+                matched_peak_indices.add(int(peak_idx))
 
         return ElementIdentificationResult(
             detected_elements=detected_elements,
@@ -238,8 +423,8 @@ class ALIASIdentifier:
             all_elements=all_element_ids,
             experimental_peaks=peaks,
             n_peaks=len(peaks),
-            n_matched_peaks=n_matched_peaks,
-            n_unmatched_peaks=n_unmatched_peaks,
+            n_matched_peaks=len(matched_peak_indices),
+            n_unmatched_peaks=len(peaks) - len(matched_peak_indices),
             algorithm="alias",
             parameters={
                 "resolving_power": self.resolving_power,
@@ -469,7 +654,7 @@ class ALIASIdentifier:
 
     def _match_lines(
         self, fused_lines: List[dict], peaks: List[Tuple[int, float]]
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Match theoretical lines to experimental peaks.
 
@@ -482,12 +667,18 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray]
-            (matched_mask, wavelength_shifts) where matched_mask is bool array and
-            wavelength_shifts is float array of shifts in nm
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+            (matched_mask, wavelength_shifts, matched_peak_idx) where
+            matched_mask is bool array, wavelength_shifts is float array of
+            shifts in nm, and matched_peak_idx is int array (-1 if unmatched)
         """
+        n = len(fused_lines)
         if not peaks or not fused_lines:
-            return np.zeros(len(fused_lines), dtype=bool), np.zeros(len(fused_lines))
+            return (
+                np.zeros(n, dtype=bool),
+                np.zeros(n),
+                np.full(n, -1, dtype=int),
+            )
 
         peak_wavelengths = np.array([p[1] for p in peaks])
 
@@ -513,8 +704,9 @@ class ALIASIdentifier:
 
         global_shift = np.median(shifts) if shifts else 0.0
 
-        matched_mask = np.zeros(len(fused_lines), dtype=bool)
-        wavelength_shifts = np.zeros(len(fused_lines))
+        matched_mask = np.zeros(n, dtype=bool)
+        wavelength_shifts = np.zeros(n)
+        matched_peak_idx = np.full(n, -1, dtype=int)
 
         for i, line in enumerate(fused_lines):
             wl_th = line["wavelength_nm"] + global_shift  # Apply correction
@@ -525,11 +717,35 @@ class ALIASIdentifier:
 
             if np.any(within_window):
                 matched_mask[i] = True
-                # Shift to closest peak (relative to uncorrected wavelength)
-                closest_idx = np.argmin(distances)
+                closest_idx = int(np.argmin(distances))
+                matched_peak_idx[i] = closest_idx
+                # Shift relative to uncorrected wavelength
                 wavelength_shifts[i] = peak_wavelengths[closest_idx] - line["wavelength_nm"]
 
-        return matched_mask, wavelength_shifts
+        # Enforce one-to-one: each experimental peak is assigned to at most
+        # one theoretical line (highest emissivity wins).  This prevents a
+        # single broad peak from "confirming" multiple theoretical lines,
+        # which inflates k_rate at low resolving power.
+        claimed_peaks: dict = {}  # peak_idx -> (line_idx, emissivity)
+        for i in range(n):
+            if not matched_mask[i]:
+                continue
+            pidx = int(matched_peak_idx[i])
+            emiss = fused_lines[i]["avg_emissivity"]
+            if pidx not in claimed_peaks or emiss > claimed_peaks[pidx][1]:
+                if pidx in claimed_peaks:
+                    old_i = claimed_peaks[pidx][0]
+                    matched_mask[old_i] = False
+                    wavelength_shifts[old_i] = 0.0
+                    matched_peak_idx[old_i] = -1
+                claimed_peaks[pidx] = (i, emiss)
+            else:
+                # Peak already claimed by a stronger line
+                matched_mask[i] = False
+                wavelength_shifts[i] = 0.0
+                matched_peak_idx[i] = -1
+
+        return matched_mask, wavelength_shifts, matched_peak_idx
 
     def _determine_emissivity_threshold(
         self, fused_lines: List[dict], matched_mask: np.ndarray
@@ -597,13 +813,14 @@ class ALIASIdentifier:
         self,
         fused_lines: List[dict],
         matched_mask: np.ndarray,
+        matched_peak_idx: np.ndarray,
         wavelength_shifts: np.ndarray,
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
         emissivity_threshold: float,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[float, float, float, float, int, int, float]:
         """
-        Compute k_sim, k_rate, k_shift scores.
+        Compute k_sim, k_rate, k_shift scores, P_maj, N_expected, N_matched, P_cov.
 
         Parameters
         ----------
@@ -611,6 +828,8 @@ class ALIASIdentifier:
             Fused theoretical lines
         matched_mask : np.ndarray
             Boolean mask of matched lines
+        matched_peak_idx : np.ndarray
+            Index of matched peak per line (-1 if unmatched)
         wavelength_shifts : np.ndarray
             Wavelength shifts in nm
         intensity : np.ndarray
@@ -622,26 +841,54 @@ class ALIASIdentifier:
 
         Returns
         -------
-        Tuple[float, float, float]
-            (k_sim, k_rate, k_shift) scores in [0, 1]
+        Tuple[float, float, float, float, int, int, float]
+            (k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov)
         """
         if not np.any(matched_mask):
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.5, 0, 0, 0.0
 
         emissivities = np.array([line["avg_emissivity"] for line in fused_lines])
         above_threshold = emissivities >= 10**emissivity_threshold
 
-        # Filter to lines above threshold
+        # N_expected: ALL above-threshold theoretical lines (matched or not).
+        N_expected = int(np.sum(above_threshold))
+
+        # Filter to lines above threshold that are also matched
         matched_above = matched_mask & above_threshold
-        n_matched_above = np.sum(matched_above)
+        n_matched_above = int(np.sum(matched_above))
+
+        # P_cov: emissivity-weighted coverage penalty — single channel for
+        # penalizing missing lines. Missing a weak line matters less than
+        # missing the resonance line.
+        total_emissivity_above = float(np.sum(emissivities[above_threshold]))
+        matched_emissivity = float(np.sum(emissivities[matched_above]))
+        P_cov = matched_emissivity / total_emissivity_above if total_emissivity_above > 0 else 0.0
 
         if n_matched_above == 0:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.5, N_expected, 0, P_cov
 
-        # k_rate: emissivity-weighted detection rate
-        total_emissivity_above = np.sum(emissivities[above_threshold])
-        matched_emissivity = np.sum(emissivities[matched_above])
+        # Soft P_maj: weighted coverage of top-k strongest above-threshold
+        # lines.  Binary P_maj (strongest matched → 1.0, else 0.5) causes
+        # false negatives when the major line is obscured by matrix
+        # emission (e.g. V in Ti6Al4V where Ti dominates).
+        top_k = min(3, N_expected)
+        if top_k > 0:
+            above_emissivities = emissivities * above_threshold.astype(float)
+            sorted_indices = np.argsort(above_emissivities)[::-1][:top_k]
+            # sqrt: softer than linear, prevents single dominant line
+            # from driving P_maj to 1.0 alone
+            weights = np.sqrt(emissivities[sorted_indices])
+            matched_weights = float(np.sum(weights * matched_above[sorted_indices]))
+            total_weights = float(np.sum(weights))
+            P_maj = (
+                0.5 + 0.5 * (matched_weights / total_weights)
+                if total_weights > 0
+                else 0.5
+            )
+        else:
+            P_maj = 0.5
 
+        # k_rate: emissivity-weighted detection rate.
         if total_emissivity_above > 0:
             k_rate = matched_emissivity / total_emissivity_above
         else:
@@ -652,55 +899,454 @@ class ALIASIdentifier:
         delta_lambda = mean_wl / self.resolving_power
 
         shifts_matched = np.abs(wavelength_shifts[matched_above])
-        if len(shifts_matched) > 0:
-            mean_shift_frac = np.mean(shifts_matched) / delta_lambda
-            k_shift = max(0.0, 1.0 - mean_shift_frac)
+        emiss_matched = emissivities[matched_above]
+        if len(shifts_matched) > 0 and np.sum(emiss_matched) > 0:
+            weighted_shift = np.average(shifts_matched, weights=emiss_matched)
+            k_shift = max(0.0, 1.0 - weighted_shift / delta_lambda)
         else:
             k_shift = 0.0
 
-        # k_sim: cosine similarity between theoretical and experimental intensities
-        # For matched lines, compare emissivities to experimental peak heights
+        # k_sim: cosine similarity between theoretical and experimental
+        # intensities over MATCHED lines only (paper-faithful).
+        # Coverage is handled exclusively by k_rate.
+        #
+        # Self-absorption correction: resonance lines (E_i < 0.1 eV) are
+        # systematically weaker than optically-thin predictions. Damping
+        # the theoretical emissivity avoids penalizing the cosine angle.
+        SA_DAMPING = 0.3  # resonance lines ~3× weaker than thin prediction
         theoretical_intensities = []
         experimental_intensities = []
+        unique_peak_set: set = set()
 
-        for i, line in enumerate(fused_lines):
+        for i in range(len(fused_lines)):
             if matched_above[i]:
-                theoretical_intensities.append(emissivities[i])
-
-                # Find closest peak
-                peak_idx = np.argmin(
-                    np.abs(np.array([p[1] for p in peaks]) - line["wavelength_nm"])
-                )
-                experimental_intensities.append(intensity[peaks[peak_idx][0]])
+                eps_th = emissivities[i]
+                trans = fused_lines[i]["transition"]
+                if getattr(trans, "E_i_ev", 1.0) < 0.1:
+                    eps_th *= SA_DAMPING
+                theoretical_intensities.append(eps_th)
+                pidx = matched_peak_idx[i]
+                experimental_intensities.append(intensity[peaks[pidx][0]])
+                unique_peak_set.add(pidx)
 
         if len(theoretical_intensities) > 1:
             th_vec = np.array(theoretical_intensities)
             exp_vec = np.array(experimental_intensities)
 
-            # Cosine similarity
             dot_product = np.dot(th_vec, exp_vec)
             norm_th = np.linalg.norm(th_vec)
             norm_exp = np.linalg.norm(exp_vec)
 
             if norm_th > 0 and norm_exp > 0:
                 k_sim = dot_product / (norm_th * norm_exp)
-                k_sim = max(0.0, min(1.0, k_sim))  # Clamp to [0, 1]
+                k_sim = max(0.0, min(1.0, k_sim))
             else:
                 k_sim = 0.0
         else:
-            # Not enough points for correlation
-            k_sim = 0.5  # Neutral value
+            # Single matched line: cosine similarity undefined.
+            # Use neutral value so penalty comes from k_rate and P_cov,
+            # not an outright rejection via the k_sim >= 0.15 gate.
+            k_sim = 0.5
 
-        return k_sim, k_rate, k_shift
+        # Uniqueness penalty: many-to-one mapping lowers k_sim
+        n_unique_peaks = len(unique_peak_set)
+        if n_matched_above > 0:
+            uniqueness_factor = n_unique_peaks / n_matched_above
+            k_sim *= uniqueness_factor
+
+        return k_sim, k_rate, k_shift, P_maj, N_expected, n_matched_above, P_cov
+
+    def _compute_P_ab(self, element: str) -> float:
+        """
+        Compute crustal-abundance prior P_ab for an element.
+
+        3-tier weighting (Noel et al. 2025):
+        - ppm >= 100    → 1.0  (common, > 0.01%)
+        - ppm >= 0.001  → 0.75 (intermediate)
+        - ppm < 0.001   → 0.5  (rare)
+
+        Parameters
+        ----------
+        element : str
+            Element symbol
+
+        Returns
+        -------
+        float
+            P_ab weighting factor
+        """
+        log_ppm = self.CRUSTAL_ABUNDANCE_LOG_PPM.get(element, 0.0)
+        ppm = 10**log_ppm
+        if ppm >= 100:
+            return 1.0
+        elif ppm >= 1e-3:
+            return 0.75
+        else:
+            return 0.5
+
+    def _compute_fill_factor(
+        self,
+        peaks: List[Tuple[int, float]],
+        wavelength: np.ndarray,
+    ) -> float:
+        """
+        Compute spectral fill factor from merged peak-match windows.
+
+        Each peak contributes an interval centered at its wavelength with half-width:
+            chance_window_scale * (lambda / resolving_power)
+        Overlapping intervals are merged before computing covered span fraction.
+
+        Parameters
+        ----------
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+        wavelength : np.ndarray
+            Full spectral wavelength axis in nm.
+
+        Returns
+        -------
+        float
+            Fraction of spectral span covered by merged intervals in [0, 1].
+        """
+        if len(peaks) == 0 or len(wavelength) < 2:
+            return 0.0
+
+        wl_min = float(np.min(wavelength))
+        wl_max = float(np.max(wavelength))
+        span = wl_max - wl_min
+        if span <= 0:
+            return 0.0
+
+        intervals: List[Tuple[float, float]] = []
+        for _, peak_wl in peaks:
+            half_window = self.chance_window_scale * (peak_wl / self.resolving_power)
+            if half_window <= 0:
+                continue
+            start = max(wl_min, peak_wl - half_window)
+            end = min(wl_max, peak_wl + half_window)
+            if end > start:
+                intervals.append((start, end))
+
+        if not intervals:
+            return 0.0
+
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for start, end in intervals[1:]:
+            last_start, last_end = merged[-1]
+            if start <= last_end:
+                merged[-1] = (last_start, max(last_end, end))
+            else:
+                merged.append((start, end))
+
+        covered = sum(end - start for start, end in merged)
+        return float(np.clip(covered / span, 0.0, 1.0))
+
+    def _build_nnls_templates(
+        self,
+        candidates: List[dict],
+        peaks: List[Tuple[int, float]],
+    ) -> np.ndarray:
+        """
+        Build NNLS template matrix from candidate element data.
+
+        Each column is an element's expected peak contribution based on
+        Gaussian kernels at instrument resolution centered on each
+        theoretical line position.  Three fixes over the original:
+
+        1. **Per-peak sigma** — ``sigma_i = lambda_i / RP / 2.355`` varies
+           across the spectral window instead of using the mean wavelength.
+        2. **Per-element shift** — median wavelength shift from the matching
+           phase is applied to each line position so the template aligns
+           with the actual peak locations.
+        3. **3-sigma proximity filter** — only peaks within 3 sigma of a
+           line receive its contribution.  At 3 sigma the Gaussian is
+           ``exp(-4.5) ~ 0.011``, so excluded contributions are < 1%.
+
+        Parameters
+        ----------
+        candidates : List[dict]
+            Candidate dicts with ``fused_lines``, ``matched_mask``, and
+            ``wavelength_shifts`` keys.
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+
+        Returns
+        -------
+        np.ndarray
+            Matrix A of shape (n_peaks, n_candidates).
+        """
+        n_peaks = len(peaks)
+        n_cands = len(candidates)
+        A = np.zeros((n_peaks, n_cands))
+        peak_wls = np.array([p[1] for p in peaks])
+
+        # Per-peak sigma (FWHM = lambda/R, sigma = FWHM/2.355)
+        peak_sigmas = peak_wls / self.resolving_power / 2.355
+
+        for j, cand in enumerate(candidates):
+            # Per-element global shift from matching phase
+            mm = cand["matched_mask"]
+            ws = cand["wavelength_shifts"]
+            shifts = ws[mm] if np.any(mm) else np.array([0.0])
+            shift = float(np.median(shifts))
+
+            for line in cand["fused_lines"]:
+                wl_shifted = line["wavelength_nm"] + shift
+                eps = line["avg_emissivity"]
+
+                # 3-sigma proximity filter: only contribute to nearby peaks
+                diffs = np.abs(peak_wls - wl_shifted)
+                relevant = diffs < (3.0 * peak_sigmas)
+                if np.any(relevant):
+                    A[relevant, j] += eps * np.exp(
+                        -0.5
+                        * ((peak_wls[relevant] - wl_shifted) / peak_sigmas[relevant]) ** 2
+                    )
+        return A
+
+    def _compute_nnls_attribution(
+        self,
+        A: np.ndarray,
+        peak_intensities: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Solve NNLS and return per-element attribution metrics.
+
+        Returns three arrays:
+
+        * **P_mix** — leave-one-out partial-R^2 (absolute).
+        * **P_local** — local explanation score: what fraction of the
+          observed intensity at claimed peaks is explained by this
+          element's NNLS contribution?  FP elements that merely ride on
+          a dominant element's peaks get P_local ~ 0.
+        * **c** — raw NNLS coefficients (useful for diagnostics).
+
+        Parameters
+        ----------
+        A : np.ndarray
+            Template matrix (n_peaks, n_candidates).
+        peak_intensities : np.ndarray
+            Observed peak intensities (n_peaks,).
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+            (P_mix, P_local, c) arrays of length n_candidates.
+        """
+        n_cands = A.shape[1]
+        if n_cands == 0 or np.all(A == 0):
+            return np.ones(n_cands), np.ones(n_cands), np.zeros(n_cands)
+
+        c, _ = nnls(A, peak_intensities)
+        total_rss = float(np.sum((peak_intensities - A @ c) ** 2))
+
+        # Total signal energy (denominator for partial R^2)
+        total_energy = float(np.sum(peak_intensities ** 2))
+        if total_energy == 0:
+            return np.ones(n_cands), np.ones(n_cands), c
+
+        # ── P_mix: leave-one-out partial R^2 ──
+        P_mix = np.zeros(n_cands)
+        for j in range(n_cands):
+            A_reduced = np.delete(A, j, axis=1)
+            if A_reduced.shape[1] == 0:
+                P_mix[j] = 1.0
+                continue
+            c_reduced, _ = nnls(A_reduced, peak_intensities)
+            rss_without = float(
+                np.sum((peak_intensities - A_reduced @ c_reduced) ** 2)
+            )
+            P_mix[j] = (rss_without - total_rss) / total_energy
+
+        # ── P_local: local explanation score ──
+        # For each element, compute what fraction of the observed
+        # intensity at its claimed peaks is explained by its own
+        # NNLS contribution.  This discriminates FP elements
+        # (tiny coefficient on dominant-element peaks) from real
+        # minor elements (significant coefficient on their own peaks).
+        P_local = np.zeros(n_cands)
+        for j in range(n_cands):
+            # Peaks where element j has meaningful template presence
+            claimed = A[:, j] > 1e-6
+            if not np.any(claimed):
+                P_local[j] = 0.0
+                continue
+            obs_at_claimed = np.sum(peak_intensities[claimed])
+            if obs_at_claimed <= 0:
+                P_local[j] = 0.0
+                continue
+            elem_contribution = np.sum(A[claimed, j] * c[j])
+            P_local[j] = float(np.clip(elem_contribution / obs_at_claimed, 0.0, 1.0))
+
+        return P_mix, P_local, c
+
+    @staticmethod
+    def _compute_ratio_consistency(
+        fused_lines: List[dict],
+        matched_mask: np.ndarray,
+        matched_peak_idx: np.ndarray,
+        intensity: np.ndarray,
+        peaks: List[Tuple[int, float]],
+    ) -> float:
+        """
+        Intensity-ratio consistency between matched lines.
+
+        For real elements, the pairwise log-ratios of observed peak
+        intensities should correlate with theoretical emissivity
+        log-ratios (both follow the same Boltzmann distribution).
+        Coincidental matches hit peaks belonging to a *different*
+        element, so the ratios are uncorrelated.
+
+        Parameters
+        ----------
+        fused_lines : List[dict]
+            Fused lines with 'avg_emissivity' keys.
+        matched_mask : np.ndarray
+            Boolean mask of matched lines.
+        matched_peak_idx : np.ndarray
+            Peak indices for matched lines.
+        intensity : np.ndarray
+            Experimental intensity array.
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+
+        Returns
+        -------
+        float
+            R_rat in [0, 1].  1.0 = perfect ratio match, 0.0 = anti-
+            correlated.  Returns 0.5 (neutral) with < 3 matched lines.
+        """
+        matched_indices = np.where(matched_mask)[0]
+        if len(matched_indices) < 3:
+            return 0.5  # Too few pairs for meaningful correlation
+
+        # Apply self-absorption damping to resonance lines so theoretical
+        # log-ratios better match observed ratios for strong transitions.
+        SA_DAMPING = 0.3
+        raw_emiss = np.array([fused_lines[i]["avg_emissivity"]
+                              for i in matched_indices])
+        damping = np.array([
+            SA_DAMPING if getattr(fused_lines[i]["transition"], "E_i_ev", 1.0) < 0.1
+            else 1.0
+            for i in matched_indices
+        ])
+        emissivities = raw_emiss * damping
+        obs_intensities = np.array([intensity[peaks[matched_peak_idx[i]][0]]
+                                    for i in matched_indices])
+
+        # Guard against zeros
+        valid = (emissivities > 0) & (obs_intensities > 0)
+        if np.sum(valid) < 3:
+            return 0.5
+
+        log_th = np.log(emissivities[valid])
+        log_obs = np.log(obs_intensities[valid])
+
+        # Build all pairwise log-ratio differences
+        n = len(log_th)
+        th_ratios = []
+        exp_ratios = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                th_ratios.append(log_th[i] - log_th[j])
+                exp_ratios.append(log_obs[i] - log_obs[j])
+
+        if len(th_ratios) < 3:
+            return 0.5
+
+        th_arr = np.array(th_ratios)
+        exp_arr = np.array(exp_ratios)
+
+        # Pearson correlation of log-ratios
+        corr = np.corrcoef(th_arr, exp_arr)[0, 1]
+        if np.isnan(corr):
+            return 0.5
+
+        # Map [-1, 1] → [0, 1]; negative correlation is worse than zero
+        return float(max(0.0, (corr + 1.0) / 2.0))
+
+    def _compute_random_match_significance(
+        self,
+        peaks: List[Tuple[int, float]],
+        wavelength: np.ndarray,
+        N_expected: int,
+        N_matched: int,
+    ) -> Tuple[float, float, float, float]:
+        """
+        Compute chance-coincidence significance from a binomial tail test.
+
+        Uses per-element theoretical line occupancy as the chance probability:
+        p_chance = fraction of spectral span occupied by N_expected
+        above-threshold theoretical line windows (not experimental peaks).
+
+        Parameters
+        ----------
+        peaks : List[Tuple[int, float]]
+            Experimental peaks as (index, wavelength) tuples.
+        wavelength : np.ndarray
+            Full spectral wavelength axis in nm.
+        N_expected : int
+            Number of above-threshold theoretical lines.
+        N_matched : int
+            Number of above-threshold lines matched to peaks.
+
+        Returns
+        -------
+        Tuple[float, float, float, float]
+            (P_sig, fill_factor, p_chance, p_tail), where:
+            - fill_factor is experimental peak fill factor (for metadata)
+            - p_chance is theoretical-window occupancy
+            - p_tail = P(X >= N_matched | n=N_expected, p=p_chance)
+            - P_sig = 1 - p_tail
+        """
+        fill_factor = self._compute_fill_factor(peaks, wavelength)
+
+        # Theoretical-window occupancy: per-element chance probability
+        wl_min = float(np.min(wavelength))
+        wl_max = float(np.max(wavelength))
+        span = wl_max - wl_min
+        if span <= 0 or N_expected <= 0:
+            p_chance = float(np.clip(fill_factor, 1e-6, 1.0 - 1e-6))
+        else:
+            mean_wl = 0.5 * (wl_min + wl_max)
+            line_window = mean_wl / self.resolving_power  # delta_lambda
+            # Each line occupies ±line_window around its center
+            theoretical_coverage = N_expected * 2 * line_window / span
+            p_chance = float(np.clip(theoretical_coverage, 1e-6, 1.0 - 1e-6))
+
+        if N_expected <= 0 or N_matched <= 0:
+            return 1.0, fill_factor, p_chance, 1.0
+
+        # Binomial test: "Given N_expected opportunities, what's the
+        # probability of N_matched or more matches by chance?"
+        n_trials = N_expected
+        n_success = N_matched
+
+        if n_success > n_trials:
+            # More matches than theoretical lines — extremely unlikely
+            # by chance.  Can happen with fused-line bookkeeping; treat
+            # as maximally significant.
+            return 1.0, fill_factor, p_chance, 0.0
+
+        p_tail = float(binom.sf(n_success - 1, n_trials, p_chance))
+        P_sig = float(np.clip(1.0 - p_tail, 0.0, 1.0))
+
+        return P_sig, fill_factor, p_chance, p_tail
 
     def _decide(
         self,
         k_sim: float,
         k_rate: float,
         k_shift: float,
-        N_X: int,
+        N_expected: int,
         intensity: np.ndarray,
         peaks: List[Tuple[int, float]],
+        element: str = "",
+        P_maj: float = 0.5,
+        P_sig: float = 1.0,
+        N_matched: int = 0,
+        P_cov: float = 1.0,
     ) -> Tuple[float, float]:
         """
         Compute detection score k_det and confidence level CL.
@@ -708,52 +1354,63 @@ class ALIASIdentifier:
         Parameters
         ----------
         k_sim : float
-            Similarity score
+            Similarity score (matched-only cosine similarity)
         k_rate : float
-            Detection rate score
+            Detection rate score (emissivity-weighted)
         k_shift : float
             Wavelength shift score
-        N_X : int
-            Number of matched lines above threshold
+        N_expected : int
+            Number of above-threshold theoretical lines (for gates/penalties)
         intensity : np.ndarray
             Experimental intensity array
         peaks : List[Tuple[int, float]]
             Experimental peaks
+        element : str
+            Element symbol (for crustal abundance weighting)
+        P_maj : float
+            Major-line coverage factor (0.5–1.0), computed from top-k
+            strongest theoretical lines
+        P_sig : float
+            Statistical significance factor against random coincidence
+        N_matched : int
+            Number of matched above-threshold lines (used in k_det blend)
+        P_cov : float
+            Emissivity-weighted coverage penalty (0–1)
 
         Returns
         -------
         Tuple[float, float]
             (k_det, CL) detection score and confidence level
         """
-        # k_det formula
-        if N_X > 0:
-            k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
-        elif k_rate > 0:
-            # Partial credit: some lines matched but below emissivity threshold
-            k_det = k_rate * 0.3
-        else:
-            k_det = 0.0
+        # k_det formula — uses N_matched (paper: N_X = matched count)
+        # for the blend weighting.  Single-line elements (N_X=1) naturally
+        # reduce to k_rate × k_shift via the blend formula.
+        N_X = max(N_matched, 1)
+        k_det = k_rate * (
+            (1.0 / N_X) * k_shift
+            + ((N_X - 1.0) / N_X) * k_sim
+        )
 
-        # P_maj: majority of strong lines matched
-        if k_rate > 0.5:
-            P_maj = 1.0
-        else:
-            P_maj = k_rate
-
-        # P_SNR: approximate SNR quality
+        # P_SNR: erf-based SNR quality factor (paper formula).
+        # z = (I_median - σ_noise) / (σ_noise × √2)
+        # P_SNR = (1 + erf(z)) / 2
         if len(peaks) > 0:
-            peak_intensities = [intensity[p[0]] for p in peaks]
-            median_peak = np.median(peak_intensities)
+            peak_intensities_local = [intensity[p[0]] for p in peaks]
+            median_peak = np.median(peak_intensities_local)
             noise_estimate = np.median(np.abs(intensity - np.median(intensity))) * 1.4826
-            snr_estimate = median_peak / max(noise_estimate, 1e-10)
-            P_SNR = min(1.0, snr_estimate / 10.0)
+            noise_estimate = max(noise_estimate, 1e-10)
+            z = (median_peak - noise_estimate) / (noise_estimate * math.sqrt(2))
+            P_SNR = 0.5 * (1.0 + float(erf(z)))
         else:
             P_SNR = 0.5
 
-        # P_ab: abundance prior (placeholder)
-        P_ab = 1.0
+        # P_ab — crustal abundance prior
+        P_ab = self._compute_P_ab(element)
 
-        # Confidence level: CL = k_det × P_SNR × P_maj × P_ab (paper formula)
+        # Confidence level — paper formula (Noel et al. 2025):
+        # CL = k_det × P_SNR × P_maj × P_ab
+        # P_cov, N_penalty, P_sig are stored in metadata for diagnostics
+        # but no longer multiply into CL.  NNLS P_mix is applied later.
         CL = k_det * P_SNR * P_maj * P_ab
 
         return k_det, CL

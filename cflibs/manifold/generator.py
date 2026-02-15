@@ -48,8 +48,7 @@ from cflibs.plasma.partition import polynomial_partition_function_jax
 
 # Conditional imports for JAX physics functions
 if HAS_JAX:
-    from cflibs.radiation.profiles import doppler_sigma_jax, voigt_profile_jax
-    from cflibs.radiation.stark import stark_hwhm_jax, estimate_stark_parameter_jax
+    pass
 
 logger = get_logger("manifold.generator")
 

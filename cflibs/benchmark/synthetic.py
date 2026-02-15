@@ -18,8 +18,8 @@ References
 - Ciucci et al. (1999): Forward model for LIBS spectra
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import numpy as np
 
@@ -31,7 +31,6 @@ from cflibs.benchmark.dataset import (
     SampleMetadata,
     SampleType,
     MatrixType,
-    DataSplit,
 )
 
 logger = get_logger("benchmark.synthetic")
@@ -471,7 +470,7 @@ class SyntheticBenchmarkGenerator:
         """Generate simplified synthetic spectrum without atomic database."""
         from cflibs.core.constants import KB_EV, EV_TO_K
 
-        T_eV = temperature_K / EV_TO_K
+        temperature_K / EV_TO_K
 
         # Initialize with low background
         spectrum = np.ones(len(self._wavelength_grid)) * 10.0
@@ -550,7 +549,6 @@ class SyntheticBenchmarkGenerator:
 
         # Voigt-like profile parameters
         gaussian_width = 0.03  # nm (Doppler broadening)
-        lorentzian_width = 0.02  # nm (Stark broadening)
 
         for element, conc in composition.items():
             if element not in element_lines:

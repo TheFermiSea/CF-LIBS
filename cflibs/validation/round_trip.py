@@ -192,7 +192,7 @@ class GoldenSpectrumGenerator:
             Synthetic spectrum with ground truth parameters
         """
         rng = np.random.default_rng(seed)
-        T_eV = temperature_K / EV_TO_K
+        temperature_K / EV_TO_K
 
         # Normalize concentrations to sum to 1.0
         total_c = sum(concentrations.values())

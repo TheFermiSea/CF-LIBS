@@ -15,10 +15,10 @@ pytestmark = pytest.mark.requires_jax
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")
-import jax.numpy as jnp
+import jax.numpy as jnp  # noqa: E402
 
 
-from cflibs.inversion.joint_optimizer import (
+from cflibs.inversion.joint_optimizer import (  # noqa: E402
     JointOptimizer,
     JointOptimizationResult,
     MultiStartJointOptimizer,

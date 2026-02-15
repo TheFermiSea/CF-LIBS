@@ -18,10 +18,10 @@ pytestmark = pytest.mark.requires_jax
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")
-import jax.numpy as jnp
+import jax.numpy as jnp  # noqa: E402
 h5py = pytest.importorskip("h5py")
 
-from cflibs.inversion.hybrid import (
+from cflibs.inversion.hybrid import (  # noqa: E402
     HybridInverter,
     HybridInversionResult,
     SpectralFitter,
@@ -42,7 +42,6 @@ def mock_manifold_file():
 
         # Create synthetic spectra at different conditions
         n_spectra = 20
-        n_elements = 2
         elements = ["Fe", "Cu"]
 
         spectra = []

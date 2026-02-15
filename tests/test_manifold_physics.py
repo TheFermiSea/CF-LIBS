@@ -14,14 +14,11 @@ pytestmark = pytest.mark.requires_jax
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")
-import jax.numpy as jnp
+import jax.numpy as jnp  # noqa: E402
 
-from cflibs.core.constants import EV_TO_J, C_LIGHT
-from cflibs.radiation.profiles import (
+from cflibs.radiation.profiles import (  # noqa: E402
     doppler_width,
     voigt_profile,
-    gaussian_profile,
-    lorentzian_profile,
 )
 
 # Import JAX versions

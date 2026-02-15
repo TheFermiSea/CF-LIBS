@@ -234,7 +234,7 @@ def mock_echellogram_image():
 # Phase 2c Fixtures - Quality, Self-Absorption, Line Selection
 # ==============================================================================
 
-from cflibs.inversion.boltzmann import LineObservation, BoltzmannFitResult
+from cflibs.inversion.boltzmann import LineObservation, BoltzmannFitResult  # noqa: E402
 
 
 @pytest.fixture

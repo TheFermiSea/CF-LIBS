@@ -13,7 +13,6 @@ import pytest
 from cflibs.inversion.boltzmann import (
     LineObservation,
     BoltzmannPlotFitter,
-    BoltzmannFitResult,
     FitMethod,
 )
 from cflibs.core.constants import KB_EV

@@ -53,6 +53,9 @@ class CombIdentifier:
         Maximum width as fraction of resolution element (default: 1.0)
     elements : List[str], optional
         List of elements to search for (default: None means all in database)
+    resolving_power : float, optional
+        Instrument resolving power (λ/Δλ). If set, tooth width is derived from
+        center wavelength / resolving_power instead of fixed 0.1 nm (default: None).
 
     Attributes
     ----------
@@ -70,6 +73,8 @@ class CombIdentifier:
         Minimum tooth width in points
     max_width_factor : float
         Maximum width scaling factor
+    resolving_power : Optional[float]
+        Instrument resolving power (None = use fixed 0.1 nm width).
     elements : Optional[List[str]]
         Elements to search (None = all)
 
@@ -82,6 +87,7 @@ class CombIdentifier:
     def __init__(
         self,
         atomic_db: AtomicDatabase,
+        resolving_power: Optional[float] = None,
         baseline_window_nm: float = 10.0,
         threshold_percentile: float = 85.0,
         min_correlation: float = 0.10,
@@ -94,6 +100,7 @@ class CombIdentifier:
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
+        self.resolving_power = resolving_power
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
         self.min_correlation = min_correlation  # fingerprint detection threshold
@@ -440,8 +447,11 @@ class CombIdentifier:
 
         # Estimate resolution element from wavelength spacing
         dwl = np.median(np.diff(wavelength))
-        # Assume typical LIBS resolution of ~0.1 nm
-        resolution_nm = 0.1
+        # Derive resolution from resolving power if available, else fallback
+        if self.resolving_power:
+            resolution_nm = center_nm / self.resolving_power
+        else:
+            resolution_nm = 0.1
         max_width_pts = int((resolution_nm * self.max_width_factor) / dwl)
         max_width_pts = max(self.min_width_pts, max_width_pts)
 
@@ -573,8 +583,11 @@ class CombIdentifier:
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-        # Hybrid: mean(active correlations) × coverage fraction
-        mean_active_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
+        # Hybrid: mean of active correlations × sqrt coverage penalty.
+        # sqrt softens the linear coverage penalty to avoid crushing
+        # elements with many theoretical lines but few visible peaks
+        # (common at low RP where lines merge).
+        mean_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
         coverage = len(active_teeth) / len(teeth)
-        fingerprint = mean_active_corr * coverage
+        fingerprint = mean_corr * np.sqrt(coverage)
         return fingerprint
