@@ -287,7 +287,7 @@ class TestLineSelectorSelect:
         result = selector.select(observations)
 
         # Should select at most 5 (max_lines_per_element)
-        fe_selected = [l for l in result.selected_lines if l.element == "Fe"]
+        fe_selected = [line for line in result.selected_lines if line.element == "Fe"]
         assert len(fe_selected) <= 5
 
     def test_rejection_reasons_tracked(self, selector):
@@ -662,7 +662,7 @@ class TestMultiElementSelection:
         assert result.n_elements == 2
 
         # Both elements should have lines selected
-        selected_elements = {l.element for l in result.selected_lines}
+        selected_elements = {line.element for line in result.selected_lines}
         assert "Fe" in selected_elements
         assert "Cu" in selected_elements
 
@@ -805,7 +805,7 @@ class TestLineSelectorBoltzmannIntegration:
 
         # Fit with all lines (no selection)
         fitter = BoltzmannPlotFitter()
-        fit_all = fitter.fit(all_lines)
+        fitter.fit(all_lines)
 
         # Fit with auto-selection (should exclude some bad lines via outlier rejection)
         selector = LineSelector(min_snr=10.0, min_lines_per_element=3)
@@ -1004,7 +1004,7 @@ class TestCrowdedSpectraEdgeCases:
 
         # The isolated line should definitely be selected
         isolated_line = next(
-            (l for l in result.selected_lines if l.wavelength_nm == 500.0), None
+            (line for line in result.selected_lines if line.wavelength_nm == 500.0), None
         )
         assert isolated_line is not None
 
@@ -1053,7 +1053,7 @@ class TestCrowdedSpectraEdgeCases:
         result = selector.select(observations)
 
         # Both elements should be represented
-        selected_elements = {l.element for l in result.selected_lines}
+        {line.element for line in result.selected_lines}
         # At least some should be selected despite crowding
         assert len(result.selected_lines) > 0
 

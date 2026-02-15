@@ -22,7 +22,6 @@ from cflibs.inversion.transfer import (
     adapt_domains,
     # Calibration transfer
     CalibrationTransfer,
-    CalibrationMethod,
     TransferResult,
     transfer_calibration,
     # Fine-tuning

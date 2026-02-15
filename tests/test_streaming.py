@@ -12,14 +12,13 @@ import pytest
 import numpy as np
 import threading
 import time
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from cflibs.inversion.streaming import (
     AnalysisMode,
     StreamingConfig,
     SpectrumPacket,
     StreamingResult,
-    LatencyStats,
     SpectrumBuffer,
     LatencyMonitor,
     FastAnalyzer,

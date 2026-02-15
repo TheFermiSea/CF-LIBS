@@ -72,7 +72,7 @@ def test_correlate_tooth_with_peak(atomic_db):
     # Should have high correlation
     assert tooth["center_nm"] == center_nm
     assert tooth["best_correlation"] > 0.5
-    assert tooth["active"] == True  # Use == instead of 'is' for numpy bool
+    assert tooth["active"]  # Use == instead of 'is' for numpy bool
     assert abs(tooth["best_shift"]) <= identifier.max_shift_pts
 
 

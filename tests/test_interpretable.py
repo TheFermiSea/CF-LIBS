@@ -322,7 +322,7 @@ class TestSpectralExplainer:
 
     def test_explain_lime(self, synthetic_spectrum, simple_model):
         """Test LIME explanation."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import SpectralExplainer
 
@@ -474,7 +474,7 @@ class TestInterpretableModel:
 
     def test_model_creation(self, interpretable_db):
         """Test interpretable model creation."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 
@@ -490,7 +490,7 @@ class TestInterpretableModel:
 
     def test_invalid_model_type(self, interpretable_db):
         """Test that invalid model type raises error."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 
@@ -503,7 +503,7 @@ class TestInterpretableModel:
 
     def test_fit_and_predict(self, interpretable_db, synthetic_spectrum):
         """Test model fitting and prediction."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 
@@ -532,7 +532,7 @@ class TestInterpretableModel:
 
     def test_predict_explain(self, interpretable_db, synthetic_spectrum):
         """Test prediction with explanations."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 
@@ -561,7 +561,7 @@ class TestInterpretableModel:
 
     def test_feature_importance_table(self, interpretable_db, synthetic_spectrum):
         """Test feature importance table generation."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 
@@ -586,7 +586,7 @@ class TestInterpretableModel:
 
     def test_different_model_types(self, interpretable_db, synthetic_spectrum):
         """Test different model types."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
 
         from cflibs.inversion.interpretable import InterpretableModel
 

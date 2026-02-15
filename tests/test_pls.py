@@ -14,10 +14,7 @@ import numpy as np
 import pytest
 
 from cflibs.inversion.pls import (
-    PLSAlgorithm,
     PreprocessingMethod,
-    PLSComponents,
-    PLSResult,
     CrossValidationResult,
     PLSRegression,
     PLSCrossValidator,

@@ -34,7 +34,7 @@ class TestEstimateNoise:
     def test_sigma_clipped_lower_than_raw(self):
         rng = np.random.default_rng(42)
         n = 5000
-        wavelength = np.linspace(200, 400, n)
+        np.linspace(200, 400, n)
         true_noise = 10.0
         baseline = np.full(n, 500.0)
         noise = rng.normal(0, true_noise, n)
@@ -69,7 +69,7 @@ class TestDetectPeaks:
 
         # Add peaks at known locations with SNR ~10
         peak_locations = [300, 600, 900, 1200, 1500]
-        peak_wavelengths = [wavelength[i] for i in peak_locations]
+        [wavelength[i] for i in peak_locations]
         signal = np.zeros(2000)
         for loc in peak_locations:
             signal[loc - 2 : loc + 3] = 100.0  # SNR = 100/10 = 10

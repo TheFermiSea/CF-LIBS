@@ -65,18 +65,18 @@ logger = get_logger("inversion.transfer")
 
 # Check for optional dependencies
 try:
-    import jax
+    import jax  # noqa: F401
     import jax.numpy as jnp
-    from jax import jit, grad
+    from jax import jit, grad  # noqa: F401
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
     jnp = np  # type: ignore
 
 try:
-    from scipy import linalg
+    from scipy import linalg  # noqa: F401
     from scipy.optimize import minimize
-    from scipy.interpolate import interp1d
+    from scipy.interpolate import interp1d  # noqa: F401
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
@@ -1137,7 +1137,6 @@ class FineTuner:
         verbose: bool,
     ) -> FineTuneResult:
         """JAX-based gradient descent fine-tuning."""
-        import jax
         import jax.numpy as jnp
         from jax import value_and_grad
 
@@ -1233,8 +1232,8 @@ class FineTuner:
 
         # Simple ridge regression as fallback
         # y = X @ W + b
-        n_features = X_train.shape[1]
-        n_outputs = y_train.shape[1]
+        X_train.shape[1]
+        y_train.shape[1]
 
         # Add bias column
         X_aug = np.hstack([X_train, np.ones((X_train.shape[0], 1))])

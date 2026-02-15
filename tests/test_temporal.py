@@ -10,7 +10,7 @@ This module tests:
 
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from cflibs.inversion.temporal import (
     PlasmaPhase,
@@ -20,7 +20,6 @@ from cflibs.inversion.temporal import (
     PlasmaEvolutionProfile,
     GateOptimizationResult,
     TemporalSelfAbsorptionResult,
-    TimeResolvedCFLIBSResult,
     PlasmaEvolutionModel,
     GateTimingOptimizer,
     TemporalSelfAbsorptionCorrector,
@@ -764,7 +763,7 @@ class TestTemporalIntegration:
             tau_ne_ns=500.0,
         )
 
-        corrector = TemporalSelfAbsorptionCorrector(model)
+        TemporalSelfAbsorptionCorrector(model)
 
         # Check that corrector uses model's T and n_e
         time = 500.0

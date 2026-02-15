@@ -9,7 +9,6 @@ Tests cover:
 - Train/test splits and k-fold CV
 """
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -32,7 +31,6 @@ from cflibs.benchmark.metrics import (
     ElementMetrics,
     MetricType,
     calculate_figure_of_merit,
-    create_comparison_table,
 )
 from cflibs.benchmark.synthetic import (
     SyntheticBenchmarkGenerator,
@@ -233,7 +231,7 @@ class TestBenchmarkSpectrum:
 
         # This should log a warning (composition sums to 0.5)
         with caplog.at_level(logging.WARNING):
-            spec = BenchmarkSpectrum(
+            BenchmarkSpectrum(
                 spectrum_id="test",
                 wavelength_nm=wavelength,
                 intensity=intensity,

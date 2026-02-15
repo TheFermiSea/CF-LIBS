@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from cflibs.inversion.outliers import (
-    OutlierMethod,
     SAMResult,
     SpectralAngleMapper,
     sam_distance,
@@ -603,7 +602,7 @@ class TestMADChannelMode:
         detector = MADOutlierDetector(mode="channel", threshold=3.0)
         result = detector.detect_outliers(spectra)
 
-        assert result.outlier_mask[3, 25] == True
+        assert result.outlier_mask[3, 25]
         assert result.n_outliers >= 1
 
     def test_channel_mode_shape(self):
@@ -792,8 +791,8 @@ class TestMADRealisticScenarios:
         cleaned, result = mad_clean_channels(spectra, threshold=3.0)
 
         # Both spikes should be detected
-        assert result.outlier_mask[2, 50] == True
-        assert result.outlier_mask[7, 30] == True
+        assert result.outlier_mask[2, 50]
+        assert result.outlier_mask[7, 30]
 
         # Cleaned values should be close to median
         assert cleaned[2, 50] < 1000

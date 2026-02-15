@@ -25,8 +25,8 @@ pytestmark = [
 
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")
-import jax.numpy as jnp
-import jax.random as random
+import jax.numpy as jnp  # noqa: E402
+import jax.random as random  # noqa: E402
 
 
 class TestPhysicsConstraintConfig:
@@ -331,7 +331,7 @@ class TestPhysicsConstraintLayer:
 
     def test_initialization(self):
         """Test physics constraint layer initialization."""
-        from cflibs.inversion.pinn import PhysicsConstraintLayer, PhysicsConstraintConfig
+        from cflibs.inversion.pinn import PhysicsConstraintLayer
 
         layer = PhysicsConstraintLayer(
             n_elements=3,
@@ -507,7 +507,6 @@ class TestPINNEncoder:
     def test_encoder_differentiable(self):
         """Test that encoder is differentiable."""
         from cflibs.inversion.pinn import PINNEncoder
-        from jax import value_and_grad
 
         key = random.PRNGKey(0)
         encoder = PINNEncoder(

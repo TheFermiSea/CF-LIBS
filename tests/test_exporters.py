@@ -378,7 +378,7 @@ class TestHDF5Exporter:
 
             assert "summary" in f
             assert f["summary"].attrs["temperature_K"] == 10000.0
-            assert f["summary"].attrs["converged"] == True
+            assert f["summary"].attrs["converged"]
 
             assert "concentrations" in f
             elements = [e.decode() for e in f["concentrations/elements"][:]]
@@ -446,7 +446,6 @@ class TestHDF5Exporter:
 
     def test_no_compression(self, mcmc_result, temp_path):
         """Test HDF5 export without compression."""
-        import h5py
 
         temp_path = temp_path + ".h5"
         exporter = HDF5Exporter(compression=None)
@@ -554,7 +553,7 @@ class TestJSONExporter:
 
         assert data["data"]["int64"] == 42
         assert data["data"]["float64"] == pytest.approx(3.14)
-        assert data["data"]["bool"] == True
+        assert data["data"]["bool"]
 
     def test_nan_handling(self, temp_path):
         """Test NaN value handling."""
@@ -627,7 +626,7 @@ class TestCreateExporter:
         exporter = create_exporter("csv", delimiter=";", include_header=False)
         assert isinstance(exporter, CSVExporter)
         assert exporter.delimiter == ";"
-        assert exporter.include_header == False
+        assert not exporter.include_header
 
     def test_create_hdf5_exporter(self):
         """Test creating HDF5Exporter via factory."""
@@ -659,7 +658,7 @@ class TestCreateExporter:
         exporter = create_exporter("json", indent=4, sort_keys=False)
         assert isinstance(exporter, JSONExporter)
         assert exporter.indent == 4
-        assert exporter.sort_keys == False
+        assert not exporter.sort_keys
 
     def test_case_insensitive(self):
         """Test that format name is case-insensitive."""

@@ -771,7 +771,6 @@ def test_P_SNR_erf_formula(atomic_db):
     rng = np.random.default_rng(42)
     intensity_low = 100.0 + rng.normal(0, 50, 500)
     intensity_low[100] = 120.0  # barely above noise
-    peaks_low = [(100, 372.0)]
 
     from cflibs.atomic.structures import Transition
     fused = [

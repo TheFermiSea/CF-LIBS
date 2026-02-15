@@ -31,11 +31,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 import json
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
+
+# Import result types for ExportData alias (lazy to avoid circular imports)
+from cflibs.inversion.solver import CFLIBSResult
+from cflibs.inversion.bayesian import MCMCResult, NestedSamplingResult
 
 logger = get_logger("io.exporters")
 
@@ -48,7 +52,7 @@ except ImportError:
 
 # --- Type aliases ---
 PathLike = Union[str, Path]
-ExportData = Union["CFLIBSResult", "MCMCResult", "NestedSamplingResult", Dict[str, Any]]
+ExportData = Union[CFLIBSResult, MCMCResult, NestedSamplingResult, Dict[str, Any]]
 
 
 @dataclass
@@ -308,7 +312,7 @@ class CSVExporter(Exporter):
 
         # Add metadata as comments
         if self.include_metadata:
-            lines.append(f"# CF-LIBS Export")
+            lines.append("# CF-LIBS Export")
             lines.append(f"# Timestamp: {export_meta.timestamp}")
             lines.append(f"# Version: {export_meta.version}")
             lines.append(f"# Source: {export_meta.source_type}")

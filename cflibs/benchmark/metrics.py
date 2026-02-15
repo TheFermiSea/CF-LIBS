@@ -22,7 +22,7 @@ References
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
@@ -356,7 +356,7 @@ class BenchmarkMetrics:
                 n_spectra = pred_len
             elif pred_len != n_spectra:
                 raise ValueError(
-                    f"Inconsistent array lengths across elements"
+                    "Inconsistent array lengths across elements"
                 )
 
         # Calculate per-element metrics

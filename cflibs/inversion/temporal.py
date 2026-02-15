@@ -53,7 +53,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple, Callable
 import numpy as np
 
-from cflibs.core.constants import KB_EV, EV_TO_K
+from cflibs.core.constants import KB_EV
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
 
