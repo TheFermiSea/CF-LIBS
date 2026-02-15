@@ -1511,6 +1511,8 @@ class InterpretableModel:
             "-" * 60,
         ]
 
+        if self.feature_names_ is None:
+            raise ValueError("feature_names_ not set")
         for rank, idx in enumerate(indices[:20], 1):
             name = self.feature_names_[idx]
             importance = self.feature_importances_[idx]

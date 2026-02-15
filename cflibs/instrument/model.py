@@ -3,7 +3,7 @@ Instrument model for spectrometer response.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 import numpy as np
 from pathlib import Path
 
@@ -29,7 +29,7 @@ class InstrumentModel:
 
     resolution_fwhm_nm: float
     response_curve: Optional[np.ndarray] = None
-    wavelength_calibration: Optional[callable] = None
+    wavelength_calibration: Optional[Callable[..., float]] = None
 
     @property
     def resolution_sigma_nm(self) -> float:

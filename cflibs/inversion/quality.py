@@ -5,7 +5,7 @@ Provides objective measures to assess analysis quality and flag unreliable resul
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import DefaultDict, Dict, List, Optional, Tuple
 import numpy as np
 from collections import defaultdict
 
@@ -316,7 +316,9 @@ class QualityAssessor:
 
 
         # Group by element and ionization stage
-        obs_by_element_stage = defaultdict(lambda: defaultdict(list))
+        obs_by_element_stage: DefaultDict[str, DefaultDict[int, List[LineObservation]]] = (
+            defaultdict(lambda: defaultdict(list))
+        )
         for obs in observations:
             obs_by_element_stage[obs.element][obs.ionization_stage].append(obs)
 

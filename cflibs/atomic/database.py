@@ -5,7 +5,7 @@ Atomic database interface for loading and querying atomic data.
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 import pandas as pd
 
 from cflibs.atomic.structures import Transition, EnergyLevel, SpeciesPhysics, PartitionFunction
@@ -28,6 +28,8 @@ class AtomicDatabase(AtomicDataSource):
     - `partition_functions`: Partition function coefficients
     """
 
+    db_path: Union[str, Path]
+
     def __init__(self, db_path: str):
         """
         Initialize database connection and verify schema.
@@ -37,24 +39,24 @@ class AtomicDatabase(AtomicDataSource):
         db_path : str
             Path to SQLite database file
         """
-        db_path = Path(db_path)
-        if not db_path.exists():
-            raise FileNotFoundError(f"Atomic database not found: {db_path}")
+        path = Path(db_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Atomic database not found: {path}")
 
-        self.db_path = db_path
+        self.db_path = path
         # Use connection pool for better performance
         try:
-            self._pool = get_pool(str(db_path), max_connections=5)
+            self._pool = get_pool(str(path), max_connections=5)
             self._use_pool = True
         except Exception as e:
             # Fallback to direct connection if pool fails
             logger.warning(f"Failed to create connection pool, using direct connection: {e}")
-            self.conn = sqlite3.connect(str(db_path))
+            self.conn = sqlite3.connect(str(path))
             self._use_pool = False
 
         # Verify and migrate schema if needed
         self._check_and_migrate_schema()
-        logger.info(f"Connected to atomic database: {db_path}")
+        logger.info(f"Connected to atomic database: {path}")
 
     @contextmanager
     def _get_connection(self):
@@ -287,7 +289,7 @@ class AtomicDatabase(AtomicDataSource):
             FROM lines
             WHERE element = ?
         """
-        params = [element]
+        params: List[Any] = [element]
 
         if ionization_stage is not None:
             query += " AND sp_num = ?"
@@ -584,7 +586,7 @@ class AtomicDatabase(AtomicDataSource):
         query = "SELECT DISTINCT element FROM lines ORDER BY element"
         with self._get_connection() as conn:
             df = pd.read_sql_query(query, conn)
-            return df["element"].tolist()
+            return list(df["element"].astype(str))
 
     def close(self):
         """Close database connection."""

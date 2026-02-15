@@ -2,7 +2,7 @@
 Batch processing utilities for multiple spectra.
 """
 
-from typing import List, Tuple, Optional, Dict
+from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
@@ -159,7 +159,7 @@ def compute_spectrum_grid(
 def compute_spectrum_ensemble(
     base_model: SpectrumModel,
     n_samples: int,
-    parameter_distributions: Dict[str, callable],
+    parameter_distributions: Dict[str, Callable[..., float]],
     n_workers: Optional[int] = None,
 ) -> Tuple[List[Dict[str, float]], List[Tuple[np.ndarray, np.ndarray]]]:
     """

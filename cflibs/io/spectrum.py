@@ -5,7 +5,7 @@ I/O utilities for spectra.
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 from cflibs.core.logging_config import get_logger
 
@@ -30,10 +30,10 @@ def load_spectrum(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
     intensity : array
         Intensity array
     """
-    file_path = Path(file_path)
+    path = Path(file_path)
 
-    if file_path.suffix.lower() == ".csv":
-        df = pd.read_csv(file_path, comment="#")
+    if path.suffix.lower() == ".csv":
+        df = pd.read_csv(path, comment="#")
         # Try common column names
         wl_col = None
         for col in ["wavelength", "wavelength_nm", "wl", "lambda", "lambda_nm"]:
@@ -58,18 +58,21 @@ def load_spectrum(file_path: str) -> Tuple[np.ndarray, np.ndarray]:
 
     else:
         # Try numpy loadtxt as fallback
-        data = np.loadtxt(file_path)
+        data = np.loadtxt(path)
         if data.ndim == 1:
             raise ValueError("Spectrum file must have at least 2 columns")
         wavelength = data[:, 0]
         intensity = data[:, 1]
 
-    logger.info(f"Loaded spectrum from {file_path}: {len(wavelength)} points")
+    logger.info(f"Loaded spectrum from {path}: {len(wavelength)} points")
     return wavelength, intensity
 
 
 def save_spectrum(
-    file_path: str, wavelength: np.ndarray, intensity: np.ndarray, header: str = None
+    file_path: str,
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    header: Optional[str] = None,
 ) -> None:
     """
     Save spectrum to file.
@@ -85,14 +88,14 @@ def save_spectrum(
     header : str, optional
         Header comment
     """
-    file_path = Path(file_path)
+    path = Path(file_path)
 
-    if file_path.suffix.lower() == ".csv":
+    if path.suffix.lower() == ".csv":
         if header is None:
             header = "wavelength_nm,intensity"
 
         np.savetxt(
-            file_path,
+            path,
             np.column_stack([wavelength, intensity]),
             delimiter=",",
             header=header,
@@ -100,6 +103,10 @@ def save_spectrum(
         )
     else:
         # Default to space-separated
-        np.savetxt(file_path, np.column_stack([wavelength, intensity]), header=header)
+        np.savetxt(
+            path,
+            np.column_stack([wavelength, intensity]),
+            header=header if header is not None else "",
+        )
 
-    logger.info(f"Saved spectrum to {file_path}")
+    logger.info(f"Saved spectrum to {path}")

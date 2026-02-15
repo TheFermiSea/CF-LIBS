@@ -8,7 +8,7 @@ spectra for all parameter combinations of interest.
 
 from __future__ import annotations
 
-from typing import Tuple, Optional
+from typing import Callable, Optional, Tuple
 import numpy as np
 import time
 from pathlib import Path
@@ -659,7 +659,10 @@ class ManifoldGenerator:
 
         return spectrum_accum
 
-    def generate_manifold(self, progress_callback: Optional[callable] = None) -> None:
+    def generate_manifold(
+        self,
+        progress_callback: Optional[Callable[[int, int, float], None]] = None,
+    ) -> None:
         """
         Generate the complete spectral manifold.
 

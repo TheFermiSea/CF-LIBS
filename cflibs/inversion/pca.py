@@ -708,7 +708,7 @@ class PCAPipeline:
         """
         if not self.is_fitted:
             raise RuntimeError("Must call fit() before transform()")
-
+        assert self.result_ is not None
         return self.result_.transform(X)
 
     def inverse_transform(self, scores: np.ndarray) -> np.ndarray:
@@ -732,7 +732,7 @@ class PCAPipeline:
         """
         if not self.is_fitted:
             raise RuntimeError("Must call fit() before inverse_transform()")
-
+        assert self.result_ is not None
         return self.result_.inverse_transform(scores)
 
 
