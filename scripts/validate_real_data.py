@@ -511,7 +511,10 @@ def estimate_resolving_power(
     from scipy.signal import find_peaks
     from scipy.optimize import curve_fit
 
-    norm = intensity / intensity.max()
+    max_intensity = float(np.max(intensity))
+    if max_intensity <= 0 or intensity.size == 0:
+        return 5000.0
+    norm = intensity / max_intensity
     peaks, _ = find_peaks(norm, height=0.1, prominence=0.05, distance=15)
     if len(peaks) == 0:
         return 5000.0
@@ -908,12 +911,29 @@ def report_depth_scan_robustness(
     elements: List[str],
     dataset_name: str,
     resolving_power: float = 5000.0,
-):
+) -> None:
     """
     Report per-iteration score variance for depth-scan datasets.
 
     Re-loads the raw 3D data, runs ALIAS on each iteration at the center
     position, and reports mean/std/CV% of scores per element.
+
+    Parameters
+    ----------
+    path : str
+        Path to scipp HDF5 file (3D: position × wavelength × iteration).
+    db : AtomicDatabase
+        Atomic database for ALIAS.
+    elements : List[str]
+        Element symbols to report scores for.
+    dataset_name : str
+        Display name for the dataset.
+    resolving_power : float, optional
+        Resolving power for ALIAS (default: 5000.0).
+
+    Returns
+    -------
+    None
     """
     print(f"\n  --- Depth-Scan Robustness: {dataset_name} ---")
 
@@ -1028,14 +1048,22 @@ def main():
         print(f"ERROR: Data directory not found: {data_dir}")
         sys.exit(1)
 
-    # Auto-extract zip archives if target dirs don't exist
+    # Auto-extract zip archives if target dirs don't exist (safe: no Zip Slip)
     for archive_name in ["10000ppm.zip", "210000ppm.zip"]:
         archive_path = data_dir / archive_name
         target_dir = data_dir / archive_name.replace(".zip", "")
         if archive_path.exists() and not target_dir.exists():
             print(f"Extracting {archive_name}...")
+            data_root = data_dir.resolve()
             with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(data_dir)
+                for member in zf.infolist():
+                    # Reject path traversal (Zip Slip)
+                    target = (data_dir / member.filename).resolve()
+                    try:
+                        target.relative_to(data_root)
+                    except ValueError:
+                        raise ValueError(f"Unsafe zip path: {member.filename}")
+                    zf.extract(member, data_dir)
             print(f"  Extracted to {target_dir}")
 
     db_path = Path(args.db_path)

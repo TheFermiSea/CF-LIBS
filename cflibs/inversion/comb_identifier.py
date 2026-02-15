@@ -53,6 +53,9 @@ class CombIdentifier:
         Maximum width as fraction of resolution element (default: 1.0)
     elements : List[str], optional
         List of elements to search for (default: None means all in database)
+    resolving_power : float, optional
+        Instrument resolving power (λ/Δλ). If set, tooth width is derived from
+        center wavelength / resolving_power instead of fixed 0.1 nm (default: None).
 
     Attributes
     ----------
@@ -70,6 +73,8 @@ class CombIdentifier:
         Minimum tooth width in points
     max_width_factor : float
         Maximum width scaling factor
+    resolving_power : Optional[float]
+        Instrument resolving power (None = use fixed 0.1 nm width).
     elements : Optional[List[str]]
         Elements to search (None = all)
 
@@ -584,5 +589,5 @@ class CombIdentifier:
         # (common at low RP where lines merge).
         mean_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
         coverage = len(active_teeth) / len(teeth)
-        fingerprint = mean_corr * math.sqrt(coverage)
+        fingerprint = mean_corr * np.sqrt(coverage)
         return fingerprint

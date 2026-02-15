@@ -7,6 +7,8 @@ import numpy as np
 from cflibs.inversion.alias_identifier import ALIASIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
 
+pytestmark = pytest.mark.requires_db
+
 
 def test_detect_peaks(atomic_db, synthetic_libs_spectrum):
     """Test peak detection with 2nd derivative enhancement."""
@@ -93,8 +95,8 @@ def test_match_lines(atomic_db):
     )
 
     # Both lines should match
-    assert matched_mask[0] == True
-    assert matched_mask[1] == True
+    assert matched_mask[0]
+    assert matched_mask[1]
 
     # Shifts should be small
     assert abs(wavelength_shifts[0]) < 0.1
@@ -578,7 +580,7 @@ def test_one_to_one_peak_assignment(atomic_db):
         f"One-to-one should allow only 1 match per peak, got {int(np.sum(matched))}"
     )
     # The matched line should be index 1 (highest emissivity)
-    assert matched[1] is True or matched[1] == True, (
+    assert bool(matched[1]), (
         "Highest emissivity line should win the peak assignment"
     )
 

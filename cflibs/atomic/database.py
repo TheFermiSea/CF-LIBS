@@ -156,9 +156,9 @@ class AtomicDatabase(AtomicDataSource):
     @staticmethod
     def _populate_energy_levels(cursor: sqlite3.Cursor):
         """Extract unique energy levels from the lines table."""
-        # Lower levels
+        # Lower levels (INSERT OR IGNORE for idempotent migration)
         cursor.execute("""
-            INSERT INTO energy_levels (element, sp_num, g_level, energy_ev)
+            INSERT OR IGNORE INTO energy_levels (element, sp_num, g_level, energy_ev)
             SELECT DISTINCT element, sp_num, CAST(gi AS INTEGER), ROUND(ei_ev, 8)
             FROM lines
             WHERE gi IS NOT NULL AND ei_ev IS NOT NULL
@@ -170,13 +170,14 @@ class AtomicDatabase(AtomicDataSource):
             FROM lines
             WHERE gk IS NOT NULL AND ek_ev IS NOT NULL
         """)
-        # Deduplicate by (element, sp_num, energy_ev)
+        # Deduplicate by (element, sp_num, g_level, energy_ev) so distinct levels
+        # (different g_level or energy) are preserved for partition-function sums
         cursor.execute("""
             DELETE FROM energy_levels
             WHERE rowid NOT IN (
                 SELECT MIN(rowid)
                 FROM energy_levels
-                GROUP BY element, sp_num, ROUND(energy_ev, 5)
+                GROUP BY element, sp_num, g_level, ROUND(energy_ev, 8)
             )
         """)
         cursor.execute("SELECT COUNT(*) FROM energy_levels")
@@ -235,12 +236,14 @@ class AtomicDatabase(AtomicDataSource):
         # fmt: on
         for elem, mass, ip1, ip2 in nist_data:
             cursor.execute(
-                "INSERT OR REPLACE INTO species_physics VALUES (?,?,?,?)",
+                "INSERT OR REPLACE INTO species_physics (element, sp_num, ip_ev, atomic_mass) "
+                "VALUES (?,?,?,?)",
                 (elem, 1, ip1, mass),
             )
             if ip2 is not None:
                 cursor.execute(
-                    "INSERT OR REPLACE INTO species_physics VALUES (?,?,?,?)",
+                    "INSERT OR REPLACE INTO species_physics (element, sp_num, ip_ev, atomic_mass) "
+                    "VALUES (?,?,?,?)",
                     (elem, 2, ip2, mass),
                 )
 

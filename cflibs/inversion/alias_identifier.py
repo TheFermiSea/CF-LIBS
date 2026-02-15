@@ -92,7 +92,11 @@ class ALIASIdentifier:
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
-        self.resolving_power = resolving_power
+        if not (np.isfinite(resolving_power) and resolving_power > 0):
+            raise ValueError(
+                f"resolving_power must be finite and > 0, got {resolving_power!r}"
+            )
+        self.resolving_power = float(resolving_power)
         self.T_range_K = T_range_K
         self.n_e_range_cm3 = n_e_range_cm3
         self.T_steps = T_steps

@@ -55,9 +55,12 @@ class CorrelationIdentifier:
         Temperature grid steps for classic mode (default: 5)
     n_e_steps : int
         Density grid steps for classic mode (default: 3)
+    resolving_power : float, optional
+        Instrument resolving power (λ/Δλ). If set, per-line sigma is
+        wavelength/resolving_power instead of fixed instrument_fwhm_nm (default: None).
     instrument_fwhm_nm : float
-        Instrument spectral FWHM in nm (default: 0.05). Used to derive
-        Gaussian sigma = FWHM / 2.355 for model line profiles.
+        Instrument spectral FWHM in nm (default: 0.05). Used when
+        resolving_power is None to derive Gaussian sigma = FWHM / 2.355.
     max_lines_per_element : int
         Cap transitions per element by emissivity (default: 100)
     reference_temperature : float
