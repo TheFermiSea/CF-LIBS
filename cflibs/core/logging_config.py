@@ -6,11 +6,13 @@ Provides standardized logging setup for the library.
 
 import logging
 import sys
-from typing import Optional
+from typing import Optional, TextIO
 
 
 def setup_logging(
-    level: str = "INFO", format_string: Optional[str] = None, stream: Optional[object] = None
+    level: str = "INFO",
+    format_string: Optional[str] = None,
+    stream: Optional[TextIO] = None,
 ) -> None:
     """
     Configure logging for CF-LIBS.

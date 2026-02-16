@@ -5,7 +5,7 @@ Implements classic and vector-accelerated modes for identifying elements
 from experimental spectra using model spectrum correlation matching.
 """
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import math
 import numpy as np
 from scipy.signal import find_peaks
@@ -250,7 +250,7 @@ class CorrelationIdentifier:
         T_grid = np.linspace(self.T_range_K[0], self.T_range_K[1], self.T_steps)
         n_e_grid = np.linspace(self.n_e_range_cm3[0], self.n_e_range_cm3[1], self.n_e_steps)
 
-        element_scores = []
+        element_scores: List[Tuple[str, float, float, List[Any], List[Any]]] = []
 
         elements_to_search = self.elements if self.elements is not None else self.atomic_db.get_available_elements()
         for element in elements_to_search:

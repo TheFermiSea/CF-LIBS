@@ -752,7 +752,7 @@ class BenchmarkDataset:
         splits = []
         for fold_idx in range(n_folds):
             test_ids = list(fold_assignments[fold_idx])
-            train_ids = []
+            train_ids: list[str] = []
             for i, fold_ids in enumerate(fold_assignments):
                 if i != fold_idx:
                     train_ids.extend(fold_ids)

@@ -40,6 +40,7 @@ References
 - Sirven et al. (2006), "PCA and SIMCA for LIBS analysis"
 - Zhang et al. (2015), "Multivariate analysis in LIBS"
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union, Any
@@ -206,11 +207,11 @@ class PCAResult:
             raise ValueError(f"Threshold must be in (0, 1], got {threshold}")
 
         cumvar = self.cumulative_variance_ratio
-        idx = np.searchsorted(cumvar, threshold)
+        idx = int(np.searchsorted(cumvar, threshold))
 
         # searchsorted returns the index where threshold would be inserted
         # We need at least that many components (1-indexed)
-        return int(min(idx + 1, self.n_components))
+        return min(idx + 1, self.n_components)
 
     def reconstruction_error(
         self,
@@ -708,7 +709,7 @@ class PCAPipeline:
         """
         if not self.is_fitted:
             raise RuntimeError("Must call fit() before transform()")
-
+        assert self.result_ is not None
         return self.result_.transform(X)
 
     def inverse_transform(self, scores: np.ndarray) -> np.ndarray:
@@ -732,7 +733,7 @@ class PCAPipeline:
         """
         if not self.is_fitted:
             raise RuntimeError("Must call fit() before inverse_transform()")
-
+        assert self.result_ is not None
         return self.result_.inverse_transform(scores)
 
 

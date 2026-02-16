@@ -22,6 +22,7 @@ References:
 - Tognoni et al., "CF-LIBS: State of the art" (2010) - limitations of sequential analysis
 - Ciucci et al., "New procedure for quantitative elemental analysis" (1999)
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum

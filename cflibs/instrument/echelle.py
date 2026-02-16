@@ -85,12 +85,12 @@ class EchelleExtractor:
         ValueError
             If calibration file format is invalid
         """
-        filepath = Path(filepath)
-        if not filepath.exists():
-            raise FileNotFoundError(f"Calibration file not found: {filepath}")
+        path = Path(filepath)
+        if not path.exists():
+            raise FileNotFoundError(f"Calibration file not found: {path}")
 
         try:
-            with open(filepath, "r") as f:
+            with open(path, "r") as f:
                 self.orders = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in calibration file: {e}")
@@ -103,7 +103,7 @@ class EchelleExtractor:
                     "must contain 'y_coeffs' and 'wl_coeffs'"
                 )
 
-        logger.info(f"Loaded calibration for {len(self.orders)} orders from {filepath}")
+        logger.info(f"Loaded calibration for {len(self.orders)} orders from {path}")
 
     def save_calibration(self, filepath: str) -> None:
         """
@@ -114,10 +114,10 @@ class EchelleExtractor:
         filepath : str
             Output file path
         """
-        filepath = Path(filepath)
-        with open(filepath, "w") as f:
+        path = Path(filepath)
+        with open(path, "w") as f:
             json.dump(self.orders, f, indent=2)
-        logger.info(f"Saved calibration to {filepath}")
+        logger.info(f"Saved calibration to {path}")
 
     def extract_order(
         self, image_2d: np.ndarray, order_name: str, background_subtract: bool = True

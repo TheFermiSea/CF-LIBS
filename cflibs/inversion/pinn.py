@@ -43,6 +43,7 @@ References
 - Tognoni et al. (2010): CF-LIBS state of the art
 - Lu et al. (2021): DeepXDE for physics-informed deep learning
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -1156,7 +1157,7 @@ class PINNInverter:
         ne_val = jnp.array(log_densities[val_idx])
         C_val = jnp.array(concentrations[val_idx])
 
-        history = {
+        history: Dict[str, List[float]] = {
             "train_loss": [],
             "val_loss": [],
             "train_T_loss": [],

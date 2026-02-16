@@ -4,7 +4,9 @@ Tests for manifold generation module.
 
 import pytest
 import numpy as np
-import h5py
+
+pytest.importorskip("h5py")
+import h5py  # noqa: E402
 
 from cflibs.manifold.config import ManifoldConfig
 from cflibs.core.logging_config import setup_logging

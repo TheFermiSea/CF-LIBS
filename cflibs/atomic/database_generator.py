@@ -14,7 +14,7 @@ from pathlib import Path
 
 def generate_database(
     db_path: str = "libs_production.db",
-    elements: list = None,
+    elements: list | None = None,
     max_ionization_stage: int = 2,
     max_upper_energy_ev: float = 12.0,
     min_relative_intensity: float = 50.0,

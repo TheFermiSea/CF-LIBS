@@ -5,7 +5,7 @@ Provides objective measures to assess analysis quality and flag unreliable resul
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import DefaultDict, Dict, List, Optional, Tuple
 import numpy as np
 from collections import defaultdict
 
@@ -152,7 +152,7 @@ class QualityAssessor:
         # 2. R² per element and inter-element T consistency
         r_squared_by_element, temp_by_element = self._compute_per_element_fits(observations)
 
-        t_values = list(temp_by_element.values())
+        t_values = np.asarray(list(temp_by_element.values()))
         if len(t_values) > 1:
             t_std = float(np.std(t_values))
             t_mean = float(np.mean(t_values))
@@ -245,20 +245,20 @@ class QualityAssessor:
         if len(x_all) < 3:
             return 0.0
 
-        x_all = np.array(x_all)
-        y_all = np.array(y_all)
+        x_ary: np.ndarray = np.array(x_all)
+        y_ary: np.ndarray = np.array(y_all)
 
         # Expected slope from fitted T
         expected_slope = -1.0 / (KB_EV * temperature_K)
 
         # Fit intercept with fixed slope
         # y = m*x + c => c = mean(y - m*x)
-        intercept = np.mean(y_all - expected_slope * x_all)
-        y_pred = expected_slope * x_all + intercept
+        intercept = np.mean(y_ary - expected_slope * x_ary)
+        y_pred = expected_slope * x_ary + intercept
 
         # R² calculation
-        ss_res = np.sum((y_all - y_pred) ** 2)
-        ss_tot = np.sum((y_all - np.mean(y_all)) ** 2)
+        ss_res = np.sum((y_ary - y_pred) ** 2)
+        ss_tot = np.sum((y_ary - np.mean(y_ary)) ** 2)
         r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
         return max(0.0, r_squared)
@@ -316,7 +316,9 @@ class QualityAssessor:
 
 
         # Group by element and ionization stage
-        obs_by_element_stage = defaultdict(lambda: defaultdict(list))
+        obs_by_element_stage: DefaultDict[str, DefaultDict[int, List[LineObservation]]] = (
+            defaultdict(lambda: defaultdict(list))
+        )
         for obs in observations:
             obs_by_element_stage[obs.element][obs.ionization_stage].append(obs)
 
@@ -328,8 +330,8 @@ class QualityAssessor:
                 continue
 
             # Average intensity ratio (simplified)
-            I_neutral = np.mean([obs.intensity for obs in stages[1]])
-            I_ion = np.mean([obs.intensity for obs in stages[2]])
+            I_neutral = float(np.mean(np.asarray([obs.intensity for obs in stages[1]])))
+            I_ion = float(np.mean(np.asarray([obs.intensity for obs in stages[2]])))
 
             if I_neutral <= 0 or I_ion <= 0:
                 continue
