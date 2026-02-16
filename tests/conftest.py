@@ -641,7 +641,22 @@ def sample_atomic_transitions():
 
 @pytest.fixture
 def synthetic_libs_spectrum():
-    """Factory fixture for creating synthetic LIBS spectra with known peaks."""
+    """
+    Return a factory that builds synthetic LIBS spectra containing Gaussian emission peaks.
+    
+    The returned factory (_create) generates a wavelength grid and an intensity array with a baseline, Gaussian peaks for specified element lines, additive Gaussian noise, and clamping to non-negative values. The factory's output is a dictionary containing the wavelength array, intensity array, the input element peak specification, a recorded list of peaks actually placed inside the wavelength range, and the provided plasma temperature metadata.
+    
+    Returns:
+        factory (callable): A function with signature
+            _create(elements=None, temperature_K=10000.0, wavelength_range=(200.0, 800.0),
+                    n_points=6000, noise_level=0.01, fwhm_nm=0.15, seed=42)
+            that returns a dict with keys:
+            - "wavelength": ndarray of wavelengths
+            - "intensity": ndarray of intensities
+            - "elements": dict of element peak specifications
+            - "peaks": list of (element, wavelength_nm, amplitude) tuples actually added
+            - "temperature_K": float (metadata)
+    """
 
     def _create(
         elements=None,
@@ -653,36 +668,25 @@ def synthetic_libs_spectrum():
         seed=42,
     ):
         """
-        Generate synthetic LIBS spectrum with Gaussian peaks at known wavelengths.
-
-        Parameters
-        ----------
-        elements : dict, optional
-            Dict mapping element symbols to list of (wavelength_nm, amplitude) tuples.
-            Default: {"Fe": [(371.99, 1000.0), (373.49, 500.0), (374.95, 200.0)],
-                      "H": [(656.28, 5000.0), (486.13, 1000.0)]}
-        temperature_K : float
-            Plasma temperature in K (metadata only)
-        wavelength_range : tuple
-            (min_nm, max_nm) wavelength range
-        n_points : int
-            Number of wavelength points
-        noise_level : float
-            Relative noise level (0.01 = 1%)
-        fwhm_nm : float
-            Full width at half maximum for Gaussian peaks in nm
-        seed : int
-            Random seed for reproducibility
-
-        Returns
-        -------
-        dict
-            Dictionary with keys:
-            - "wavelength": ndarray of wavelengths
-            - "intensity": ndarray of intensities
-            - "elements": dict of element peaks
-            - "peaks": list of (element, wavelength_nm, amplitude) tuples
-            - "temperature_K": plasma temperature (metadata)
+        Create a synthetic LIBS spectrum containing Gaussian emission peaks for the specified elements.
+        
+        Parameters:
+            elements (dict, optional): Mapping of element symbol -> list of (wavelength_nm, amplitude) tuples. Peaks outside wavelength_range are ignored. Defaults to Fe and H example peaks.
+            temperature_K (float): Plasma temperature in kelvin (recorded as metadata).
+            wavelength_range (tuple): (min_nm, max_nm) wavelength interval for the spectrum.
+            n_points (int): Number of wavelength samples across the range.
+            noise_level (float): Relative noise amplitude expressed as a fraction of the maximum signal (e.g., 0.01 = 1%).
+            fwhm_nm (float): Full width at half maximum for Gaussian peaks in nanometers.
+            seed (int): Random seed for reproducible noise.
+        
+        Returns:
+            dict: {
+                "wavelength": ndarray of shape (n_points,) with wavelength values (nm),
+                "intensity": ndarray of shape (n_points,) with simulated intensities,
+                "elements": dict of input element peak specifications (unchanged),
+                "peaks": list of (element, wavelength_nm, amplitude) tuples actually placed inside wavelength_range,
+                "temperature_K": the provided temperature_K value
+            }
         """
         if elements is None:
             elements = {
