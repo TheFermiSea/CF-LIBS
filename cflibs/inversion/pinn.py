@@ -1156,7 +1156,7 @@ class PINNInverter:
         ne_val = jnp.array(log_densities[val_idx])
         C_val = jnp.array(concentrations[val_idx])
 
-        history: dict[str, list[float]] = {
+        history: Dict[str, List[float]] = {
             "train_loss": [],
             "val_loss": [],
             "train_T_loss": [],

@@ -152,7 +152,7 @@ class QualityAssessor:
         # 2. R² per element and inter-element T consistency
         r_squared_by_element, temp_by_element = self._compute_per_element_fits(observations)
 
-        t_values = list(temp_by_element.values())
+        t_values = np.asarray(list(temp_by_element.values()))
         if len(t_values) > 1:
             t_std = float(np.std(t_values))
             t_mean = float(np.mean(t_values))
@@ -330,8 +330,8 @@ class QualityAssessor:
                 continue
 
             # Average intensity ratio (simplified)
-            I_neutral = np.mean([obs.intensity for obs in stages[1]])
-            I_ion = np.mean([obs.intensity for obs in stages[2]])
+            I_neutral = float(np.mean(np.asarray([obs.intensity for obs in stages[1]])))
+            I_ion = float(np.mean(np.asarray([obs.intensity for obs in stages[2]])))
 
             if I_neutral <= 0 or I_ion <= 0:
                 continue

@@ -206,11 +206,11 @@ class PCAResult:
             raise ValueError(f"Threshold must be in (0, 1], got {threshold}")
 
         cumvar = self.cumulative_variance_ratio
-        idx = np.searchsorted(cumvar, threshold)
+        idx = int(np.searchsorted(cumvar, threshold))
 
         # searchsorted returns the index where threshold would be inserted
         # We need at least that many components (1-indexed)
-        return int(min(idx + 1, self.n_components))
+        return min(idx + 1, self.n_components)
 
     def reconstruction_error(
         self,

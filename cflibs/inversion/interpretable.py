@@ -1384,6 +1384,7 @@ class InterpretableModel:
             self.feature_importances_ = self._model.feature_importances_
         elif hasattr(self._model, "coef_"):
             self.feature_importances_ = np.abs(self._model.coef_)
+            assert self.feature_importances_ is not None
             if self.feature_importances_.ndim > 1:
                 self.feature_importances_ = np.mean(self.feature_importances_, axis=0)
 
@@ -1448,6 +1449,8 @@ class InterpretableModel:
         """
         if not self.is_fitted_:
             raise ValueError("Model must be fitted before prediction")
+        if self.feature_names_ is None:
+            raise ValueError("Model has no feature names; fit with store_feature_names=True")
 
         # Handle single spectrum
         single_input = spectra.ndim == 1
