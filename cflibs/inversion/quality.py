@@ -245,20 +245,20 @@ class QualityAssessor:
         if len(x_all) < 3:
             return 0.0
 
-        x_all = np.array(x_all)
-        y_all = np.array(y_all)
+        x_ary: np.ndarray = np.array(x_all)
+        y_ary: np.ndarray = np.array(y_all)
 
         # Expected slope from fitted T
         expected_slope = -1.0 / (KB_EV * temperature_K)
 
         # Fit intercept with fixed slope
         # y = m*x + c => c = mean(y - m*x)
-        intercept = np.mean(y_all - expected_slope * x_all)
-        y_pred = expected_slope * x_all + intercept
+        intercept = np.mean(y_ary - expected_slope * x_ary)
+        y_pred = expected_slope * x_ary + intercept
 
         # R² calculation
-        ss_res = np.sum((y_all - y_pred) ** 2)
-        ss_tot = np.sum((y_all - np.mean(y_all)) ** 2)
+        ss_res = np.sum((y_ary - y_pred) ** 2)
+        ss_tot = np.sum((y_ary - np.mean(y_ary)) ** 2)
         r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
         return max(0.0, r_squared)
