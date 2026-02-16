@@ -11,6 +11,7 @@ This approach combines the global search capability of the manifold lookup
 References:
 - Tognoni et al., "CF-LIBS: State of the art" (2010)
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Callable
