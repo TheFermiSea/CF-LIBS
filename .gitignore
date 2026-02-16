@@ -57,6 +57,7 @@ htmlcov/
 *.cache
 nist_*_cache/
 .uv-cache/
+uv.lock
 
 # OS
 .DS_Store
