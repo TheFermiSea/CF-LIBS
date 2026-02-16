@@ -40,6 +40,7 @@ References
 - Sirven et al. (2006), "PCA and SIMCA for LIBS analysis"
 - Zhang et al. (2015), "Multivariate analysis in LIBS"
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union, Any

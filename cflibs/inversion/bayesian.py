@@ -88,6 +88,7 @@ References
 - Tognoni et al. (2010): CF-LIBS state of the art
 - Ciucci et al. (1999): CF-LIBS quantitative analysis
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
