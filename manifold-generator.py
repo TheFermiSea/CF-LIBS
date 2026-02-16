@@ -10,8 +10,7 @@ Output: HDF5 Manifold Archive
 
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap, pmap
-from jax.scipy.special import voigt_profile
+from jax import jit, vmap
 import numpy as np
 import pandas as pd
 import sqlite3
