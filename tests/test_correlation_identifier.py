@@ -66,7 +66,8 @@ def test_correlation_identifier_min_confidence_threshold(temp_db):
 
     # Weak spectrum
     wavelength = np.linspace(370, 380, 500)
-    intensity = np.random.rand(500) * 0.1  # Mostly noise
+    rng = np.random.default_rng(99)
+    intensity = rng.random(500) * 0.1  # Mostly noise
 
     identifier = CorrelationIdentifier(
         db,

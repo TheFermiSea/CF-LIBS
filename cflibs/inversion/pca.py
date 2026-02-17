@@ -181,7 +181,7 @@ class PCAResult:
 
         if scores.shape[1] != self.n_components:
             raise ValueError(
-                f"Component count mismatch: got {scores.shape[1]}, " f"expected {self.n_components}"
+                f"Component count mismatch: got {scores.shape[1]}, expected {self.n_components}"
             )
 
         # Reconstruct: scores @ components + mean
@@ -291,7 +291,7 @@ class PCAResult:
             f"Components: {self.n_components}",
             "-" * 60,
             f"Total variance: {self.total_variance:.4e}",
-            f"Explained variance (all components): " f"{self.cumulative_variance_ratio[-1]:.2%}",
+            f"Explained variance (all components): {self.cumulative_variance_ratio[-1]:.2%}",
             "-" * 60,
             "Top Components:",
         ]

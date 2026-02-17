@@ -441,7 +441,7 @@ class IterativeCFLIBSSolver:
                 intercepts_u[el] = ufloat(
                     fit_result.intercept,
                     (
-                        fit_result.intercept_uncertainty
+                        max(fit_result.intercept_uncertainty, 0.0)
                         if np.isfinite(fit_result.intercept_uncertainty)
                         else 0.0
                     ),

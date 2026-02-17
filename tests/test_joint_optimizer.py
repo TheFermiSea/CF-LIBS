@@ -271,7 +271,7 @@ class TestJointOptimizer:
             initial_n_e=1e17,
         )
 
-        # Should recover temperature within ~20%
+        # Should recover temperature within ~30%
         np.testing.assert_allclose(result.temperature_eV, data["T_true"], rtol=0.3)
 
         # Concentrations should be close

@@ -47,6 +47,7 @@ All branches pass their test suites. Differences are in implementation approach 
 ### Key Implementation Differences
 
 #### 1. Cosmic Ray Rejection
+
 - **PR #29**: `min_width_pts` (integer, default 2) - simple but less flexible
 - **PR #30**: `min_fwhm_pixels` (float, default 1.5) - more flexible, resolution-aware
 - **PR #31/#32**: No cosmic ray rejection
@@ -54,6 +55,7 @@ All branches pass their test suites. Differences are in implementation approach 
 **Recommendation**: Use PR #30's float-based approach for flexibility.
 
 #### 2. Second-Derivative Confirmation (PR #30 ONLY)
+
 Unique feature that filters peaks without positive curvature. Can reduce false positives from noise spikes.
 
 ```python
@@ -66,6 +68,7 @@ if use_second_derivative:
 **Recommendation**: Include as optional feature (default False) for advanced use cases.
 
 #### 3. Noise Floor Clamping (PR #30 ONLY)
+
 Critical for synthetic/noiseless spectra:
 
 ```python
@@ -76,6 +79,7 @@ if noise < 1e-10:
 **Recommendation**: **MUST INCLUDE** - prevents zero thresholds that break find_peaks.
 
 #### 4. Distance Parameter API Design
+
 - **PR #29**: `min_distance_nm` - wavelength-based, requires manual conversion
 - **PR #30**: `resolving_power` - instrument-aware, automatic conversion
 - **PR #31**: `distance_px` - pixel-based, simplest but manual
@@ -84,6 +88,7 @@ if noise < 1e-10:
 **Recommendation**: Use PR #32's dual-parameter approach for maximum flexibility while maintaining PR #30's instrument-aware defaults.
 
 #### 5. detect_peaks_auto() Wrapper
+
 - **PR #29/#30**: Convenience wrapper that estimates baseline/noise automatically
 - **PR #31/#32**: No wrapper (callers must do estimation themselves)
 
@@ -262,7 +267,3 @@ python scripts/calibrate_alias.py --help
 7. ⏭️ **NEXT**: Close individual PRs after consolidation is merged
 
 ---
-
-## Appendix: File-by-File Comparison
-
-See `/tmp/branch_comparison_analysis.md` for detailed code-level comparisons.

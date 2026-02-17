@@ -350,11 +350,9 @@ class AtomicDatabase(AtomicDataSource):
                 wavelength_nm=float(row["wavelength_nm"]),
                 A_ki=float(row["aki"]),
                 E_k_ev=float(row["ek_ev"]),
-                E_i_ev=(
-                    float(0.0) if pd.isna(row.get("ei_ev", 0.0)) else float(row.get("ei_ev", 0.0))
-                ),
+                E_i_ev=(0.0 if pd.isna(row.get("ei_ev", 0.0)) else float(row.get("ei_ev", 0.0))),
                 g_k=int(row["gk"]),
-                g_i=int(1) if pd.isna(row.get("gi", 1)) else int(row.get("gi", 1)),
+                g_i=1 if pd.isna(row.get("gi", 1)) else int(row.get("gi", 1)),
                 relative_intensity=(
                     float(row.get("rel_int", 0.0)) if pd.notna(row.get("rel_int")) else None
                 ),

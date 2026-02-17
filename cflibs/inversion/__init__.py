@@ -286,7 +286,6 @@ try:
     HAS_PINN = True
 except ImportError:
     # PINN components are optional
-
     pass
 # --- Public API ---
 __all__ = [

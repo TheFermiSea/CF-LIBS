@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 # Keep consistent with existing scripts.
 os.environ["JAX_PLATFORMS"] = "cpu"
 
-from cflibs.atomic.database import AtomicDatabase  # noqa: E402
-from cflibs.inversion.alias_identifier import ALIASIdentifier  # noqa: E402
-
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from cflibs.atomic.database import AtomicDatabase  # noqa: E402
+from cflibs.inversion.alias_identifier import ALIASIdentifier  # noqa: E402
 
 from scripts.validate_real_data import (  # noqa: E402
     DATASETS,
@@ -52,8 +52,8 @@ class DatasetCase:
     elements: List[str]
     expected: Set[str]
     resolving_power: float
-    wavelength: np.ndarray
-    spectrum: np.ndarray
+    wavelength: np.ndarray = field(repr=False)
+    spectrum: np.ndarray = field(repr=False)
 
 
 @dataclass
@@ -183,17 +183,17 @@ def run_sweep(
     max_lines_per_element: Iterable[int],
     max_combinations: Optional[int] = None,
 ) -> List[SweepResult]:
-    combos = list(
-        itertools.product(
-            intensity_threshold_factors,
-            detection_thresholds,
-            chance_window_scales,
-            min_relative_intensities,
-            max_lines_per_element,
-        )
+    combo_iter = itertools.product(
+        intensity_threshold_factors,
+        detection_thresholds,
+        chance_window_scales,
+        min_relative_intensities,
+        max_lines_per_element,
     )
     if max_combinations is not None and max_combinations > 0:
-        combos = combos[:max_combinations]
+        combos = list(itertools.islice(combo_iter, max_combinations))
+    else:
+        combos = list(combo_iter)
 
     results: List[SweepResult] = []
     for idx, (itf, dt, cws, mri, mle) in enumerate(combos, start=1):

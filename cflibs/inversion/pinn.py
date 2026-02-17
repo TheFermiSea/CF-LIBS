@@ -72,7 +72,7 @@ except ImportError:
     jnp = None
 
     def jit(f):
-        return f  # noqa: E731
+        return f
 
     grad = None
     value_and_grad = None

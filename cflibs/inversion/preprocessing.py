@@ -43,10 +43,13 @@ def estimate_baseline(
     """
     if wavelength.size < 2:
         return intensity.copy()
-    spacing = np.median(np.diff(wavelength))
+    spacing = float(np.median(np.abs(np.diff(wavelength))))
     if not np.isfinite(spacing) or spacing <= 0:
-        spacing = 1e-10
+        spacing = 1.0  # safe fallback instead of 1e-10
     window_pts = max(3, int(window_nm / spacing))
+    # Clamp to array length to prevent hangs
+    max_window = len(intensity) if len(intensity) % 2 == 1 else len(intensity) - 1
+    window_pts = min(window_pts, max(3, max_window))
     if window_pts % 2 == 0:
         window_pts += 1  # ensure odd
     return median_filter(intensity, size=window_pts)
@@ -157,7 +160,7 @@ def detect_peaks(
         min_distance = max(1, int(min_distance_px))
     elif resolving_power is not None and resolving_power > 0:
         mean_wl = float(np.mean(wavelength))
-        spacing = float(np.median(np.diff(wavelength)))
+        spacing = float(np.median(np.abs(np.diff(wavelength))))
         resolution_nm = mean_wl / resolving_power
         min_distance = max(3, int(resolution_nm / max(spacing, 1e-9)))
     else:
@@ -187,21 +190,23 @@ def detect_peaks(
         return []
 
     # Second-derivative confirmation
-    if use_second_derivative:
-        if wavelength.size > 1:
-            spacing = float(np.median(np.diff(wavelength)))
-        else:
-            spacing = 1.0
-        d1 = np.gradient(corrected, spacing, edge_order=2)
-        d2 = -np.gradient(d1, spacing, edge_order=2)
-        d2[d2 < 0] = 0.0
-        confirmed = []
-        for idx in peak_indices:
-            lo = max(0, idx - 2)
-            hi = min(len(d2), idx + 3)
-            if np.max(d2[lo:hi]) > 0:
-                confirmed.append(idx)
-        peak_indices = np.array(confirmed, dtype=int) if confirmed else np.array([], dtype=int)
+    if use_second_derivative and len(peak_indices) > 0:
+        if wavelength.size >= 3:  # edge_order=2 requires >= 3 points
+            if wavelength.size > 1:
+                spacing = float(np.median(np.abs(np.diff(wavelength))))
+            else:
+                spacing = 1.0
+            d1 = np.gradient(corrected, spacing, edge_order=2)
+            d2 = -np.gradient(d1, spacing, edge_order=2)
+            d2[d2 < 0] = 0.0
+            confirmed = []
+            for idx in peak_indices:
+                lo = max(0, idx - 2)
+                hi = min(len(d2), idx + 3)
+                if np.max(d2[lo:hi]) > 0:
+                    confirmed.append(idx)
+            peak_indices = np.array(confirmed, dtype=int) if confirmed else np.array([], dtype=int)
+        # else: skip second-derivative filtering for short arrays
 
     return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
 

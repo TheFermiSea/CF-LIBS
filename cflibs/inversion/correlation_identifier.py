@@ -273,8 +273,7 @@ class CorrelationIdentifier:
 
             # Cap to strongest lines by estimated emissivity to avoid line-count disparity
             if len(transitions) > self.max_lines_per_element:
-                kB_eV = 8.617e-5
-                kT = kB_eV * self.reference_temperature
+                kT = KB_EV * self.reference_temperature
                 transitions = sorted(
                     transitions,
                     key=lambda t: t.A_ki * t.g_k * math.exp(-t.E_k_ev / kT),
@@ -481,10 +480,9 @@ class CorrelationIdentifier:
         candidates = []
         for t_idx, trans in enumerate(transitions):
             distances = np.abs(peak_wavelengths - trans.wavelength_nm)
-            nearest = int(np.argmin(distances))
-            min_dist = distances[nearest]
-            if min_dist <= self.wavelength_tolerance_nm:
-                candidates.append((min_dist, nearest, t_idx))
+            for p_idx in range(len(peak_wavelengths)):
+                if distances[p_idx] <= self.wavelength_tolerance_nm:
+                    candidates.append((distances[p_idx], p_idx, t_idx))
 
         # Greedy one-to-one: sort by distance, assign first-come
         candidates.sort(key=lambda c: c[0])

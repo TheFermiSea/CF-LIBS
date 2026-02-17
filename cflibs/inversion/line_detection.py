@@ -91,6 +91,16 @@ def detect_line_observations(
     LineDetectionResult
         Detected line observations and resonance set
     """
+    if min_peak_height != 0.01:  # non-default value
+        import warnings
+
+        warnings.warn(
+            "min_peak_height is deprecated and ignored by the new noise-calibrated "
+            "peak detection pipeline. Use threshold_factor instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     if wavelength.size == 0 or intensity.size == 0:
         return LineDetectionResult([], set(), 0, 0, 0, ["empty_spectrum"])
 
@@ -167,6 +177,11 @@ def detect_line_observations(
         # trapezoidal integration because the Poisson shot noise dominates
         # and the rectangular approximation is well within the overall
         # uncertainty budget for LIBS measurements.
+        #
+        # NOTE: Poisson uncertainty is computed from raw (non-subtracted) intensity
+        # since shot noise scales with total detected photons. This intentionally
+        # yields a conservative (slightly overestimated) uncertainty when applied
+        # to the baseline-subtracted line_area.
         counts = np.maximum(intensity[start_idx:end_idx], 1.0)
         line_unc = float(np.sqrt(np.sum(counts)) * wl_step)
 
