@@ -464,7 +464,15 @@ class ALIASIdentifier:
 
         # Find peaks in baseline-corrected intensity
         corrected = intensity - baseline
-        peak_indices, _ = find_peaks(corrected, height=threshold, prominence=threshold / 3)
+        wl_step = np.median(np.diff(wavelength))
+        resolution_nm = np.median(wavelength) / self.resolving_power
+        min_distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        peak_indices, _ = find_peaks(
+            corrected,
+            height=threshold,
+            prominence=threshold,
+            distance=min_distance_px,
+        )
 
         # Paper (Noël et al. 2025): enhance peak detection using negative 2nd derivative
         # Compute -d²I/dλ², zero negatives — true peaks have positive curvature here

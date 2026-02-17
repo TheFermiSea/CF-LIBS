@@ -11,6 +11,11 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.stats import pearsonr
 
+from cflibs.inversion.preprocessing import (
+    estimate_baseline,
+    estimate_noise,
+    detect_peaks as detect_peaks_preprocessing,
+)
 from cflibs.inversion.element_id import (
     IdentifiedLine,
     ElementIdentification,
@@ -159,11 +164,21 @@ class CorrelationIdentifier:
 
         logger.info(f"Running correlation identifier in {mode} mode")
 
-        # Detect experimental peaks
-        peak_indices, _ = find_peaks(
-            intensity, height=np.max(intensity) * 0.05, distance=5
+        # Detect experimental peaks via baseline + noise-based preprocessing
+        baseline = estimate_baseline(wavelength, intensity)
+        noise = estimate_noise(intensity, baseline)
+        wl_step = np.median(np.diff(wavelength))
+        resolution_nm = 0.05 if wl_step <= 0 else min(0.1, 2.0 * wl_step)
+        distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        experimental_peaks = detect_peaks_preprocessing(
+            wavelength,
+            intensity,
+            baseline,
+            noise,
+            threshold_factor=4.0,
+            prominence_factor=1.5,
+            distance_px=distance_px,
         )
-        experimental_peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
 
         logger.info(f"Detected {len(experimental_peaks)} experimental peaks")
 

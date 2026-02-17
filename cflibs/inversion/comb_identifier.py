@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 import math
 import numpy as np
 from scipy.ndimage import median_filter
+from scipy.signal import find_peaks
 from scipy.stats import pearsonr
 
 from cflibs.atomic.database import AtomicDatabase
@@ -261,11 +262,21 @@ class CombIdentifier:
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
-        # Step 7: Identify experimental peaks (simple threshold-based for now)
+        # Step 7: Identify experimental peaks (local maxima via find_peaks)
         residual = intensity - baseline
-        peak_mask = residual > threshold
-        peak_indices = np.where(peak_mask)[0]
-        experimental_peaks = [(i, wavelength[i]) for i in peak_indices]
+        dwl = np.median(np.diff(wavelength))
+        if self.resolving_power and np.median(wavelength) > 0:
+            resolution_nm = np.median(wavelength) / self.resolving_power
+        else:
+            resolution_nm = 0.1
+        min_distance_px = max(1, int(resolution_nm / max(dwl, 1e-9)))
+        peak_indices, _ = find_peaks(
+            residual,
+            height=threshold,
+            prominence=threshold / 2.0,
+            distance=min_distance_px,
+        )
+        experimental_peaks = [(int(i), float(wavelength[i])) for i in peak_indices]
 
         # Count matched peaks (peaks that have at least one identified line)
         matched_peak_wavelengths = set()

@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.ndimage import median_filter
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 def estimate_baseline(
@@ -75,6 +75,7 @@ def detect_peaks(
     noise: float,
     threshold_factor: float = 4.0,
     prominence_factor: float = 1.5,
+    distance_px: Optional[int] = None,
 ) -> List[Tuple[int, float]]:
     """Unified peak detection above baseline.
 
@@ -92,6 +93,8 @@ def detect_peaks(
         Peak height threshold = noise * threshold_factor (default 4.0)
     prominence_factor : float
         Peak prominence threshold = noise * prominence_factor (default 1.5)
+    distance_px : int, optional
+        Minimum distance between peaks in pixels. If None, no distance constraint.
 
     Returns
     -------
@@ -102,7 +105,10 @@ def detect_peaks(
     threshold = noise * threshold_factor
     prominence = noise * prominence_factor
 
-    peak_indices, _ = find_peaks(corrected, height=threshold, prominence=prominence)
+    kwargs: dict = {"height": threshold, "prominence": prominence}
+    if distance_px is not None:
+        kwargs["distance"] = max(1, distance_px)
+    peak_indices, _ = find_peaks(corrected, **kwargs)
     return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
 
 
