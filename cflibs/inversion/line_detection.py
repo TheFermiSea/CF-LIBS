@@ -246,34 +246,38 @@ def _find_peaks(
 
     baseline = estimate_baseline(wavelength, intensity)
     noise = estimate_noise(intensity, baseline)
-    if noise <= 0:
-        return []
 
-    # Preserve backward compatibility with min_peak_height while operating
-    # in sigma units for robust thresholding.
-    absolute_height = max(min_peak_height, 0.0) * max_intensity
-    threshold_factor = max(2.0, absolute_height / max(noise, 1e-12))
-
-    wl_step = _estimate_wl_step(wavelength)
-    min_distance_px = max(int(peak_width_nm / max(wl_step, 1e-9)), 1)
-    peaks = detect_peaks(
-        wavelength=wavelength,
-        intensity=intensity,
-        baseline=baseline,
-        noise=noise,
-        threshold_factor=threshold_factor,
-        prominence_factor=max(1.0, threshold_factor / 2.0),
-        resolving_power=resolving_power,
-        min_distance_px=min_distance_px,
-    )
-    if peaks:
-        return peaks
-
-    # Simple fallback: local maxima above threshold
-    normalized = intensity / max_intensity
-    threshold = max(min_peak_height, 0.0)
     peaks: List[Tuple[int, float]] = []
-    for i in range(1, len(intensity) - 1):
-        if normalized[i] >= threshold and intensity[i] > intensity[i - 1] and intensity[i] > intensity[i + 1]:
-            peaks.append((i, float(wavelength[i])))
+
+    if noise > 0 and np.isfinite(noise):
+        # Preserve backward compatibility with min_peak_height while operating
+        # in sigma units for robust thresholding.
+        absolute_height = max(min_peak_height, 0.0) * max_intensity
+        threshold_factor = max(2.0, absolute_height / max(noise, 1e-12))
+
+        wl_step = _estimate_wl_step(wavelength)
+        min_distance_px = max(int(peak_width_nm / max(wl_step, 1e-9)), 1)
+        peaks = detect_peaks(
+            wavelength=wavelength,
+            intensity=intensity,
+            baseline=baseline,
+            noise=noise,
+            threshold_factor=threshold_factor,
+            prominence_factor=max(1.0, threshold_factor / 2.0),
+            resolving_power=resolving_power,
+            min_distance_px=min_distance_px,
+        )
+
+    # Fallback: local maxima above threshold
+    if not peaks:
+        normalized = intensity / max_intensity
+        threshold = max(min_peak_height, 0.0)
+        for i in range(1, len(intensity) - 1):
+            if (
+                normalized[i] >= threshold
+                and intensity[i] > intensity[i - 1]
+                and intensity[i] > intensity[i + 1]
+            ):
+                peaks.append((i, float(wavelength[i])))
+
     return peaks

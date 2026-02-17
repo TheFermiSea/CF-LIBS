@@ -9,6 +9,7 @@ key ALIAS thresholds and ranking configurations by global F1.
 import argparse
 import itertools
 import json
+import logging
 import os
 import sys
 from dataclasses import asdict, dataclass
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Keep consistent with existing scripts.
 os.environ["JAX_PLATFORMS"] = "cpu"
@@ -209,7 +212,13 @@ def run_sweep(
                     min_relative_intensity=float(mri),
                     max_lines_per_element=int(mle),
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Scoring failed for dataset %s with config %s: %s",
+                    case.name,
+                    f"itf={itf} dt={dt} cws={cws} mri={mri} mle={mle}",
+                    exc,
+                )
                 continue
             tp += ctp
             fp += cfp
@@ -273,7 +282,9 @@ def _write_outputs(results: List[SweepResult], output_dir: Path) -> Tuple[Path, 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Calibrate ALIAS thresholds using labeled datasets.")
+    parser = argparse.ArgumentParser(
+        description="Calibrate ALIAS thresholds using labeled datasets."
+    )
     parser.add_argument("--db-path", type=str, default="ASD_da/libs_production.db")
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--output-dir", type=str, default="output/calibration")
@@ -327,7 +338,8 @@ def main() -> None:
             f"{i:>2}. F1={r.f1:.3f} P={r.precision:.3f} R={r.recall:.3f} FPR={r.fpr:.3f} "
             f"exact={r.exact_matches}/{r.datasets_evaluated} "
             f"| itf={r.intensity_threshold_factor:.2f} dt={r.detection_threshold:.3f} "
-            f"cws={r.chance_window_scale:.2f} mri={r.min_relative_intensity:.0f} mle={r.max_lines_per_element}"
+            f"cws={r.chance_window_scale:.2f} mri={r.min_relative_intensity:.0f} "
+            f"mle={r.max_lines_per_element}"
         )
 
     best = results[0]
