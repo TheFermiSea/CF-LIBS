@@ -105,7 +105,9 @@ class CombIdentifier:
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
         self.min_correlation = min_correlation  # fingerprint detection threshold
-        self.tooth_activation_threshold = tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        self.tooth_activation_threshold = (
+            tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        )
         self.max_shift_pts = max_shift_pts
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor
@@ -131,6 +133,19 @@ class CombIdentifier:
         ElementIdentificationResult
             Complete identification results with algorithm="comb"
         """
+        if wavelength.size < 2:
+            return ElementIdentificationResult(
+                detected_elements=[],
+                rejected_elements=[],
+                all_elements=[],
+                experimental_peaks=[],
+                n_peaks=0,
+                n_matched_peaks=0,
+                n_unmatched_peaks=0,
+                algorithm="comb",
+                parameters={},
+            )
+
         logger.info(
             f"Starting comb identification on spectrum: "
             f"{wavelength[0]:.1f}-{wavelength[-1]:.1f} nm, {len(wavelength)} points"
@@ -264,12 +279,21 @@ class CombIdentifier:
 
         # Step 7: Identify experimental peaks (local maxima via find_peaks)
         residual = intensity - baseline
-        dwl = np.median(np.diff(wavelength))
-        if self.resolving_power and np.median(wavelength) > 0:
-            resolution_nm = np.median(wavelength) / self.resolving_power
+        wl_diffs = np.diff(wavelength)
+        if wl_diffs.size == 0 or not np.isfinite(np.median(wl_diffs)):
+            wl_step = 1.0
+        else:
+            wl_step = float(np.median(wl_diffs))
+            if wl_step <= 0:
+                wl_step = 1.0
+        median_wavelength = float(np.median(wavelength))
+        if self.resolving_power is not None and self.resolving_power > 0 and median_wavelength > 0:
+            resolution_nm = median_wavelength / self.resolving_power
         else:
             resolution_nm = 0.1
-        min_distance_px = max(1, int(resolution_nm / max(dwl, 1e-9)))
+        min_distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        # Comb uses half-threshold prominence (=threshold/2) because individual
+        # tooth correlation already validates peak quality per element.
         peak_indices, _ = find_peaks(
             residual,
             height=threshold,
@@ -369,8 +393,8 @@ class CombIdentifier:
             Peak detection threshold
         """
         # Compute window size in points
-        dwl_median = np.median(np.diff(wavelength))
-        window_pts = int(self.baseline_window_nm / dwl_median)
+        wl_step_median = np.median(np.diff(wavelength))
+        window_pts = int(self.baseline_window_nm / wl_step_median)
         # Ensure odd window size for median filter
         if window_pts % 2 == 0:
             window_pts += 1
@@ -457,13 +481,13 @@ class CombIdentifier:
         center_idx = np.argmin(np.abs(wavelength - center_nm))
 
         # Estimate resolution element from wavelength spacing
-        dwl = np.median(np.diff(wavelength))
+        wl_step = float(np.median(np.diff(wavelength)))
         # Derive resolution from resolving power if available, else fallback
-        if self.resolving_power:
+        if self.resolving_power and self.resolving_power > 0:
             resolution_nm = center_nm / self.resolving_power
         else:
             resolution_nm = 0.1
-        max_width_pts = int((resolution_nm * self.max_width_factor) / dwl)
+        max_width_pts = int((resolution_nm * self.max_width_factor) / max(wl_step, 1e-9))
         max_width_pts = max(self.min_width_pts, max_width_pts)
 
         best_correlation = -1.0

@@ -86,7 +86,7 @@ class CorrelationIdentifier:
     >>> identifier = CorrelationIdentifier(atomic_db, elements=['Fe', 'Ti', 'Cr'])
     >>> result = identifier.identify(wavelength, intensity, mode="classic")
     >>> print(f"Detected: {[e.element for e in result.detected_elements]}")
-    
+
     >>> # Vector mode with pre-built index
     >>> identifier = CorrelationIdentifier(atomic_db, vector_index=index)
     >>> result = identifier.identify(wavelength, intensity, mode="vector")
@@ -157,7 +157,7 @@ class CorrelationIdentifier:
         """
         # Resolve mode
         if mode == "auto":
-            mode = "vector" if self.vector_index is not None else "classic" 
+            mode = "vector" if self.vector_index is not None else "classic"
 
         if mode == "vector" and self.vector_index is None:
             raise ValueError("mode='vector' requires vector_index to be provided")
@@ -167,9 +167,29 @@ class CorrelationIdentifier:
         # Detect experimental peaks via baseline + noise-based preprocessing
         baseline = estimate_baseline(wavelength, intensity)
         noise = estimate_noise(intensity, baseline)
-        wl_step = np.median(np.diff(wavelength))
-        resolution_nm = 0.05 if wl_step <= 0 else min(0.1, 2.0 * wl_step)
-        distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        wl_diffs = np.diff(wavelength)
+        if wl_diffs.size == 0:
+            wl_step = np.nan
+        else:
+            wl_step = float(np.median(wl_diffs))
+
+        if not np.isfinite(wl_step) or wl_step <= 0:
+            resolution_nm = 0.05
+            distance_px = 1
+        elif (
+            hasattr(self, "resolving_power")
+            and self.resolving_power is not None
+            and self.resolving_power > 0
+            and wavelength.size > 0
+        ):
+            resolution_nm = float(np.median(wavelength)) / self.resolving_power
+            distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        else:
+            resolution_nm = min(0.1, 2.0 * wl_step)
+            distance_px = max(1, int(resolution_nm / max(wl_step, 1e-9)))
+        # Correlation uses noise-scaled prominence (=noise*1.5) because it
+        # performs per-element correlation scoring, so peak quality filtering
+        # is less aggressive than ALIAS or comb.
         experimental_peaks = detect_peaks_preprocessing(
             wavelength,
             intensity,
@@ -267,7 +287,9 @@ class CorrelationIdentifier:
 
         element_scores: List[Tuple[str, float, float, List[Any], List[Any]]] = []
 
-        elements_to_search = self.elements if self.elements is not None else self.atomic_db.get_available_elements()
+        elements_to_search = (
+            self.elements if self.elements is not None else self.atomic_db.get_available_elements()
+        )
         for element in elements_to_search:
             # Get transitions
             transitions = self.atomic_db.get_transitions(
@@ -296,8 +318,8 @@ class CorrelationIdentifier:
             for T_K in T_grid:
                 T_eV = T_K * KB_EV
                 for n_e in n_e_grid:
-                    model_spectrum = self._generate_model_spectrum(intensity,
-                        element, transitions, wavelength, T_eV, n_e
+                    model_spectrum = self._generate_model_spectrum(
+                        intensity, element, transitions, wavelength, T_eV, n_e
                     )
                     # Peak-region mask: correlate only where signal is significant
                     # Union of experimental and model peaks above normalized threshold
@@ -314,7 +336,11 @@ class CorrelationIdentifier:
                     # Pearson correlation on peak regions only
                     exp_peaks = intensity[peak_mask]
                     mod_peaks = model_spectrum[peak_mask]
-                    if len(exp_peaks) > 2 and np.std(mod_peaks) > 1e-10 and np.std(exp_peaks) > 1e-10:
+                    if (
+                        len(exp_peaks) > 2
+                        and np.std(mod_peaks) > 1e-10
+                        and np.std(exp_peaks) > 1e-10
+                    ):
                         corr, _ = pearsonr(exp_peaks, mod_peaks)
                         correlations.append(corr)
                     else:
@@ -346,7 +372,7 @@ class CorrelationIdentifier:
         -------
         List[Tuple[str, float, float, List[IdentifiedLine], List[Transition]]]
             List of (element, score, confidence, matched_lines, unmatched_lines)
-        
+
         Raises
         ------
         NotImplementedError
@@ -389,40 +415,6 @@ class CorrelationIdentifier:
             Model spectrum intensity on wavelength grid
         """
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         model_spectrum = np.zeros_like(wavelength, dtype=np.float64)
 
         # Compute ionization fractions using Saha equation
@@ -438,9 +430,7 @@ class CorrelationIdentifier:
 
         for trans in transitions:
             # Partition function
-            U = self.saha_solver.calculate_partition_function(
-                element, trans.ionization_stage, T_eV
-            )
+            U = self.saha_solver.calculate_partition_function(element, trans.ionization_stage, T_eV)
 
             # Ion-stage population fraction from Saha balance
             if stage_densities is not None:

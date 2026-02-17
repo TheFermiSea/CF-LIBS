@@ -68,6 +68,10 @@ def estimate_noise(intensity: np.ndarray, baseline: np.ndarray) -> float:
     return mad * 1.4826
 
 
+# TODO: Factor out min_distance_px calculation into a shared helper
+# (currently duplicated across alias_identifier, comb_identifier, correlation_identifier)
+
+
 def detect_peaks(
     wavelength: np.ndarray,
     intensity: np.ndarray,
