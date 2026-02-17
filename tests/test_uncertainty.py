@@ -539,8 +539,11 @@ class TestMonteCarloUQUnit:
 
         rng = np.random.default_rng(42)
         perturbed = mc._perturb_observations(
-            observations, rng, noise_fraction=0.05, atomic_uncertainty=None,
-            perturbation_type=PerturbationType.SPECTRAL_NOISE
+            observations,
+            rng,
+            noise_fraction=0.05,
+            atomic_uncertainty=None,
+            perturbation_type=PerturbationType.SPECTRAL_NOISE,
         )
 
         # Intensity should be perturbed
@@ -551,7 +554,9 @@ class TestMonteCarloUQUnit:
     def test_perturbation_atomic_data(self):
         """Test that atomic data perturbation modifies A_ki values."""
         from cflibs.inversion.uncertainty import (
-            MonteCarloUQ, PerturbationType, AtomicDataUncertainty
+            MonteCarloUQ,
+            PerturbationType,
+            AtomicDataUncertainty,
         )
         from cflibs.inversion.boltzmann import LineObservation
         from unittest.mock import MagicMock
@@ -576,8 +581,11 @@ class TestMonteCarloUQUnit:
         adu = AtomicDataUncertainty(default_A_uncertainty=0.10)
 
         perturbed = mc._perturb_observations(
-            observations, rng, noise_fraction=None, atomic_uncertainty=adu,
-            perturbation_type=PerturbationType.ATOMIC_DATA
+            observations,
+            rng,
+            noise_fraction=None,
+            atomic_uncertainty=adu,
+            perturbation_type=PerturbationType.ATOMIC_DATA,
         )
 
         # A_ki should be perturbed
@@ -588,7 +596,9 @@ class TestMonteCarloUQUnit:
     def test_perturbation_combined(self):
         """Test that combined perturbation modifies both intensity and A_ki."""
         from cflibs.inversion.uncertainty import (
-            MonteCarloUQ, PerturbationType, AtomicDataUncertainty
+            MonteCarloUQ,
+            PerturbationType,
+            AtomicDataUncertainty,
         )
         from cflibs.inversion.boltzmann import LineObservation
         from unittest.mock import MagicMock
@@ -613,8 +623,11 @@ class TestMonteCarloUQUnit:
         adu = AtomicDataUncertainty(default_A_uncertainty=0.10)
 
         perturbed = mc._perturb_observations(
-            observations, rng, noise_fraction=0.05, atomic_uncertainty=adu,
-            perturbation_type=PerturbationType.COMBINED
+            observations,
+            rng,
+            noise_fraction=0.05,
+            atomic_uncertainty=adu,
+            perturbation_type=PerturbationType.COMBINED,
         )
 
         # Both should be perturbed

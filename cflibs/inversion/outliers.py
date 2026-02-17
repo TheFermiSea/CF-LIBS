@@ -563,7 +563,11 @@ class MADResult:
         ]
         if self.statistic:
             lines.append(f"  Statistic: {self.statistic}")
-        if self.mode in ("spectrum", "1d") and self.n_outliers > 0 and self.outlier_indices is not None:
+        if (
+            self.mode in ("spectrum", "1d")
+            and self.n_outliers > 0
+            and self.outlier_indices is not None
+        ):
             lines.append(f"  Outlier indices: {list(self.outlier_indices)}")
         return "\n".join(lines)
 
@@ -635,7 +639,9 @@ class MADOutlierDetector:
         self.mode = mode
         self.statistic = statistic
 
-    def compute_mad(self, data: np.ndarray, axis: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def compute_mad(
+        self, data: np.ndarray, axis: Optional[int] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute median and MAD of data.
 
@@ -895,9 +901,7 @@ class MADOutlierDetector:
                     good_idx = np.where(~mask)[0]
                     bad_idx = np.where(mask)[0]
                     if len(good_idx) >= 2:
-                        cleaned[i, bad_idx] = np.interp(
-                            bad_idx, good_idx, cleaned[i, good_idx]
-                        )
+                        cleaned[i, bad_idx] = np.interp(bad_idx, good_idx, cleaned[i, good_idx])
                     else:
                         # Not enough good points for interpolation
                         cleaned[i, bad_idx] = result.median[bad_idx]

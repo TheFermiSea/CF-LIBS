@@ -262,9 +262,7 @@ class SyntheticBenchmarkGenerator:
             electron_density_cm3 = condition_variation.sample_electron_density(rng)
 
             # Vary instrumental conditions
-            conditions = self._vary_conditions(
-                self.base_conditions, condition_variation, rng
-            )
+            conditions = self._vary_conditions(self.base_conditions, condition_variation, rng)
 
             # Generate spectrum
             spectrum = self._generate_single_spectrum(
@@ -307,9 +305,7 @@ class SyntheticBenchmarkGenerator:
                 random_seed=seed,
             )
 
-        logger.info(
-            f"Generated synthetic benchmark: {name} with {n_spectra} spectra"
-        )
+        logger.info(f"Generated synthetic benchmark: {name} with {n_spectra} spectra")
 
         return dataset
 
@@ -384,9 +380,7 @@ class SyntheticBenchmarkGenerator:
                 composition, temperature_K, electron_density_cm3, rng
             )
         else:
-            intensity = self._generate_simplified(
-                composition, temperature_K, rng
-            )
+            intensity = self._generate_simplified(composition, temperature_K, rng)
 
         # Add noise
         intensity = self._add_noise(
@@ -405,9 +399,7 @@ class SyntheticBenchmarkGenerator:
         )
 
         # Create composition uncertainty (assume 2% relative for synthetic)
-        composition_uncertainty = {
-            el: max(c * 0.02, 0.0001) for el, c in composition.items()
-        }
+        composition_uncertainty = {el: max(c * 0.02, 0.0001) for el, c in composition.items()}
 
         # Intensity uncertainty from noise model
         intensity_uncertainty = np.sqrt(
@@ -563,9 +555,7 @@ class SyntheticBenchmarkGenerator:
                 intensity = conc * rel_int * boltz * 1e4
 
                 # Add Gaussian line profile
-                profile = self._gaussian_profile(
-                    self._wavelength_grid, wl_center, gaussian_width
-                )
+                profile = self._gaussian_profile(self._wavelength_grid, wl_center, gaussian_width)
                 spectrum += intensity * profile
 
         return spectrum
@@ -577,7 +567,7 @@ class SyntheticBenchmarkGenerator:
         width: float,
     ) -> np.ndarray:
         """Calculate Gaussian line profile."""
-        return np.exp(-((wavelengths - center) ** 2) / (2 * width ** 2))
+        return np.exp(-((wavelengths - center) ** 2) / (2 * width**2))
 
     def _add_noise(
         self,

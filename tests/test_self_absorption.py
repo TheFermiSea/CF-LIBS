@@ -460,13 +460,15 @@ class TestSelfAbsorptionResult:
         result = SelfAbsorptionResult(
             corrected_observations=[obs],
             masked_observations=[],
-            corrections={400.0: AbsorptionCorrectionResult(
-                original_intensity=1000.0,
-                corrected_intensity=1000.0,
-                optical_depth=0.01,
-                correction_factor=1.0,
-                is_optically_thick=False,
-            )},
+            corrections={
+                400.0: AbsorptionCorrectionResult(
+                    original_intensity=1000.0,
+                    corrected_intensity=1000.0,
+                    optical_depth=0.01,
+                    correction_factor=1.0,
+                    is_optically_thick=False,
+                )
+            },
             n_corrected=0,
             n_masked=0,
             max_optical_depth=0.01,
@@ -512,17 +514,17 @@ class TestPublishedCorrectionFactors:
     # Verified against standard plasma spectroscopy references
     PUBLISHED_VALUES = {
         # τ: f(τ)  (calculated values)
-        0.01: 0.995,   # Nearly optically thin
+        0.01: 0.995,  # Nearly optically thin
         0.05: 0.975,
         0.10: 0.951,
         0.20: 0.906,
         0.50: 0.787,
-        1.00: 0.632,   # Classic value: 1 - 1/e
+        1.00: 0.632,  # Classic value: 1 - 1/e
         1.50: 0.518,
         2.00: 0.432,
         3.00: 0.317,
-        5.00: 0.199,   # (1 - exp(-5))/5 ≈ 0.1987
-        10.0: 0.100,   # Approaches 1/τ
+        5.00: 0.199,  # (1 - exp(-5))/5 ≈ 0.1987
+        10.0: 0.100,  # Approaches 1/τ
     }
 
     @pytest.mark.parametrize("tau,expected_f", list(PUBLISHED_VALUES.items()))
@@ -531,9 +533,9 @@ class TestPublishedCorrectionFactors:
         f_calculated = correction_factor(tau)
 
         # Allow 1% tolerance for numerical precision
-        assert f_calculated == pytest.approx(expected_f, rel=0.01), (
-            f"f({tau}) = {f_calculated:.4f}, expected {expected_f:.4f}"
-        )
+        assert f_calculated == pytest.approx(
+            expected_f, rel=0.01
+        ), f"f({tau}) = {f_calculated:.4f}, expected {expected_f:.4f}"
 
     def test_correction_factor_monotonically_decreasing(self):
         """Verify f(τ) decreases monotonically with τ."""
@@ -541,9 +543,9 @@ class TestPublishedCorrectionFactors:
         f_values = [correction_factor(tau) for tau in tau_values]
 
         for i in range(1, len(f_values)):
-            assert f_values[i] < f_values[i - 1], (
-                f"f(τ) not monotonically decreasing at τ={tau_values[i]}"
-            )
+            assert (
+                f_values[i] < f_values[i - 1]
+            ), f"f(τ) not monotonically decreasing at τ={tau_values[i]}"
 
     def test_correction_inverse_recovers_true_intensity(self):
         """
@@ -571,9 +573,9 @@ class TestPublishedCorrectionFactors:
             asymptotic = 1.0 / tau
 
             # Should be within 1% for large τ
-            assert f_tau == pytest.approx(asymptotic, rel=0.01), (
-                f"Asymptotic deviation at τ={tau}: f={f_tau:.6f}, 1/τ={asymptotic:.6f}"
-            )
+            assert f_tau == pytest.approx(
+                asymptotic, rel=0.01
+            ), f"Asymptotic deviation at τ={tau}: f={f_tau:.6f}, 1/τ={asymptotic:.6f}"
 
 
 class TestSelfAbsorptionEdgeCases:

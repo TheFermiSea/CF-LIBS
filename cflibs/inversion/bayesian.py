@@ -88,6 +88,7 @@ References
 - Tognoni et al. (2010): CF-LIBS state of the art
 - Ciucci et al. (1999): CF-LIBS quantitative analysis
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -115,7 +116,10 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    def jit(f): return f  # noqa: E731
+
+    def jit(f):
+        return f  # noqa: E731
+
     _faddeeva_weideman_jax = None
 
 try:
@@ -153,12 +157,36 @@ M_PROTON = 1.6726219e-27  # Proton mass [kg]
 
 # Standard atomic masses for fallback [amu]
 STANDARD_MASSES = {
-    "H": 1.008, "He": 4.003, "Li": 6.941, "Be": 9.012, "B": 10.81,
-    "C": 12.01, "N": 14.01, "O": 16.00, "F": 19.00, "Ne": 20.18,
-    "Na": 22.99, "Mg": 24.31, "Al": 26.98, "Si": 28.09, "P": 30.97,
-    "S": 32.07, "Cl": 35.45, "Ar": 39.95, "K": 39.10, "Ca": 40.08,
-    "Sc": 44.96, "Ti": 47.87, "V": 50.94, "Cr": 52.00, "Mn": 54.94,
-    "Fe": 55.85, "Co": 58.93, "Ni": 58.69, "Cu": 63.55, "Zn": 65.38,
+    "H": 1.008,
+    "He": 4.003,
+    "Li": 6.941,
+    "Be": 9.012,
+    "B": 10.81,
+    "C": 12.01,
+    "N": 14.01,
+    "O": 16.00,
+    "F": 19.00,
+    "Ne": 20.18,
+    "Na": 22.99,
+    "Mg": 24.31,
+    "Al": 26.98,
+    "Si": 28.09,
+    "P": 30.97,
+    "S": 32.07,
+    "Cl": 35.45,
+    "Ar": 39.95,
+    "K": 39.10,
+    "Ca": 40.08,
+    "Sc": 44.96,
+    "Ti": 47.87,
+    "V": 50.94,
+    "Cr": 52.00,
+    "Mn": 54.94,
+    "Fe": 55.85,
+    "Co": 58.93,
+    "Ni": 58.69,
+    "Cu": 63.55,
+    "Zn": 65.38,
 }
 
 
@@ -311,7 +339,7 @@ class MCMCResult:
     @property
     def n_e_mean(self) -> float:
         """Mean electron density [cm^-3]."""
-        return 10.0 ** self.log_ne_mean
+        return 10.0**self.log_ne_mean
 
     @property
     def T_K_mean(self) -> float:
@@ -359,9 +387,7 @@ class MCMCResult:
             std = self.concentrations_std[el]
             q025 = self.concentrations_q025.get(el, mean - 2 * std)
             q975 = self.concentrations_q975.get(el, mean + 2 * std)
-            lines.append(
-                f"{el:<20} {mean:>12.4f} {std:>12.4f} [{q025:.4f}, {q975:.4f}]"
-            )
+            lines.append(f"{el:<20} {mean:>12.4f} {std:>12.4f} [{q025:.4f}, {q975:.4f}]")
 
         if self.r_hat:
             lines.append("-" * 70)
@@ -538,7 +564,7 @@ class NestedSamplingResult:
     @property
     def n_e_mean(self) -> float:
         """Mean electron density [cm^-3]."""
-        return 10.0 ** self.log_ne_mean
+        return 10.0**self.log_ne_mean
 
     @property
     def T_K_mean(self) -> float:
@@ -697,9 +723,7 @@ class BayesianForwardModel:
         if wavelength_grid is not None:
             self.wavelength = jnp.array(wavelength_grid)
         else:
-            self.wavelength = jnp.linspace(
-                wavelength_range[0], wavelength_range[1], pixels
-            )
+            self.wavelength = jnp.linspace(wavelength_range[0], wavelength_range[1], pixels)
 
         # Load atomic data
         self.atomic_data = self._load_atomic_data(db_path)
@@ -735,8 +759,7 @@ class BayesianForwardModel:
 
         if df.empty:
             raise ValueError(
-                f"No atomic data for elements {self.elements} in "
-                f"range {self.wavelength_range}"
+                f"No atomic data for elements {self.elements} in " f"range {self.wavelength_range}"
             )
 
         # Map elements to indices
@@ -847,7 +870,7 @@ class BayesianForwardModel:
         array
             Synthetic spectrum intensity
         """
-        n_e = 10.0 ** log_ne
+        n_e = 10.0**log_ne
         return self._compute_spectrum(T_eV, n_e, concentrations)
 
     def forward_numpy(
@@ -914,9 +937,7 @@ class BayesianForwardModel:
 
         # Saha ratio: n_ion / n_neutral
         saha_factor = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5)
-        ratio_ion_neutral = (
-            2.0 * saha_factor * (U1 / U0) * jnp.exp(-IP_I / T_eV)
-        )
+        ratio_ion_neutral = 2.0 * saha_factor * (U1 / U0) * jnp.exp(-IP_I / T_eV)
 
         # Population fractions
         frac_neutral = 1.0 / (1.0 + ratio_ion_neutral)
@@ -938,14 +959,14 @@ class BayesianForwardModel:
         n_upper = N_species * (data.gk / U_val) * jnp.exp(-data.ek_ev / T_eV)
 
         # Line emissivity: epsilon = (hc / 4pi * lambda) * A * n_upper
-        epsilon = (H_PLANCK * C_LIGHT / (4 * jnp.pi * data.wavelength_nm * 1e-9)) * data.aki * n_upper
+        epsilon = (
+            (H_PLANCK * C_LIGHT / (4 * jnp.pi * data.wavelength_nm * 1e-9)) * data.aki * n_upper
+        )
 
         # --- Line Broadening ---
         # Doppler width
         mass_kg = data.mass_amu * M_PROTON
-        sigma_doppler = data.wavelength_nm * jnp.sqrt(
-            2.0 * T_eV * EV_TO_J / (mass_kg * C_LIGHT**2)
-        )
+        sigma_doppler = data.wavelength_nm * jnp.sqrt(2.0 * T_eV * EV_TO_J / (mass_kg * C_LIGHT**2))
 
         # Instrument broadening
         sigma_inst = self.instrument_fwhm_nm / 2.355
@@ -1017,16 +1038,12 @@ def log_likelihood(
 
     # Variance: Poisson (shot) + Gaussian (readout) + dark current
     variance = (
-        pred_safe / noise_params.gain
-        + noise_params.readout_noise**2
-        + noise_params.dark_current
+        pred_safe / noise_params.gain + noise_params.readout_noise**2 + noise_params.dark_current
     )
 
     # Gaussian log-likelihood
     residual = observed - pred_safe
-    log_lik = -0.5 * jnp.sum(
-        jnp.log(2 * jnp.pi * variance) + residual**2 / variance
-    )
+    log_lik = -0.5 * jnp.sum(jnp.log(2 * jnp.pi * variance) + residual**2 / variance)
 
     return log_lik
 
@@ -1087,9 +1104,7 @@ def bayesian_model(
     pred_safe = jnp.where(jnp.isinf(pred_safe), 1e6, pred_safe)
 
     variance = (
-        pred_safe / noise_params.gain
-        + noise_params.readout_noise**2
-        + noise_params.dark_current
+        pred_safe / noise_params.gain + noise_params.readout_noise**2 + noise_params.dark_current
     )
     sigma = jnp.sqrt(jnp.maximum(variance, 1e-6))
 
@@ -1153,9 +1168,7 @@ class MCMCSampler:
 
         # Midpoint of prior ranges
         T_init = (self.prior_config.T_eV_range[0] + self.prior_config.T_eV_range[1]) / 2
-        log_ne_init = (
-            self.prior_config.log_ne_range[0] + self.prior_config.log_ne_range[1]
-        ) / 2
+        log_ne_init = (self.prior_config.log_ne_range[0] + self.prior_config.log_ne_range[1]) / 2
 
         # Uniform concentrations
         conc_init = jnp.ones(n_elements) / n_elements
@@ -1211,9 +1224,7 @@ class MCMCSampler:
 
         # Create model function
         def model(obs):
-            bayesian_model(
-                self.forward_model, obs, self.prior_config, self.noise_params
-            )
+            bayesian_model(self.forward_model, obs, self.prior_config, self.noise_params)
 
         # Create NUTS sampler with initialization
         # Use init_to_uniform for robustness - samples from prior to find valid start
@@ -1234,7 +1245,9 @@ class MCMCSampler:
 
         # Run sampling
         rng_key = random.PRNGKey(seed)
-        logger.info(f"Starting MCMC: {num_chains} chains, {num_warmup} warmup, {num_samples} samples")
+        logger.info(
+            f"Starting MCMC: {num_chains} chains, {num_warmup} warmup, {num_samples} samples"
+        )
 
         mcmc.run(rng_key, observed_jax)
 
@@ -1268,16 +1281,13 @@ class MCMCSampler:
             log_ne_q025=float(np.percentile(log_ne_flat, 2.5)),
             log_ne_q975=float(np.percentile(log_ne_flat, 97.5)),
             concentrations_mean={
-                el: float(np.mean(conc_flat[:, i]))
-                for i, el in enumerate(self.elements)
+                el: float(np.mean(conc_flat[:, i])) for i, el in enumerate(self.elements)
             },
             concentrations_std={
-                el: float(np.std(conc_flat[:, i]))
-                for i, el in enumerate(self.elements)
+                el: float(np.std(conc_flat[:, i])) for i, el in enumerate(self.elements)
             },
             concentrations_q025={
-                el: float(np.percentile(conc_flat[:, i], 2.5))
-                for i, el in enumerate(self.elements)
+                el: float(np.percentile(conc_flat[:, i], 2.5)) for i, el in enumerate(self.elements)
             },
             concentrations_q975={
                 el: float(np.percentile(conc_flat[:, i], 97.5))
@@ -1427,9 +1437,7 @@ class MCMCSampler:
             logger.warning(f"Trace plot failed: {e}")
             return None
 
-    def plot_posterior(
-        self, result: MCMCResult, figsize: Tuple[int, int] = (12, 6)
-    ) -> Any:
+    def plot_posterior(self, result: MCMCResult, figsize: Tuple[int, int] = (12, 6)) -> Any:
         """
         Generate posterior distribution plot using ArviZ.
 
@@ -1515,9 +1523,7 @@ class MCMCSampler:
             logger.warning(f"Corner plot failed: {e}")
             return None
 
-    def plot_forest(
-        self, result: MCMCResult, figsize: Tuple[int, int] = (10, 6)
-    ) -> Any:
+    def plot_forest(self, result: MCMCResult, figsize: Tuple[int, int] = (10, 6)) -> Any:
         """
         Generate forest plot comparing parameter estimates with credible intervals.
 
@@ -1609,9 +1615,7 @@ class MCMCSampler:
         # Get posterior samples
         T_samples = np.array(result.samples["T_eV"]).flatten()
         log_ne_samples = np.array(result.samples["log_ne"]).flatten()
-        conc_samples = np.array(result.samples["concentrations"]).reshape(
-            -1, len(self.elements)
-        )
+        conc_samples = np.array(result.samples["concentrations"]).reshape(-1, len(self.elements))
 
         # Select random subset
         n_available = len(T_samples)
@@ -1640,13 +1644,13 @@ class MCMCSampler:
         # Noise model variance
         variance = (
             np.abs(predicted_mean) / self.noise_params.gain
-            + self.noise_params.readout_noise ** 2
+            + self.noise_params.readout_noise**2
             + self.noise_params.dark_current
         )
         variance = np.maximum(variance, 1e-6)
 
         # Observed chi-squared
-        chi_sq_obs = np.sum(residuals ** 2 / variance)
+        chi_sq_obs = np.sum(residuals**2 / variance)
 
         # Simulated chi-squared from posterior predictive
         chi_sq_sim = []
@@ -1769,6 +1773,7 @@ class NestedSampler:
             for i in range(self.n_elements - 1):
                 # Beta distribution via inverse CDF
                 from scipy import stats
+
                 beta_sample = stats.beta.ppf(u[2 + i], alpha, alpha * (self.n_elements - 1 - i))
                 x[2 + i] = remaining * beta_sample
                 remaining -= x[2 + i]
@@ -1789,9 +1794,7 @@ class NestedSampler:
         conc[-1] = max(0.0, 1.0 - np.sum(conc[:-1]))
         return conc
 
-    def _log_likelihood(
-        self, params: np.ndarray, observed: np.ndarray
-    ) -> float:
+    def _log_likelihood(self, params: np.ndarray, observed: np.ndarray) -> float:
         """
         Compute log-likelihood for nested sampling.
 
@@ -1888,10 +1891,7 @@ class NestedSampler:
         # Set random state
         rstate = np.random.default_rng(seed)
 
-        logger.info(
-            f"Starting nested sampling: nlive={nlive}, dlogz={dlogz}, "
-            f"ndim={self.ndim}"
-        )
+        logger.info(f"Starting nested sampling: nlive={nlive}, dlogz={dlogz}, " f"ndim={self.ndim}")
 
         # Create and run sampler
         sampler = DynestyNestedSampler(
@@ -1921,17 +1921,19 @@ class NestedSampler:
         # Evidence
         log_evidence = float(results.logz[-1])
         log_evidence_err = float(results.logzerr[-1])
-        information = float(results.information[-1]) if hasattr(results, 'information') else 0.0
+        information = float(results.information[-1]) if hasattr(results, "information") else 0.0
 
         # Compute weighted statistics
         T_samples = samples[:, 0]
         log_ne_samples = samples[:, 1]
 
         T_mean = float(np.average(T_samples, weights=weights))
-        T_std = float(np.sqrt(np.average((T_samples - T_mean)**2, weights=weights)))
+        T_std = float(np.sqrt(np.average((T_samples - T_mean) ** 2, weights=weights)))
 
         log_ne_mean = float(np.average(log_ne_samples, weights=weights))
-        log_ne_std = float(np.sqrt(np.average((log_ne_samples - log_ne_mean)**2, weights=weights)))
+        log_ne_std = float(
+            np.sqrt(np.average((log_ne_samples - log_ne_mean) ** 2, weights=weights))
+        )
 
         # Concentration statistics
         conc_samples = np.array([self._params_to_concentrations(s) for s in samples])
@@ -1940,7 +1942,7 @@ class NestedSampler:
         for i, el in enumerate(self.elements):
             c_samples = conc_samples[:, i]
             c_mean = float(np.average(c_samples, weights=weights))
-            c_std = float(np.sqrt(np.average((c_samples - c_mean)**2, weights=weights)))
+            c_std = float(np.sqrt(np.average((c_samples - c_mean) ** 2, weights=weights)))
             conc_mean[el] = c_mean
             conc_std[el] = c_std
 

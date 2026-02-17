@@ -36,6 +36,7 @@ from cflibs.inversion.transfer import (
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def rng():
     """Random number generator with fixed seed for reproducibility."""
@@ -82,6 +83,7 @@ def concentrations(rng):
 # MMD Tests
 # ============================================================================
 
+
 class TestMMD:
     """Tests for Maximum Mean Discrepancy computation."""
 
@@ -120,9 +122,9 @@ class TestMMD:
         X = rng.normal(0, 1, (30, 20))
         Y = rng.normal(1, 1, (30, 20))
 
-        mmd_rbf = compute_mmd(X, Y, kernel='rbf')
-        mmd_linear = compute_mmd(X, Y, kernel='linear')
-        mmd_poly = compute_mmd(X, Y, kernel='poly')
+        mmd_rbf = compute_mmd(X, Y, kernel="rbf")
+        mmd_linear = compute_mmd(X, Y, kernel="linear")
+        mmd_poly = compute_mmd(X, Y, kernel="poly")
 
         # All should be positive
         assert mmd_rbf >= 0
@@ -146,12 +148,13 @@ class TestMMD:
 # Domain Adaptation Tests
 # ============================================================================
 
+
 class TestDomainAdapter:
     """Tests for domain adaptation methods."""
 
     def test_coral_adaptation(self, source_spectra, target_spectra):
         """Test CORAL domain adaptation."""
-        adapter = DomainAdapter(method='coral')
+        adapter = DomainAdapter(method="coral")
         result = adapter.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, DomainAdaptationResult)
@@ -161,7 +164,7 @@ class TestDomainAdapter:
 
     def test_mmd_adaptation(self, source_spectra, target_spectra):
         """Test MMD-based domain adaptation."""
-        adapter = DomainAdapter(method='mmd')
+        adapter = DomainAdapter(method="mmd")
         result = adapter.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, DomainAdaptationResult)
@@ -171,7 +174,7 @@ class TestDomainAdapter:
 
     def test_subspace_adaptation(self, source_spectra, target_spectra):
         """Test subspace alignment domain adaptation."""
-        adapter = DomainAdapter(method='subspace', n_components=20)
+        adapter = DomainAdapter(method="subspace", n_components=20)
         result = adapter.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, DomainAdaptationResult)
@@ -179,7 +182,7 @@ class TestDomainAdapter:
 
     def test_tca_adaptation(self, source_spectra, target_spectra):
         """Test Transfer Component Analysis."""
-        adapter = DomainAdapter(method='tca', n_components=10)
+        adapter = DomainAdapter(method="tca", n_components=10)
         result = adapter.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, DomainAdaptationResult)
@@ -187,18 +190,16 @@ class TestDomainAdapter:
 
     def test_no_adaptation(self, source_spectra, target_spectra):
         """Test identity transformation (no adaptation)."""
-        adapter = DomainAdapter(method='none')
+        adapter = DomainAdapter(method="none")
         result = adapter.fit_transform(source_spectra, target_spectra)
 
         assert result.method == DomainAdaptationMethod.NONE
         # Source should be unchanged
-        np.testing.assert_array_almost_equal(
-            result.source_aligned, source_spectra, decimal=5
-        )
+        np.testing.assert_array_almost_equal(result.source_aligned, source_spectra, decimal=5)
 
     def test_fit_transform_separate(self, source_spectra, target_spectra, rng):
         """Test that fit and transform can be called separately."""
-        adapter = DomainAdapter(method='coral')
+        adapter = DomainAdapter(method="coral")
 
         # Fit
         adapter.fit(source_spectra, target_spectra)
@@ -211,7 +212,7 @@ class TestDomainAdapter:
 
     def test_transform_before_fit_raises(self, rng):
         """Transform before fit should raise error."""
-        adapter = DomainAdapter(method='coral')
+        adapter = DomainAdapter(method="coral")
         X = rng.normal(0, 1, (10, 50))
 
         with pytest.raises(RuntimeError, match="fit"):
@@ -228,10 +229,10 @@ class TestDomainAdapter:
 
     def test_method_from_string(self):
         """Test method specification from string."""
-        adapter_coral = DomainAdapter(method='CORAL')
+        adapter_coral = DomainAdapter(method="CORAL")
         assert adapter_coral.method == DomainAdaptationMethod.CORAL
 
-        adapter_mmd = DomainAdapter(method='mmd')
+        adapter_mmd = DomainAdapter(method="mmd")
         assert adapter_mmd.method == DomainAdaptationMethod.MMD
 
 
@@ -239,50 +240,51 @@ class TestDomainAdapter:
 # Calibration Transfer Tests
 # ============================================================================
 
+
 class TestCalibrationTransfer:
     """Tests for calibration transfer methods."""
 
     def test_sbc_transfer(self, source_spectra, target_spectra):
         """Test Slope/Bias Correction transfer."""
-        transfer = CalibrationTransfer(method='sbc')
+        transfer = CalibrationTransfer(method="sbc")
         result = transfer.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, TransferResult)
-        assert result.method == 'SBC'
+        assert result.method == "SBC"
         assert result.transformed_spectra.shape == source_spectra.shape
-        assert 'r_squared' in result.metrics
+        assert "r_squared" in result.metrics
 
     def test_pds_transfer(self, source_spectra, target_spectra):
         """Test Piecewise Direct Standardization transfer."""
-        transfer = CalibrationTransfer(method='pds', window_size=5)
+        transfer = CalibrationTransfer(method="pds", window_size=5)
         result = transfer.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, TransferResult)
-        assert result.method == 'PDS'
+        assert result.method == "PDS"
         assert result.transformed_spectra.shape == source_spectra.shape
 
     def test_ds_transfer(self, source_spectra, target_spectra):
         """Test Direct Standardization transfer."""
-        transfer = CalibrationTransfer(method='ds')
+        transfer = CalibrationTransfer(method="ds")
         result = transfer.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, TransferResult)
-        assert result.method == 'DS'
+        assert result.method == "DS"
 
     def test_standardization_transfer(self, source_spectra, target_spectra):
         """Test simple standardization transfer."""
-        transfer = CalibrationTransfer(method='standardization')
+        transfer = CalibrationTransfer(method="standardization")
         result = transfer.fit_transform(source_spectra, target_spectra)
 
         assert isinstance(result, TransferResult)
-        assert result.method == 'STANDARDIZATION'
+        assert result.method == "STANDARDIZATION"
 
     def test_transfer_reduces_residual(self, source_spectra, target_spectra):
         """Transfer should reduce residuals between domains."""
         # Initial residual
         initial_residual = np.mean(np.abs(target_spectra - source_spectra))
 
-        transfer = CalibrationTransfer(method='sbc')
+        transfer = CalibrationTransfer(method="sbc")
         transfer.fit(source_spectra, target_spectra)
         transformed = transfer.transform(target_spectra)
 
@@ -297,7 +299,7 @@ class TestCalibrationTransfer:
             path = Path(tmpdir) / "transfer_model.json"
 
             # Fit and save
-            transfer = CalibrationTransfer(method='sbc')
+            transfer = CalibrationTransfer(method="sbc")
             transfer.fit(source_spectra, target_spectra)
             transfer.save(path)
 
@@ -324,6 +326,7 @@ class TestCalibrationTransfer:
 # Fine-tuning Tests
 # ============================================================================
 
+
 class TestFineTuner:
     """Tests for fine-tuning functionality."""
 
@@ -339,8 +342,8 @@ class TestFineTuner:
         y = np.dot(X, W_true) + rng.normal(0, 0.01, (n_samples, n_outputs))
 
         initial_params = {
-            'W': rng.normal(0, 0.1, (n_features, n_outputs)),
-            'b': np.zeros(n_outputs),
+            "W": rng.normal(0, 0.1, (n_features, n_outputs)),
+            "b": np.zeros(n_outputs),
         }
 
         finetuner = FineTuner(learning_rate=0.01, l2_reg=0.001)
@@ -368,8 +371,8 @@ class TestFineTuner:
 
         # Start with random (poor) initialization
         initial_params = {
-            'W': rng.normal(0, 1, (n_features, n_outputs)),
-            'b': np.zeros(n_outputs),
+            "W": rng.normal(0, 1, (n_features, n_outputs)),
+            "b": np.zeros(n_outputs),
         }
 
         finetuner = FineTuner(learning_rate=0.01)
@@ -396,8 +399,8 @@ class TestFineTuner:
         y = np.dot(X, W_true) + rng.normal(0, 0.1, (n_samples, n_outputs))
 
         initial_params = {
-            'W': rng.normal(0, 0.5, (n_features, n_outputs)),
-            'b': np.zeros(n_outputs),
+            "W": rng.normal(0, 0.5, (n_features, n_outputs)),
+            "b": np.zeros(n_outputs),
         }
 
         finetuner = FineTuner(early_stopping_patience=10, learning_rate=0.01)
@@ -416,6 +419,7 @@ class TestFineTuner:
 # ============================================================================
 # Pipeline Tests
 # ============================================================================
+
 
 class TestTransferLearningPipeline:
     """Tests for complete transfer learning pipeline."""
@@ -447,10 +451,10 @@ class TestTransferLearningPipeline:
         pipeline.fit(source_spectra, target_spectra)
         metrics = pipeline.evaluate(source_spectra, target_spectra)
 
-        assert 'mmd' in metrics
-        assert 'mae' in metrics
-        assert 'rmse' in metrics
-        assert 'r_squared' in metrics
+        assert "mmd" in metrics
+        assert "mae" in metrics
+        assert "rmse" in metrics
+        assert "r_squared" in metrics
 
     def test_pipeline_summary(self, source_spectra, target_spectra):
         """Test pipeline summary generation."""
@@ -513,19 +517,20 @@ class TestTransferLearningPipeline:
 # Convenience Function Tests
 # ============================================================================
 
+
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
 
     def test_transfer_calibration(self, source_spectra, target_spectra):
         """Test quick transfer_calibration function."""
-        result = transfer_calibration(source_spectra, target_spectra, method='sbc')
+        result = transfer_calibration(source_spectra, target_spectra, method="sbc")
 
         assert result.shape == target_spectra.shape
 
     def test_adapt_domains(self, source_spectra, target_spectra):
         """Test quick adapt_domains function."""
         source_aligned, target_aligned = adapt_domains(
-            source_spectra, target_spectra, method='coral'
+            source_spectra, target_spectra, method="coral"
         )
 
         assert source_aligned.shape == source_spectra.shape
@@ -536,6 +541,7 @@ class TestConvenienceFunctions:
 # Edge Case Tests
 # ============================================================================
 
+
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
@@ -545,7 +551,7 @@ class TestEdgeCases:
         target = rng.normal(1, 1, (1, 50))
 
         # SBC should work with single sample
-        transfer = CalibrationTransfer(method='sbc')
+        transfer = CalibrationTransfer(method="sbc")
         transfer.fit(source, target)
         result = transfer.transform(target)
 
@@ -557,7 +563,7 @@ class TestEdgeCases:
         source = rng.normal(0, 1, (20, n_wavelengths))
         target = rng.normal(0, 1, (20, n_wavelengths))
 
-        adapter = DomainAdapter(method='coral')
+        adapter = DomainAdapter(method="coral")
         result = adapter.fit_transform(source, target)
 
         assert result.source_aligned.shape == source.shape
@@ -571,7 +577,7 @@ class TestEdgeCases:
         source[:, 10] = 5.0
         target[:, 10] = 3.0
 
-        transfer = CalibrationTransfer(method='sbc')
+        transfer = CalibrationTransfer(method="sbc")
         transfer.fit(source, target)
         result = transfer.transform(target)
 
@@ -585,7 +591,7 @@ class TestEdgeCases:
         source = rng.normal(0, 1, (100, 10))
         target = source + rng.normal(0, 0.001, source.shape)  # Nearly identical
 
-        adapter = DomainAdapter(method='coral', regularization=1e-4)
+        adapter = DomainAdapter(method="coral", regularization=1e-4)
         result = adapter.fit_transform(source, target)
 
         assert not np.any(np.isnan(result.source_aligned))
@@ -595,17 +601,18 @@ class TestEdgeCases:
 # Integration Tests
 # ============================================================================
 
+
 class TestIntegration:
     """Integration tests combining multiple components."""
 
     def test_adaptation_then_transfer(self, source_spectra, target_spectra):
         """Test domain adaptation followed by calibration transfer."""
         # Step 1: Domain adaptation
-        adapter = DomainAdapter(method='coral')
+        adapter = DomainAdapter(method="coral")
         adaptation_result = adapter.fit_transform(source_spectra, target_spectra)
 
         # Step 2: Calibration transfer on adapted data
-        transfer = CalibrationTransfer(method='sbc')
+        transfer = CalibrationTransfer(method="sbc")
         transfer.fit(adaptation_result.source_aligned, target_spectra)
         final_spectra = transfer.transform(target_spectra)
 
@@ -616,9 +623,7 @@ class TestIntegration:
         # Should show some improvement
         assert final_mmd < initial_mmd * 1.5
 
-    def test_full_workflow_with_new_samples(
-        self, source_spectra, target_spectra, rng
-    ):
+    def test_full_workflow_with_new_samples(self, source_spectra, target_spectra, rng):
         """Test complete workflow including prediction on new samples."""
         # Split target data
         n_transfer = 20

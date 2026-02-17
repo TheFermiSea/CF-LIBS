@@ -103,6 +103,7 @@ def detect_peaks(
     threshold_factor: float = 4.0,
     prominence_factor: float = 1.5,
     resolving_power: Optional[float] = None,
+    min_distance_px: Optional[int] = None,
     min_fwhm_pixels: float = 1.5,
     use_second_derivative: bool = False,
 ) -> List[Tuple[int, float]]:
@@ -129,8 +130,10 @@ def detect_peaks(
         Peak prominence threshold = noise * prominence_factor (default 1.5)
     resolving_power : float, optional
         Instrument resolving power R = lambda/delta_lambda.  If provided,
-        the minimum peak distance is set to one resolution element and
-        cosmic ray rejection uses resolution-aware FWHM thresholds.
+        the minimum peak distance is set to one resolution element.
+    min_distance_px : int, optional
+        Explicit minimum peak distance in pixels. Overrides resolving_power-
+        derived value when provided.
     min_fwhm_pixels : float
         Minimum peak full-width at half-maximum in pixels.  Peaks narrower
         than this are rejected as cosmic ray artifacts (default 1.5).
@@ -149,8 +152,10 @@ def detect_peaks(
     threshold = noise * threshold_factor
     prominence = noise * prominence_factor
 
-    # Minimum distance between peaks: at least one resolution element
-    if resolving_power is not None and resolving_power > 0:
+    # Minimum distance between peaks
+    if min_distance_px is not None:
+        min_distance = max(1, int(min_distance_px))
+    elif resolving_power is not None and resolving_power > 0:
         mean_wl = float(np.mean(wavelength))
         spacing = float(np.median(np.diff(wavelength)))
         resolution_nm = mean_wl / resolving_power
@@ -205,6 +210,7 @@ def detect_peaks_auto(
     wavelength: np.ndarray,
     intensity: np.ndarray,
     resolving_power: Optional[float] = None,
+    min_distance_px: Optional[int] = None,
     threshold_factor: float = 4.0,
     prominence_factor: float = 1.5,
     baseline_window_nm: float = 10.0,
@@ -224,6 +230,9 @@ def detect_peaks_auto(
         Intensity array
     resolving_power : float, optional
         Instrument resolving power R = lambda/delta_lambda
+    min_distance_px : int, optional
+        Explicit minimum peak distance in pixels. Overrides resolving_power
+        when provided.
     threshold_factor : float
         Peak height threshold in noise units (default 4.0)
     prominence_factor : float
@@ -258,6 +267,7 @@ def detect_peaks_auto(
         threshold_factor=threshold_factor,
         prominence_factor=prominence_factor,
         resolving_power=resolving_power,
+        min_distance_px=min_distance_px,
         min_fwhm_pixels=min_fwhm_pixels,
         use_second_derivative=use_second_derivative,
     )

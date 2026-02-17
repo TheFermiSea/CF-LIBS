@@ -30,6 +30,7 @@ class FitMethod(Enum):
     RANSAC = "ransac"  # Random Sample Consensus
     HUBER = "huber"  # Huber M-estimation
 
+
 try:
     import matplotlib.pyplot as plt
     from matplotlib.figure import Figure
@@ -305,8 +306,16 @@ class BoltzmannPlotFitter:
             logger.debug(f"Iteration {iteration}: Rejected {len(outlier_global_indices)} outliers")
 
         return self._create_result(
-            slope, slope_err, intercept, intercept_err, r_squared,
-            mask, indices, "sigma_clip", n_iterations, covariance_matrix
+            slope,
+            slope_err,
+            intercept,
+            intercept_err,
+            r_squared,
+            mask,
+            indices,
+            "sigma_clip",
+            n_iterations,
+            covariance_matrix,
         )
 
     def _fit_ransac(
@@ -397,8 +406,16 @@ class BoltzmannPlotFitter:
         final_mask[valid_indices[best_inliers]] = True
 
         return self._create_result(
-            slope, slope_err, intercept, intercept_err, r_squared,
-            final_mask, indices, "ransac", self.ransac_max_trials, covariance_matrix
+            slope,
+            slope_err,
+            intercept,
+            intercept_err,
+            r_squared,
+            final_mask,
+            indices,
+            "ransac",
+            self.ransac_max_trials,
+            covariance_matrix,
         )
 
     def _fit_huber(
@@ -448,9 +465,7 @@ class BoltzmannPlotFitter:
 
             # Huber weights: 1 for |u| <= epsilon, epsilon/|u| for |u| > epsilon
             huber_weights = np.where(
-                np.abs(u) <= self.huber_epsilon,
-                1.0,
-                self.huber_epsilon / np.abs(u)
+                np.abs(u) <= self.huber_epsilon, 1.0, self.huber_epsilon / np.abs(u)
             )
 
             # Combined weights
@@ -499,8 +514,16 @@ class BoltzmannPlotFitter:
         final_mask[valid_indices[inlier_points]] = True
 
         return self._create_result(
-            slope, slope_err, intercept, intercept_err, r_squared,
-            final_mask, indices, "huber", n_iterations, covariance_matrix
+            slope,
+            slope_err,
+            intercept,
+            intercept_err,
+            r_squared,
+            final_mask,
+            indices,
+            "huber",
+            n_iterations,
+            covariance_matrix,
         )
 
     def _compute_weights(self, y_err: np.ndarray) -> np.ndarray:
@@ -510,17 +533,13 @@ class BoltzmannPlotFitter:
         safe_err = np.where(y_err > 0, y_err, np.inf)
         return 1.0 / safe_err**2
 
-    def _compute_r_squared(
-        self, y: np.ndarray, y_pred: np.ndarray, weights: np.ndarray
-    ) -> float:
+    def _compute_r_squared(self, y: np.ndarray, y_pred: np.ndarray, weights: np.ndarray) -> float:
         """Compute weighted R-squared."""
         ss_res = np.sum(weights * (y - y_pred) ** 2)
         ss_tot = np.sum(weights * (y - np.average(y, weights=weights)) ** 2)
         return 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
-    def _weighted_fit(
-        self, x: np.ndarray, y: np.ndarray, y_err: np.ndarray
-    ) -> tuple:
+    def _weighted_fit(self, x: np.ndarray, y: np.ndarray, y_err: np.ndarray) -> tuple:
         """Perform weighted linear fit returning slope, intercept, uncertainties, and covariance.
 
         Returns

@@ -73,10 +73,7 @@ class SahaBoltzmannSolver(SolverStrategy):
         U_II = self.calculate_partition_function(element, 2, T_e_eV)
 
         saha_ratio_I = (
-            (SAHA_CONST_CM3 / n_e_cm3)
-            * (T_e_eV**1.5)
-            * (U_II / U_I)
-            * np.exp(-ip_I / T_e_eV)
+            (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_e_eV)
         )
 
         # n_I + n_II = n_total

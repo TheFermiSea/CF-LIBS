@@ -67,7 +67,6 @@ def compute_spectrum_batch(
     return results
 
 
-
 def _apply_params_to_plasma(plasma, params: dict) -> None:
     """Apply parameter dictionary to a plasma object.
 

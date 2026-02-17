@@ -66,14 +66,43 @@ class ALIASIdentifier:
 
     # Crustal abundance in log10(ppm) — from CRC Handbook / USGS
     CRUSTAL_ABUNDANCE_LOG_PPM = {
-        "O": 5.67, "Si": 5.44, "Al": 4.91, "Fe": 4.70, "Ca": 4.57,
-        "Na": 4.36, "Mg": 4.33, "K": 4.32, "Ti": 3.75, "H": 3.15,
-        "Mn": 2.98, "P": 2.97, "F": 2.80, "Ba": 2.70, "C": 2.30,
-        "Sr": 2.57, "S": 2.56, "Zr": 2.23, "V": 2.10, "Cl": 2.20,
-        "Cr": 2.00, "Ni": 1.88, "Zn": 1.88, "Cu": 1.78, "Co": 1.40,
-        "Li": 1.30, "N": 1.30, "Ga": 1.28, "Pb": 1.15, "Rb": 1.95,
-        "B": 1.00, "Sn": 0.35, "W": 0.18, "Mo": 0.18, "Ag": -0.62,
-        "Cd": -0.82, "Au": -2.40,
+        "O": 5.67,
+        "Si": 5.44,
+        "Al": 4.91,
+        "Fe": 4.70,
+        "Ca": 4.57,
+        "Na": 4.36,
+        "Mg": 4.33,
+        "K": 4.32,
+        "Ti": 3.75,
+        "H": 3.15,
+        "Mn": 2.98,
+        "P": 2.97,
+        "F": 2.80,
+        "Ba": 2.70,
+        "C": 2.30,
+        "Sr": 2.57,
+        "S": 2.56,
+        "Zr": 2.23,
+        "V": 2.10,
+        "Cl": 2.20,
+        "Cr": 2.00,
+        "Ni": 1.88,
+        "Zn": 1.88,
+        "Cu": 1.78,
+        "Co": 1.40,
+        "Li": 1.30,
+        "N": 1.30,
+        "Ga": 1.28,
+        "Pb": 1.15,
+        "Rb": 1.95,
+        "B": 1.00,
+        "Sn": 0.35,
+        "W": 0.18,
+        "Mo": 0.18,
+        "Ag": -0.62,
+        "Cd": -0.82,
+        "Au": -2.40,
     }
 
     def __init__(
@@ -93,9 +122,7 @@ class ALIASIdentifier:
     ):
         self.atomic_db = atomic_db
         if not (np.isfinite(resolving_power) and resolving_power > 0):
-            raise ValueError(
-                f"resolving_power must be finite and > 0, got {resolving_power!r}"
-            )
+            raise ValueError(f"resolving_power must be finite and > 0, got {resolving_power!r}")
         self.resolving_power = float(resolving_power)
         self.T_range_K = T_range_K
         self.n_e_range_cm3 = n_e_range_cm3
@@ -176,42 +203,53 @@ class ALIASIdentifier:
             else:
                 emissivity_threshold = -np.inf
 
-            k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
-                self._compute_scores(
-                    fused_lines, matched_mask, matched_peak_idx,
-                    wavelength_shifts, intensity, peaks, emissivity_threshold,
-                )
+            k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = self._compute_scores(
+                fused_lines,
+                matched_mask,
+                matched_peak_idx,
+                wavelength_shifts,
+                intensity,
+                peaks,
+                emissivity_threshold,
             )
 
-            P_sig, fill_factor, p_chance, p_tail = (
-                self._compute_random_match_significance(
-                    peaks=peaks,
-                    wavelength=wavelength,
-                    N_expected=N_expected,
-                    N_matched=N_matched,
-                )
+            P_sig, fill_factor, p_chance, p_tail = self._compute_random_match_significance(
+                peaks=peaks,
+                wavelength=wavelength,
+                N_expected=N_expected,
+                N_matched=N_matched,
             )
 
             k_det, CL = self._decide(
-                k_sim, k_rate, k_shift, N_expected, intensity, peaks,
-                element=element, P_maj=P_maj, P_sig=P_sig,
-                N_matched=N_matched, P_cov=P_cov,
+                k_sim,
+                k_rate,
+                k_shift,
+                N_expected,
+                intensity,
+                peaks,
+                element=element,
+                P_maj=P_maj,
+                P_sig=P_sig,
+                N_matched=N_matched,
+                P_cov=P_cov,
             )
 
-            candidates.append({
-                "element": element,
-                "fused_lines": fused_lines,
-                "matched_mask": matched_mask,
-                "matched_peak_idx": matched_peak_idx,
-                "wavelength_shifts": wavelength_shifts,
-                "emissivity_threshold": emissivity_threshold,
-                "initial_CL": CL,
-                # Cache phase 1 scores for reuse when competition is skipped
-                "scores": (k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov),
-                "N_matched": N_matched,
-                "P_sig_data": (P_sig, fill_factor, p_chance, p_tail),
-                "k_det": k_det,
-            })
+            candidates.append(
+                {
+                    "element": element,
+                    "fused_lines": fused_lines,
+                    "matched_mask": matched_mask,
+                    "matched_peak_idx": matched_peak_idx,
+                    "wavelength_shifts": wavelength_shifts,
+                    "emissivity_threshold": emissivity_threshold,
+                    "initial_CL": CL,
+                    # Cache phase 1 scores for reuse when competition is skipped
+                    "scores": (k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov),
+                    "N_matched": N_matched,
+                    "P_sig_data": (P_sig, fill_factor, p_chance, p_tail),
+                    "k_det": k_det,
+                }
+            )
 
         # ── Phase 1.5: NNLS peak-space mixture attribution ────────────
         # Non-negative least squares fit of all candidate templates against
@@ -222,9 +260,7 @@ class ALIASIdentifier:
         if candidates and peaks:
             peak_intensities_arr = np.array([intensity[p[0]] for p in peaks])
             A = self._build_nnls_templates(candidates, peaks)
-            P_mix_arr, P_local_arr, _ = self._compute_nnls_attribution(
-                A, peak_intensities_arr
-            )
+            P_mix_arr, P_local_arr, _ = self._compute_nnls_attribution(A, peak_intensities_arr)
             for i, cand in enumerate(candidates):
                 cand["P_mix"] = float(P_mix_arr[i])
                 cand["P_local"] = float(P_local_arr[i])
@@ -247,9 +283,7 @@ class ALIASIdentifier:
                 for l_idx in range(len(mask)):
                     if mask[l_idx]:
                         pidx = int(pidx_arr[l_idx])
-                        peak_claims[pidx].append(
-                            (cand["initial_CL"], c_idx, l_idx)
-                        )
+                        peak_claims[pidx].append((cand["initial_CL"], c_idx, l_idx))
 
             # Resolve: highest initial CL wins; losers get unmatched
             for pidx, claims in peak_claims.items():
@@ -276,33 +310,39 @@ class ALIASIdentifier:
 
             if competition_ran:
                 # Rescore with post-competition matches
-                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
-                    self._compute_scores(
-                        fused_lines, matched_mask, matched_peak_idx,
-                        wavelength_shifts, intensity, peaks,
-                        emissivity_threshold,
-                    )
+                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = self._compute_scores(
+                    fused_lines,
+                    matched_mask,
+                    matched_peak_idx,
+                    wavelength_shifts,
+                    intensity,
+                    peaks,
+                    emissivity_threshold,
                 )
 
-                P_sig, fill_factor, p_chance, p_tail = (
-                    self._compute_random_match_significance(
-                        peaks=peaks,
-                        wavelength=wavelength,
-                        N_expected=N_expected,
-                        N_matched=N_matched,
-                    )
+                P_sig, fill_factor, p_chance, p_tail = self._compute_random_match_significance(
+                    peaks=peaks,
+                    wavelength=wavelength,
+                    N_expected=N_expected,
+                    N_matched=N_matched,
                 )
 
                 k_det, CL = self._decide(
-                    k_sim, k_rate, k_shift, N_expected, intensity, peaks,
-                    element=element, P_maj=P_maj, P_sig=P_sig,
-                    N_matched=N_matched, P_cov=P_cov,
+                    k_sim,
+                    k_rate,
+                    k_shift,
+                    N_expected,
+                    intensity,
+                    peaks,
+                    element=element,
+                    P_maj=P_maj,
+                    P_sig=P_sig,
+                    N_matched=N_matched,
+                    P_cov=P_cov,
                 )
             else:
                 # No competition — reuse phase 1 scores
-                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = (
-                    cand["scores"]
-                )
+                k_sim, k_rate, k_shift, P_maj, N_expected, N_matched, P_cov = cand["scores"]
                 P_sig, fill_factor, p_chance, p_tail = cand["P_sig_data"]
                 k_det = cand["k_det"]
                 CL = cand["initial_CL"]
@@ -330,8 +370,11 @@ class ALIASIdentifier:
             P_local = cand.get("P_local", 1.0)
 
             R_rat = self._compute_ratio_consistency(
-                fused_lines, matched_mask, matched_peak_idx,
-                intensity, peaks,
+                fused_lines,
+                matched_mask,
+                matched_peak_idx,
+                intensity,
+                peaks,
             )
 
             # Post-CL discriminators with raised floors to prevent
@@ -342,10 +385,10 @@ class ALIASIdentifier:
             CL *= float(np.clip(2.0 * P_local, 0.25, 1.0))
 
             # Gate 2: P_mix — linear ramp (0.25 at P_mix=0, 1.0 at P_mix=1)
-            CL *= (0.25 + 0.75 * min(P_mix, 1.0))
+            CL *= 0.25 + 0.75 * min(P_mix, 1.0)
 
             # Gate 3: R_rat — soft consistency check (0.5 min, 1.0 max)
-            CL *= (0.5 + 0.5 * R_rat)
+            CL *= 0.5 + 0.5 * R_rat
 
             detected = CL >= self.detection_threshold
 
@@ -690,9 +733,7 @@ class ALIASIdentifier:
         delta_lambda = mean_wl / self.resolving_power
 
         # Estimate global wavelength offset from strongest peaks
-        sorted_by_emissivity = sorted(
-            fused_lines, key=lambda x: x["avg_emissivity"], reverse=True
-        )
+        sorted_by_emissivity = sorted(fused_lines, key=lambda x: x["avg_emissivity"], reverse=True)
         top_lines = sorted_by_emissivity[: min(5, len(sorted_by_emissivity))]
 
         shifts = []
@@ -883,11 +924,7 @@ class ALIASIdentifier:
             weights = np.sqrt(emissivities[sorted_indices])
             matched_weights = float(np.sum(weights * matched_above[sorted_indices]))
             total_weights = float(np.sum(weights))
-            P_maj = (
-                0.5 + 0.5 * (matched_weights / total_weights)
-                if total_weights > 0
-                else 0.5
-            )
+            P_maj = 0.5 + 0.5 * (matched_weights / total_weights) if total_weights > 0 else 0.5
         else:
             P_maj = 0.5
 
@@ -1103,8 +1140,7 @@ class ALIASIdentifier:
                 relevant = diffs < (3.0 * peak_sigmas)
                 if np.any(relevant):
                     A[relevant, j] += eps * np.exp(
-                        -0.5
-                        * ((peak_wls[relevant] - wl_shifted) / peak_sigmas[relevant]) ** 2
+                        -0.5 * ((peak_wls[relevant] - wl_shifted) / peak_sigmas[relevant]) ** 2
                     )
         return A
 
@@ -1145,7 +1181,7 @@ class ALIASIdentifier:
         total_rss = float(np.sum((peak_intensities - A @ c) ** 2))
 
         # Total signal energy (denominator for partial R^2)
-        total_energy = float(np.sum(peak_intensities ** 2))
+        total_energy = float(np.sum(peak_intensities**2))
         if total_energy == 0:
             return np.ones(n_cands), np.ones(n_cands), c
 
@@ -1157,9 +1193,7 @@ class ALIASIdentifier:
                 P_mix[j] = 1.0
                 continue
             c_reduced, _ = nnls(A_reduced, peak_intensities)
-            rss_without = float(
-                np.sum((peak_intensities - A_reduced @ c_reduced) ** 2)
-            )
+            rss_without = float(np.sum((peak_intensities - A_reduced @ c_reduced) ** 2))
             P_mix[j] = (rss_without - total_rss) / total_energy
 
         # ── P_local: local explanation score ──
@@ -1227,16 +1261,17 @@ class ALIASIdentifier:
         # Apply self-absorption damping to resonance lines so theoretical
         # log-ratios better match observed ratios for strong transitions.
         SA_DAMPING = 0.3
-        raw_emiss = np.array([fused_lines[i]["avg_emissivity"]
-                              for i in matched_indices])
-        damping = np.array([
-            SA_DAMPING if getattr(fused_lines[i]["transition"], "E_i_ev", 1.0) < 0.1
-            else 1.0
-            for i in matched_indices
-        ])
+        raw_emiss = np.array([fused_lines[i]["avg_emissivity"] for i in matched_indices])
+        damping = np.array(
+            [
+                SA_DAMPING if getattr(fused_lines[i]["transition"], "E_i_ev", 1.0) < 0.1 else 1.0
+                for i in matched_indices
+            ]
+        )
         emissivities = raw_emiss * damping
-        obs_intensities = np.array([intensity[peaks[matched_peak_idx[i]][0]]
-                                    for i in matched_indices])
+        obs_intensities = np.array(
+            [intensity[peaks[matched_peak_idx[i]][0]] for i in matched_indices]
+        )
 
         # Guard against zeros
         valid = (emissivities > 0) & (obs_intensities > 0)
@@ -1389,10 +1424,7 @@ class ALIASIdentifier:
         # for the blend weighting.  Single-line elements (N_X=1) naturally
         # reduce to k_rate × k_shift via the blend formula.
         N_X = max(N_matched, 1)
-        k_det = k_rate * (
-            (1.0 / N_X) * k_shift
-            + ((N_X - 1.0) / N_X) * k_sim
-        )
+        k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
 
         # P_SNR: erf-based SNR quality factor (paper formula).
         # z = (I_median - σ_noise) / (σ_noise × √2)

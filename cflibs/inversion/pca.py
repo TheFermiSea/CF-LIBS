@@ -40,6 +40,7 @@ References
 - Sirven et al. (2006), "PCA and SIMCA for LIBS analysis"
 - Zhang et al. (2015), "Multivariate analysis in LIBS"
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -60,7 +61,8 @@ except ImportError:
     HAS_JAX = False
     jnp = None
 
-    def jit(f): return f  # noqa: E731
+    def jit(f):
+        return f  # noqa: E731
 
 
 @dataclass
@@ -179,8 +181,7 @@ class PCAResult:
 
         if scores.shape[1] != self.n_components:
             raise ValueError(
-                f"Component count mismatch: got {scores.shape[1]}, "
-                f"expected {self.n_components}"
+                f"Component count mismatch: got {scores.shape[1]}, " f"expected {self.n_components}"
             )
 
         # Reconstruct: scores @ components + mean
@@ -290,8 +291,7 @@ class PCAResult:
             f"Components: {self.n_components}",
             "-" * 60,
             f"Total variance: {self.total_variance:.4e}",
-            f"Explained variance (all components): "
-            f"{self.cumulative_variance_ratio[-1]:.2%}",
+            f"Explained variance (all components): " f"{self.cumulative_variance_ratio[-1]:.2%}",
             "-" * 60,
             "Top Components:",
         ]
@@ -312,9 +312,7 @@ class PCAResult:
         for thresh in [0.90, 0.95, 0.99]:
             if self.cumulative_variance_ratio[-1] >= thresh:
                 n_needed = self.n_components_for_variance(thresh)
-                lines.append(
-                    f"Components for {thresh:.0%} variance: {n_needed}"
-                )
+                lines.append(f"Components for {thresh:.0%} variance: {n_needed}")
 
         lines.append("=" * 60)
         return "\n".join(lines)
@@ -429,9 +427,7 @@ class PCAPipeline:
             raise ValueError(f"Need at least 2 samples, got {n_samples}")
 
         # Determine number of components
-        n_components = self._resolve_n_components(
-            self.n_components, n_samples, n_features
-        )
+        n_components = self._resolve_n_components(self.n_components, n_samples, n_features)
 
         logger.info(
             f"Fitting PCA: {n_samples} samples, {n_features} features, "
@@ -493,9 +489,7 @@ class PCAPipeline:
 
         if isinstance(n_components, float):
             if not (0 < n_components < 1):
-                raise ValueError(
-                    f"n_components as float must be in (0, 1), got {n_components}"
-                )
+                raise ValueError(f"n_components as float must be in (0, 1), got {n_components}")
             # Will be resolved after SVD based on variance
             # For now, fit all and truncate later
             return max_components
@@ -819,7 +813,6 @@ if HAS_JAX:
         reconstructed = pca_inverse_transform_jax(scores, components, mean)
         residuals = X - reconstructed
         return jnp.mean(residuals**2, axis=1)
-
 
 else:
     # Stubs when JAX is not available

@@ -19,6 +19,7 @@ pytestmark = pytest.mark.requires_jax
 # Skip all tests if JAX is not available
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
+
 h5py = pytest.importorskip("h5py")
 
 from cflibs.inversion.hybrid import (  # noqa: E402
@@ -32,6 +33,7 @@ from cflibs.inversion.hybrid import (  # noqa: E402
 def mock_manifold_file():
     """Create a minimal mock manifold HDF5 file."""
     import os
+
     fd, path = tempfile.mkstemp(suffix=".h5")
     os.close(fd)  # Close file descriptor to prevent leaks
 
@@ -58,9 +60,7 @@ def mock_manifold_file():
 
             # Generate simple spectrum (sum of Gaussians)
             spectrum = np.zeros(len(wavelength))
-            for j, (el, c, center) in enumerate(
-                [("Fe", c_Fe, 400), ("Cu", c_Cu, 500)]
-            ):
+            for j, (el, c, center) in enumerate([("Fe", c_Fe, 400), ("Cu", c_Cu, 500)]):
                 # Intensity depends on concentration and temperature
                 intensity = c * 1000 * np.exp(-3.0 / T_eV)
                 sigma = 10.0 * np.sqrt(T_eV)

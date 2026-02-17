@@ -580,10 +580,7 @@ class TestEdgeCases:
         """Test with highly correlated features (typical in spectra)."""
         rng = np.random.default_rng(42)
         base = rng.standard_normal((30, 1))
-        X = np.hstack([
-            base + 0.01 * rng.standard_normal((30, 1))
-            for _ in range(20)
-        ])
+        X = np.hstack([base + 0.01 * rng.standard_normal((30, 1)) for _ in range(20)])
         Y = base[:, 0] + 0.1 * rng.standard_normal(30)
 
         pls = PLSRegression(n_components=3)

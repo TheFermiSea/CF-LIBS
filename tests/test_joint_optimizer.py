@@ -272,9 +272,7 @@ class TestJointOptimizer:
         )
 
         # Should recover temperature within ~20%
-        np.testing.assert_allclose(
-            result.temperature_eV, data["T_true"], rtol=0.3
-        )
+        np.testing.assert_allclose(result.temperature_eV, data["T_true"], rtol=0.3)
 
         # Concentrations should be close
         assert result.concentrations["Fe"] > 0.5  # True is 0.7
@@ -335,7 +333,9 @@ class TestJointOptimizer:
         assert result.reduced_chi_squared >= 0
         assert result.degrees_of_freedom > 0
 
-    def test_optimize_with_huber_loss(self, simple_forward_model, wavelength_grid, synthetic_spectrum):
+    def test_optimize_with_huber_loss(
+        self, simple_forward_model, wavelength_grid, synthetic_spectrum
+    ):
         """Test optimization with Huber loss for robustness."""
         optimizer = JointOptimizer(
             forward_model=simple_forward_model,
@@ -358,7 +358,9 @@ class TestJointOptimizer:
         assert result.temperature_eV > 0
         assert result.temperature_eV < 10  # Reasonable range
 
-    def test_optimize_with_regularization(self, simple_forward_model, wavelength_grid, synthetic_spectrum):
+    def test_optimize_with_regularization(
+        self, simple_forward_model, wavelength_grid, synthetic_spectrum
+    ):
         """Test optimization with entropy regularization."""
         optimizer = JointOptimizer(
             forward_model=simple_forward_model,
@@ -454,9 +456,7 @@ class TestManyElementOptimization:
         line_centers = {el: [350 + i * 25] for i, el in enumerate(elements)}
         line_strengths = {el: [1.0] for el in elements}
 
-        forward_model = create_simple_forward_model(
-            elements, line_centers, line_strengths
-        )
+        forward_model = create_simple_forward_model(elements, line_centers, line_strengths)
 
         optimizer = JointOptimizer(
             forward_model=forward_model,
@@ -489,9 +489,7 @@ class TestManyElementOptimization:
             line_centers = {el: [400 + i * 10] for i, el in enumerate(elements)}
             line_strengths = {el: [1.0] for el in elements}
 
-            forward_model = create_simple_forward_model(
-                elements, line_centers, line_strengths
-            )
+            forward_model = create_simple_forward_model(elements, line_centers, line_strengths)
 
             optimizer = JointOptimizer(
                 forward_model=forward_model,
@@ -565,6 +563,7 @@ class TestEdgeCases:
 
     def test_single_element(self, simple_forward_model, wavelength_grid):
         """Test with single element."""
+
         # Create single-element forward model
         @jax.jit
         def single_el_model(T, ne, conc, wl):
@@ -580,7 +579,9 @@ class TestEdgeCases:
         )
 
         # Single element should have concentration = 1
-        spectrum = np.array(single_el_model(1.5, 1e17, jnp.array([1.0]), jnp.array(wavelength_grid)))
+        spectrum = np.array(
+            single_el_model(1.5, 1e17, jnp.array([1.0]), jnp.array(wavelength_grid))
+        )
         spectrum = np.maximum(spectrum, 1.0)
 
         result = optimizer.optimize(spectrum)
@@ -616,9 +617,5 @@ class TestEdgeCases:
         assert result_high.convergence_status is not None
 
         # Concentrations should always sum to 1 regardless of starting point
-        np.testing.assert_allclose(
-            sum(result_low.concentrations.values()), 1.0, rtol=1e-6
-        )
-        np.testing.assert_allclose(
-            sum(result_high.concentrations.values()), 1.0, rtol=1e-6
-        )
+        np.testing.assert_allclose(sum(result_low.concentrations.values()), 1.0, rtol=1e-6)
+        np.testing.assert_allclose(sum(result_high.concentrations.values()), 1.0, rtol=1e-6)

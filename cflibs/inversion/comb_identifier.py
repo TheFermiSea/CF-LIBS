@@ -105,7 +105,9 @@ class CombIdentifier:
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
         self.min_correlation = min_correlation  # fingerprint detection threshold
-        self.tooth_activation_threshold = tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        self.tooth_activation_threshold = (
+            tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        )
         self.max_shift_pts = max_shift_pts
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor

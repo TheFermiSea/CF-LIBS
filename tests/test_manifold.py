@@ -43,8 +43,9 @@ class TestManifoldConfig:
         """Test config validation."""
         # Create dummy db file
         from pathlib import Path
+
         Path("test.db").touch()
-        
+
         try:
             # Valid config
             config = ManifoldConfig(
@@ -61,12 +62,12 @@ class TestManifoldConfig:
             # Should raise if db doesn't exist - but we created it, so it should pass check
             # Wait, validate() checks existence.
             # config.validate()
-            
+
             # If we delete it, it should fail
             Path("test.db").unlink()
             with pytest.raises(ValueError, match="Database file not found"):
                 config.validate()
-            
+
             # Restore it for other tests
             Path("test.db").touch()
 
@@ -74,19 +75,19 @@ class TestManifoldConfig:
             config.wavelength_range = (550.0, 250.0)
             with pytest.raises(ValueError, match="Invalid wavelength range"):
                 config.validate()
-            config.wavelength_range = (250.0, 550.0) # Reset
+            config.wavelength_range = (250.0, 550.0)  # Reset
 
             # Invalid temperature range
             config.temperature_range = (2.0, 0.5)
             with pytest.raises(ValueError, match="Invalid temperature range"):
                 config.validate()
-            config.temperature_range = (0.5, 2.0) # Reset
+            config.temperature_range = (0.5, 2.0)  # Reset
 
             # Invalid density range
             config.density_range = (1e19, 1e16)
             with pytest.raises(ValueError, match="Invalid density range"):
                 config.validate()
-            config.density_range = (1e16, 1e19) # Reset
+            config.density_range = (1e16, 1e19)  # Reset
 
             # Invalid steps
             config.temperature_steps = 1
@@ -103,7 +104,7 @@ class TestManifoldConfig:
             config.pixels = 5
             with pytest.raises(ValueError, match="pixels must be >= 10"):
                 config.validate()
-                
+
         finally:
             # Cleanup
             if Path("test.db").exists():

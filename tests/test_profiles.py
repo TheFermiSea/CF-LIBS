@@ -161,9 +161,7 @@ class TestWidemanFaddeeva:
             params = jnp.array([sigma, gamma])
             grad = grad_fn(params)
 
-            assert jnp.isfinite(grad).all(), (
-                f"NaN/Inf gradient at log_ne={log_ne}: grad={grad}"
-            )
+            assert jnp.isfinite(grad).all(), f"NaN/Inf gradient at log_ne={log_ne}: grad={grad}"
 
     def test_voigt_jax_gradient_finite(self):
         """Test Voigt profile has finite gradients for typical LIBS parameters."""
@@ -198,9 +196,9 @@ class TestWidemanFaddeeva:
         for T_eV, log_ne in test_params:
             params = jnp.array([T_eV, log_ne])
             grad = grad_fn(params)
-            assert jnp.isfinite(grad).all(), (
-                f"NaN/Inf gradient at T={T_eV}eV, log_ne={log_ne}: grad={grad}"
-            )
+            assert jnp.isfinite(
+                grad
+            ).all(), f"NaN/Inf gradient at T={T_eV}eV, log_ne={log_ne}: grad={grad}"
 
     def test_voigt_jax_matches_numpy(self):
         """Test JAX Voigt profile matches NumPy version."""
@@ -216,6 +214,6 @@ class TestWidemanFaddeeva:
         v_numpy = voigt_profile(wavelength, center, sigma, gamma, amplitude)
         v_jax = np.array(voigt_profile_jax(jnp.array(wavelength), center, sigma, gamma, amplitude))
 
-        assert np.allclose(v_numpy, v_jax, rtol=1e-4), (
-            f"Max diff: {np.max(np.abs(v_numpy - v_jax))}"
-        )
+        assert np.allclose(
+            v_numpy, v_jax, rtol=1e-4
+        ), f"Max diff: {np.max(np.abs(v_numpy - v_jax))}"

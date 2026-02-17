@@ -39,13 +39,15 @@ from cflibs.inversion.bayesian import (  # noqa: E402
 def bayesian_db():
     """Create a database with partition functions and Stark parameters for Bayesian tests."""
     import os
+
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)  # Close file descriptor to prevent leaks
 
     conn = sqlite3.connect(db_path)
 
     # Create tables
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE lines (
             id INTEGER PRIMARY KEY,
             element TEXT,
@@ -60,18 +62,22 @@ def bayesian_db():
             stark_w REAL,
             stark_alpha REAL
         )
-    """)
+    """
+    )
 
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE species_physics (
             element TEXT,
             sp_num INTEGER,
             ip_ev REAL,
             PRIMARY KEY (element, sp_num)
         )
-    """)
+    """
+    )
 
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE partition_functions (
             element TEXT,
             sp_num INTEGER,
@@ -82,7 +88,8 @@ def bayesian_db():
             a4 REAL,
             PRIMARY KEY (element, sp_num)
         )
-    """)
+    """
+    )
 
     # Insert Fe spectral lines with Stark parameters
     lines_data = [
@@ -95,10 +102,13 @@ def bayesian_db():
         ("Fe", 2, 238.20, 3.0e8, 0.0, 5.22, 10, 10, 600, 0.03, 0.6),
         ("Fe", 2, 259.94, 2.2e8, 0.0, 4.77, 8, 10, 400, 0.025, 0.6),
     ]
-    conn.executemany("""
+    conn.executemany(
+        """
         INSERT INTO lines (element, sp_num, wavelength_nm, aki, ei_ev, ek_ev, gi, gk, rel_int, stark_w, stark_alpha)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, lines_data)
+    """,
+        lines_data,
+    )
 
     # Cu I lines
     cu_lines = [
@@ -106,20 +116,26 @@ def bayesian_db():
         ("Cu", 1, 327.40, 1.4e8, 0.0, 3.79, 2, 2, 1000, 0.01, 0.5),
         ("Cu", 1, 510.55, 2.0e6, 1.39, 3.82, 4, 4, 300, 0.008, 0.5),
     ]
-    conn.executemany("""
+    conn.executemany(
+        """
         INSERT INTO lines (element, sp_num, wavelength_nm, aki, ei_ev, ek_ev, gi, gk, rel_int, stark_w, stark_alpha)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, cu_lines)
+    """,
+        cu_lines,
+    )
 
     # Ionization potentials
-    conn.executemany("""
+    conn.executemany(
+        """
         INSERT INTO species_physics (element, sp_num, ip_ev) VALUES (?, ?, ?)
-    """, [
-        ("Fe", 1, 7.87),
-        ("Fe", 2, 16.18),
-        ("Cu", 1, 7.73),
-        ("Cu", 2, 20.29),
-    ])
+    """,
+        [
+            ("Fe", 1, 7.87),
+            ("Fe", 2, 16.18),
+            ("Cu", 1, 7.73),
+            ("Cu", 2, 20.29),
+        ],
+    )
 
     # Partition function coefficients (Irwin polynomial form)
     # log(U) = a0 + a1*log(T) + a2*log(T)^2 + ...
@@ -133,10 +149,13 @@ def bayesian_db():
         # Cu II: U ~ 1 at 10000K
         ("Cu", 2, 0.0, 0.0, 0.0, 0.0, 0.0),
     ]
-    conn.executemany("""
+    conn.executemany(
+        """
         INSERT INTO partition_functions (element, sp_num, a0, a1, a2, a3, a4)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, pf_data)
+    """,
+        pf_data,
+    )
 
     conn.commit()
     conn.close()
@@ -419,6 +438,7 @@ class TestPriorCreation:
         """Test temperature prior can be created (if NumPyro available)."""
         try:
             from cflibs.inversion.bayesian import create_temperature_prior
+
             prior = create_temperature_prior(0.5, 3.0, "uniform")
             assert prior is not None
         except ImportError:
@@ -428,6 +448,7 @@ class TestPriorCreation:
         """Test density prior can be created (if NumPyro available)."""
         try:
             from cflibs.inversion.bayesian import create_density_prior
+
             prior = create_density_prior(15.0, 19.0, "uniform")
             assert prior is not None
         except ImportError:
@@ -437,6 +458,7 @@ class TestPriorCreation:
         """Test concentration prior can be created (if NumPyro available)."""
         try:
             from cflibs.inversion.bayesian import create_concentration_prior
+
             prior = create_concentration_prior(n_elements=3, alpha=1.0)
             assert prior is not None
         except ImportError:
@@ -589,9 +611,7 @@ class TestMCMCSampling:
 
         # Run MCMC
         sampler = MCMCSampler(model)
-        result = sampler.run(
-            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
-        )
+        result = sampler.run(observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False)
 
         # Test correlation matrix
         corr_data = result.correlation_matrix()
@@ -631,9 +651,7 @@ class TestMCMCSampling:
         observed = np.maximum(observed, 1.0)
 
         sampler = MCMCSampler(model)
-        result = sampler.run(
-            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
-        )
+        result = sampler.run(observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False)
 
         # Test correlation table
         table = result.correlation_table()
@@ -661,9 +679,7 @@ class TestMCMCSampling:
         observed = np.maximum(observed, 1.0)
 
         sampler = MCMCSampler(model)
-        result = sampler.run(
-            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
-        )
+        result = sampler.run(observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False)
 
         # Test plot_corner method exists and doesn't crash
         # (may return None if matplotlib/ArviZ not properly configured)
@@ -693,9 +709,7 @@ class TestMCMCSampling:
         observed = np.maximum(observed, 1.0)
 
         sampler = MCMCSampler(model)
-        result = sampler.run(
-            observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False
-        )
+        result = sampler.run(observed, num_warmup=10, num_samples=30, seed=42, progress_bar=False)
 
         # Test plot_forest method exists and doesn't crash
         try:
@@ -741,6 +755,7 @@ class TestNestedSampling:
 
         # Test derived properties (use approximate comparison for floating point)
         from cflibs.core.constants import EV_TO_K
+
         assert np.isclose(result.T_K_mean, result.T_eV_mean * EV_TO_K)
         assert np.isclose(result.n_e_mean, 10.0**17.1)
 
@@ -809,9 +824,7 @@ class TestNestedSampling:
             concentrations_std={"Fe": 0.05},
         )
 
-        comparison = NestedSamplingResult.compare_models(
-            result_a, result_b, "Model A", "Model B"
-        )
+        comparison = NestedSamplingResult.compare_models(result_a, result_b, "Model A", "Model B")
 
         assert isinstance(comparison, str)
         assert "Model Comparison" in comparison

@@ -18,6 +18,7 @@ from cflibs.manifold.vector_index import SpectralEmbedder
 # VectorIndex requires faiss (optional)
 try:
     from cflibs.manifold.vector_index import VectorIndex, VectorIndexConfig, HAS_FAISS  # noqa: F401
+
     HAS_VECTOR_INDEX = HAS_FAISS
 except ImportError:
     HAS_VECTOR_INDEX = False

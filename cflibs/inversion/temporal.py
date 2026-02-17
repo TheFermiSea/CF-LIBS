@@ -409,9 +409,7 @@ class PlasmaEvolutionModel:
 
         return self.ne_initial_cm3 * np.exp(-time_ns / self.tau_ne_ns)
 
-    def lte_validity(
-        self, time_ns: float, max_delta_E_eV: float = 3.0
-    ) -> float:
+    def lte_validity(self, time_ns: float, max_delta_E_eV: float = 3.0) -> float:
         """
         Estimate LTE validity at given time using McWhirter criterion.
 
@@ -436,7 +434,7 @@ class PlasmaEvolutionModel:
         n_e = self.electron_density(time_ns)
 
         # McWhirter criterion threshold
-        n_e_threshold = 1.6e12 * np.sqrt(T_K) * (max_delta_E_eV ** 3)
+        n_e_threshold = 1.6e12 * np.sqrt(T_K) * (max_delta_E_eV**3)
 
         # LTE score: how much n_e exceeds threshold
         if n_e <= 0:
@@ -512,13 +510,15 @@ class PlasmaEvolutionModel:
             lte = self.lte_validity(t, max_delta_E_eV)
             phase = self.classify_phase(t)
 
-            points.append(PlasmaEvolutionPoint(
-                time_ns=float(t),
-                temperature_K=T,
-                electron_density_cm3=n_e,
-                lte_validity=lte,
-                phase=phase,
-            ))
+            points.append(
+                PlasmaEvolutionPoint(
+                    time_ns=float(t),
+                    temperature_K=T,
+                    electron_density_cm3=n_e,
+                    lte_validity=lte,
+                    phase=phase,
+                )
+            )
 
             # Find when LTE first becomes valid
             if lte_threshold_time is None and lte > 0.9:
@@ -816,12 +816,14 @@ class GateTimingOptimizer:
                 if details["lte_score"] < min_lte_validity:
                     score *= 0.1  # Heavy penalty for poor LTE
 
-                all_results.append({
-                    "delay_ns": delay,
-                    "width_ns": width,
-                    "score": score,
-                    **details,
-                })
+                all_results.append(
+                    {
+                        "delay_ns": delay,
+                        "width_ns": width,
+                        "score": score,
+                        **details,
+                    }
+                )
 
                 if score > best_score:
                     best_score = score
@@ -884,12 +886,14 @@ class GateTimingOptimizer:
         results = []
         for delay in delays:
             score, details = self.score_gate(delay, fixed_width_ns, max_delta_E_eV)
-            results.append({
-                "delay_ns": delay,
-                "width_ns": fixed_width_ns,
-                "score": score,
-                **details,
-            })
+            results.append(
+                {
+                    "delay_ns": delay,
+                    "width_ns": fixed_width_ns,
+                    "score": score,
+                    **details,
+                }
+            )
         return results
 
 
@@ -1000,7 +1004,7 @@ class TemporalSelfAbsorptionCorrector:
         # tau ~ n_lower * f * lambda^2 * L
         # f ~ A_ki * lambda^2 (rough scaling)
         SCALE_FACTOR = 1e-25
-        tau = SCALE_FACTOR * A_ki * (lambda_cm ** 3) * n_lower * self.plasma_length_cm
+        tau = SCALE_FACTOR * A_ki * (lambda_cm**3) * n_lower * self.plasma_length_cm
 
         return max(0.0, tau)
 
@@ -1045,11 +1049,7 @@ class TemporalSelfAbsorptionCorrector:
         float
             Effective (averaged) optical depth
         """
-        times = np.linspace(
-            gate.delay_ns,
-            gate.end_ns,
-            self.integration_points
-        )
+        times = np.linspace(gate.delay_ns, gate.end_ns, self.integration_points)
 
         tau_values = []
         weights = []  # Weight by emission intensity
@@ -1059,8 +1059,14 @@ class TemporalSelfAbsorptionCorrector:
             U_T = partition_func_callable(T_K)
 
             tau = self.optical_depth_at_time(
-                t, wavelength_nm, A_ki, g_k, E_lower_eV,
-                concentration, total_number_density_cm3, U_T
+                t,
+                wavelength_nm,
+                A_ki,
+                g_k,
+                E_lower_eV,
+                concentration,
+                total_number_density_cm3,
+                U_T,
             )
             tau_values.append(tau)
 
@@ -1136,8 +1142,14 @@ class TemporalSelfAbsorptionCorrector:
 
             # Calculate gate-averaged optical depth
             tau_avg = self.gate_averaged_optical_depth(
-                gate, obs.wavelength_nm, obs.A_ki, obs.g_k, E_lower,
-                C_s, total_number_density_cm3, U_func
+                gate,
+                obs.wavelength_nm,
+                obs.A_ki,
+                obs.g_k,
+                E_lower,
+                C_s,
+                total_number_density_cm3,
+                U_func,
             )
 
             time_averaged_tau[obs.wavelength_nm] = tau_avg
@@ -1148,8 +1160,14 @@ class TemporalSelfAbsorptionCorrector:
                 T_K = self.model.temperature(t)
                 U_T = U_func(T_K)
                 tau_t = self.optical_depth_at_time(
-                    t, obs.wavelength_nm, obs.A_ki, obs.g_k, E_lower,
-                    C_s, total_number_density_cm3, U_T
+                    t,
+                    obs.wavelength_nm,
+                    obs.A_ki,
+                    obs.g_k,
+                    E_lower,
+                    C_s,
+                    total_number_density_cm3,
+                    U_T,
                 )
                 tau_at_times[float(t)] = tau_t
 
@@ -1158,8 +1176,7 @@ class TemporalSelfAbsorptionCorrector:
             # Calculate correction factor
             if tau_avg > mask_threshold:
                 warnings.append(
-                    f"Line {obs.wavelength_nm:.2f} nm masked: "
-                    f"time-averaged tau={tau_avg:.2f}"
+                    f"Line {obs.wavelength_nm:.2f} nm masked: " f"time-averaged tau={tau_avg:.2f}"
                 )
                 correction_factors[obs.wavelength_nm] = {t: 0.0 for t in sample_times}
                 continue
@@ -1178,16 +1195,18 @@ class TemporalSelfAbsorptionCorrector:
                 correction = 1.0 / f_tau
                 corrected_intensity = obs.intensity * correction
 
-                corrected_obs.append(LineObservation(
-                    wavelength_nm=obs.wavelength_nm,
-                    intensity=corrected_intensity,
-                    intensity_uncertainty=obs.intensity_uncertainty * correction,
-                    element=obs.element,
-                    ionization_stage=obs.ionization_stage,
-                    E_k_ev=obs.E_k_ev,
-                    g_k=obs.g_k,
-                    A_ki=obs.A_ki,
-                ))
+                corrected_obs.append(
+                    LineObservation(
+                        wavelength_nm=obs.wavelength_nm,
+                        intensity=corrected_intensity,
+                        intensity_uncertainty=obs.intensity_uncertainty * correction,
+                        element=obs.element,
+                        ionization_stage=obs.ionization_stage,
+                        E_k_ev=obs.E_k_ev,
+                        g_k=obs.g_k,
+                        A_ki=obs.A_ki,
+                    )
+                )
 
                 # Calculate correction factor at each time
                 factors_at_times: Dict[float, float] = {}
@@ -1250,6 +1269,7 @@ class TimeResolvedCFLIBSSolver:
 
         # Import here to avoid circular imports
         from cflibs.inversion.solver import IterativeCFLIBSSolver
+
         if self.base_solver is None:
             self.base_solver = IterativeCFLIBSSolver(atomic_db)
 
@@ -1277,9 +1297,7 @@ class TimeResolvedCFLIBSSolver:
             Results including concentrations, temperature, quality metrics
         """
         result = self.base_solver.solve(
-            spectrum.observations,
-            closure_mode=closure_mode,
-            **solver_kwargs
+            spectrum.observations, closure_mode=closure_mode, **solver_kwargs
         )
 
         return {
@@ -1384,9 +1402,7 @@ class TimeResolvedCFLIBSSolver:
             times = np.array([t[0] for t in temp_profile])
             temps = np.array([t[1] for t in temp_profile])
             densities = np.array([d[1] for d in density_profile])
-            self.evolution_model = PlasmaEvolutionModel.from_measurements(
-                times, temps, densities
-            )
+            self.evolution_model = PlasmaEvolutionModel.from_measurements(times, temps, densities)
 
         # Compute weights
         gate_weights: Dict[float, float] = {}
@@ -1402,9 +1418,7 @@ class TimeResolvedCFLIBSSolver:
                 else:
                     expected_T = result["temperature_K"]
                     expected_ne = result["electron_density_cm3"]
-                gate_weights[delay] = self._compute_gate_weight(
-                    result, expected_T, expected_ne
-                )
+                gate_weights[delay] = self._compute_gate_weight(result, expected_T, expected_ne)
 
         # Normalize weights
         total_weight = sum(gate_weights.values())
@@ -1450,9 +1464,7 @@ class TimeResolvedCFLIBSSolver:
                 concentration_variances[el] = variance
 
         # Uncertainties from spread
-        concentration_uncertainties = {
-            el: np.sqrt(v) for el, v in concentration_variances.items()
-        }
+        concentration_uncertainties = {el: np.sqrt(v) for el, v in concentration_variances.items()}
 
         # Normalize concentrations
         total_c = sum(concentrations.values())
@@ -1512,26 +1524,26 @@ def create_default_evolution_model(
 
     defaults = {
         "metal": {
-            "T_initial_K": 20000.0 * energy_factor ** 0.3,
-            "ne_initial_cm3": 1e18 * energy_factor ** 0.5,
+            "T_initial_K": 20000.0 * energy_factor**0.3,
+            "ne_initial_cm3": 1e18 * energy_factor**0.5,
             "tau_T_ns": 1000.0,
             "tau_ne_ns": 500.0,
         },
         "ceramic": {
-            "T_initial_K": 15000.0 * energy_factor ** 0.3,
-            "ne_initial_cm3": 5e17 * energy_factor ** 0.5,
+            "T_initial_K": 15000.0 * energy_factor**0.3,
+            "ne_initial_cm3": 5e17 * energy_factor**0.5,
             "tau_T_ns": 800.0,
             "tau_ne_ns": 400.0,
         },
         "polymer": {
-            "T_initial_K": 12000.0 * energy_factor ** 0.3,
-            "ne_initial_cm3": 2e17 * energy_factor ** 0.5,
+            "T_initial_K": 12000.0 * energy_factor**0.3,
+            "ne_initial_cm3": 2e17 * energy_factor**0.5,
             "tau_T_ns": 600.0,
             "tau_ne_ns": 300.0,
         },
         "soil": {
-            "T_initial_K": 18000.0 * energy_factor ** 0.3,
-            "ne_initial_cm3": 8e17 * energy_factor ** 0.5,
+            "T_initial_K": 18000.0 * energy_factor**0.3,
+            "ne_initial_cm3": 8e17 * energy_factor**0.5,
             "tau_T_ns": 900.0,
             "tau_ne_ns": 450.0,
         },

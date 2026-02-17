@@ -442,9 +442,7 @@ BENCHMARK_CRITERIA = {
 # ============================================================================
 
 
-def select_representative_spectrum(
-    data: np.ndarray, dataset_name: str
-) -> np.ndarray:
+def select_representative_spectrum(data: np.ndarray, dataset_name: str) -> np.ndarray:
     """
     Select a representative 1D spectrum from multi-dimensional data.
 
@@ -494,9 +492,7 @@ def select_representative_spectrum(
 # ============================================================================
 
 
-def estimate_resolving_power(
-    wavelength: np.ndarray, intensity: np.ndarray
-) -> float:
+def estimate_resolving_power(wavelength: np.ndarray, intensity: np.ndarray) -> float:
     """
     Estimate instrument resolving power from isolated peaks.
 
@@ -520,7 +516,7 @@ def estimate_resolving_power(
         return 5000.0
 
     def gaussian(x, A, mu, sigma, bg):
-        return A * np.exp(-(x - mu) ** 2 / (2 * sigma**2)) + bg
+        return A * np.exp(-((x - mu) ** 2) / (2 * sigma**2)) + bg
 
     rp_estimates = []
     pixel_spacing = np.median(np.diff(wavelength))
@@ -587,13 +583,17 @@ def run_all_identifiers(
     algorithms = [
         ("ALIAS", ALIASIdentifier, {"resolving_power": resolving_power}),
         ("Comb", CombIdentifier, {"resolving_power": resolving_power}),
-        ("Correlation", CorrelationIdentifier, {
-            "resolving_power": resolving_power,
-            "T_range_K": (5000, 15000),
-            "T_steps": 7,
-            "n_e_range_cm3": (1e15, 5e17),
-            "n_e_steps": 4,
-        }),
+        (
+            "Correlation",
+            CorrelationIdentifier,
+            {
+                "resolving_power": resolving_power,
+                "T_range_K": (5000, 15000),
+                "T_steps": 7,
+                "n_e_range_cm3": (1e15, 5e17),
+                "n_e_steps": 4,
+            },
+        ),
     ]
 
     for name, Cls, kwargs in algorithms:
@@ -671,8 +671,10 @@ def print_result_table(
                 if is_blind:
                     detected_str = "YES" if e.detected else "NO"
                 else:
-                    detected_str = "YES*" if (e.detected and elem in expected) else (
-                        "YES" if e.detected else "NO"
+                    detected_str = (
+                        "YES*"
+                        if (e.detected and elem in expected)
+                        else ("YES" if e.detected else "NO")
                     )
                 matched_str = f"{e.n_matched_lines}/{e.n_total_lines}"
                 print(
@@ -1087,7 +1089,10 @@ def main():
             sys.exit(1)
 
     # Summary tracking
-    summary = {algo: {"expected_detected": 0, "total_expected": 0} for algo in ["ALIAS", "Comb", "Correlation"]}
+    summary = {
+        algo: {"expected_detected": 0, "total_expected": 0}
+        for algo in ["ALIAS", "Comb", "Correlation"]
+    }
     # Per-dataset detection results for benchmark mode
     # Structure: {algo: {(dataset_name, element): bool_detected}}
     detection_results: Dict[str, Dict[Tuple[str, str], bool]] = {
@@ -1197,7 +1202,10 @@ def main():
         # Depth-scan robustness reporting
         if args.robustness and loader_name == "scipp_depth_scan":
             report_depth_scan_robustness(
-                str(data_path), db, elements, dataset["name"],
+                str(data_path),
+                db,
+                elements,
+                dataset["name"],
                 resolving_power=rp,
             )
 
@@ -1205,7 +1213,9 @@ def main():
     print(f"\n{'='*100}")
     print("OVERALL SUMMARY")
     print(f"{'='*100}")
-    print(f"{'Algorithm':<15} {'Expected Detected':<20} {'Total Expected':<15} {'Success Rate':<15}")
+    print(
+        f"{'Algorithm':<15} {'Expected Detected':<20} {'Total Expected':<15} {'Success Rate':<15}"
+    )
     print("-" * 100)
 
     for algo_name in ["ALIAS", "Comb", "Correlation"]:

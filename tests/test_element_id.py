@@ -897,21 +897,39 @@ def test_to_line_observations_multiple_elements(mock_transition, mock_transition
     )
 
     fe_id = ElementIdentification(
-        element="Fe", detected=True, score=0.85, confidence=0.90,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[fe_line],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.85,
+        confidence=0.90,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[fe_line],
+        unmatched_lines=[],
+        metadata={},
     )
 
     ti_id = ElementIdentification(
-        element="Ti", detected=True, score=0.70, confidence=0.75,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[ti_line],
-        unmatched_lines=[], metadata={},
+        element="Ti",
+        detected=True,
+        score=0.70,
+        confidence=0.75,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[ti_line],
+        unmatched_lines=[],
+        metadata={},
     )
 
     cu_id = ElementIdentification(
-        element="Cu", detected=True, score=0.95, confidence=0.95,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[cu_line],
-        unmatched_lines=[], metadata={},
+        element="Cu",
+        detected=True,
+        score=0.95,
+        confidence=0.95,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[cu_line],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result = ElementIdentificationResult(
@@ -991,9 +1009,15 @@ def test_to_line_observations_intensity_uncertainty_calculation(mock_transition)
     )
 
     elem_id_high = ElementIdentification(
-        element="Fe", detected=True, score=0.9, confidence=0.9,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[line_high],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.9,
+        confidence=0.9,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[line_high],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result_high = ElementIdentificationResult(
@@ -1022,9 +1046,15 @@ def test_to_line_observations_intensity_uncertainty_calculation(mock_transition)
     )
 
     elem_id_low = ElementIdentification(
-        element="Fe", detected=True, score=0.5, confidence=0.5,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[line_low],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.5,
+        confidence=0.5,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[line_low],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result_low = ElementIdentificationResult(
@@ -1055,9 +1085,15 @@ def test_to_line_observations_uses_theoretical_wavelength(mock_transition):
     )
 
     elem_id = ElementIdentification(
-        element="Fe", detected=True, score=0.85, confidence=0.90,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[line],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.85,
+        confidence=0.90,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[line],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result = ElementIdentificationResult(
@@ -1099,9 +1135,15 @@ def test_to_line_observations_deduplication_order(mock_transition):
     )
 
     elem_id = ElementIdentification(
-        element="Fe", detected=True, score=0.85, confidence=0.90,
-        n_matched_lines=2, n_total_lines=2, matched_lines=[line1, line2],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.85,
+        confidence=0.90,
+        n_matched_lines=2,
+        n_total_lines=2,
+        matched_lines=[line1, line2],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result = ElementIdentificationResult(
@@ -1124,21 +1166,39 @@ def test_to_line_observations_deduplication_order(mock_transition):
 def test_element_identification_result_consistency():
     """Test that all_elements equals detected + rejected."""
     fe_id = ElementIdentification(
-        element="Fe", detected=True, score=0.85, confidence=0.90,
-        n_matched_lines=1, n_total_lines=1, matched_lines=[],
-        unmatched_lines=[], metadata={},
+        element="Fe",
+        detected=True,
+        score=0.85,
+        confidence=0.90,
+        n_matched_lines=1,
+        n_total_lines=1,
+        matched_lines=[],
+        unmatched_lines=[],
+        metadata={},
     )
 
     ti_id = ElementIdentification(
-        element="Ti", detected=False, score=0.30, confidence=0.25,
-        n_matched_lines=0, n_total_lines=5, matched_lines=[],
-        unmatched_lines=[], metadata={},
+        element="Ti",
+        detected=False,
+        score=0.30,
+        confidence=0.25,
+        n_matched_lines=0,
+        n_total_lines=5,
+        matched_lines=[],
+        unmatched_lines=[],
+        metadata={},
     )
 
     cu_id = ElementIdentification(
-        element="Cu", detected=True, score=0.75, confidence=0.80,
-        n_matched_lines=2, n_total_lines=3, matched_lines=[],
-        unmatched_lines=[], metadata={},
+        element="Cu",
+        detected=True,
+        score=0.75,
+        confidence=0.80,
+        n_matched_lines=2,
+        n_total_lines=3,
+        matched_lines=[],
+        unmatched_lines=[],
+        metadata={},
     )
 
     result = ElementIdentificationResult(

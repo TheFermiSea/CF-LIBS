@@ -582,7 +582,10 @@ class TestPINNInverter:
         concentrations = np.random.dirichlet([1, 1], n_samples)
 
         history = simple_inverter.train(
-            spectra, temperatures, log_densities, concentrations,
+            spectra,
+            temperatures,
+            log_densities,
+            concentrations,
             epochs=10,
             batch_size=10,
             validation_split=0.2,
@@ -605,7 +608,10 @@ class TestPINNInverter:
         concentrations = np.random.dirichlet([1, 1], n_samples)
 
         simple_inverter.train(
-            spectra, temperatures, log_densities, concentrations,
+            spectra,
+            temperatures,
+            log_densities,
+            concentrations,
             epochs=10,
             batch_size=10,
             verbose=False,
@@ -689,25 +695,31 @@ class TestCreatePINNFromDatabase:
     def pinn_db(self):
         """Create a database for PINN initialization."""
         import os
+
         fd, db_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
 
         conn = sqlite3.connect(db_path)
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE species_physics (
                 element TEXT,
                 sp_num INTEGER,
                 ip_ev REAL,
                 PRIMARY KEY (element, sp_num)
             )
-        """)
-        conn.executemany("""
+        """
+        )
+        conn.executemany(
+            """
             INSERT INTO species_physics (element, sp_num, ip_ev) VALUES (?, ?, ?)
-        """, [
-            ("Fe", 1, 7.87),
-            ("Cu", 1, 7.73),
-            ("Mn", 1, 7.43),
-        ])
+        """,
+            [
+                ("Fe", 1, 7.87),
+                ("Cu", 1, 7.73),
+                ("Mn", 1, 7.43),
+            ],
+        )
         conn.commit()
         conn.close()
 

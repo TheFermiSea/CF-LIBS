@@ -140,6 +140,7 @@ def test_vector_index_without_faiss():
     # Skip if faiss is available
     try:
         import faiss  # noqa: F401
+
         pytest.skip("faiss is installed, cannot test ImportError")
     except ImportError:  # faiss not installed; continue to test error handling
         pass

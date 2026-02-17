@@ -211,9 +211,7 @@ class TestPhysicsGuidedFeatureExtractor:
         intensity_features = [
             f for f in result.features if f.feature_type == FeatureType.PEAK_INTENSITY
         ]
-        area_features = [
-            f for f in result.features if f.feature_type == FeatureType.PEAK_AREA
-        ]
+        area_features = [f for f in result.features if f.feature_type == FeatureType.PEAK_AREA]
 
         # At least one intensity and area feature for Cu
         cu_intensity = [f for f in intensity_features if f.element == "Cu"]
@@ -240,9 +238,7 @@ class TestPhysicsGuidedFeatureExtractor:
         result = extractor.extract(wavelengths, spectrum)
 
         # Should have ratio features
-        ratio_features = [
-            f for f in result.features if f.feature_type == FeatureType.RATIO
-        ]
+        ratio_features = [f for f in result.features if f.feature_type == FeatureType.RATIO]
 
         # If both Fe and Cu are detected, should have ratio
         if "Fe" in result.elements_detected and "Cu" in result.elements_detected:

@@ -43,6 +43,7 @@ References
 - Tognoni et al. (2010): CF-LIBS state of the art
 - Lu et al. (2021): DeepXDE for physics-informed deep learning
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -70,7 +71,8 @@ except ImportError:
     HAS_JAX = False
     jnp = None
 
-    def jit(f): return f  # noqa: E731
+    def jit(f):
+        return f  # noqa: E731
 
     grad = None
     value_and_grad = None
@@ -162,9 +164,7 @@ class PINNConfig:
     use_batch_norm: bool = True
     n_ensemble: int = 1
     learning_rate: float = 1e-3
-    physics_config: PhysicsConstraintConfig = field(
-        default_factory=PhysicsConstraintConfig
-    )
+    physics_config: PhysicsConstraintConfig = field(default_factory=PhysicsConstraintConfig)
 
 
 @dataclass
@@ -233,18 +233,22 @@ class PINNResult:
             unc = self.concentration_uncertainties.get(el, 0.0)
             lines.append(f"  {el}: {c:.4f} +/- {unc:.4f}")
 
-        lines.extend([
-            "",
-            "Physics Constraint Losses:",
-        ])
+        lines.extend(
+            [
+                "",
+                "Physics Constraint Losses:",
+            ]
+        )
         for name, loss in self.physics_loss.items():
             lines.append(f"  {name}: {loss:.4e}")
 
-        lines.extend([
-            "",
-            f"Total loss: {self.total_loss:.4e}",
-            f"Converged: {self.converged} ({self.epochs} epochs)",
-        ])
+        lines.extend(
+            [
+                "",
+                f"Total loss: {self.total_loss:.4e}",
+                f"Converged: {self.converged} ({self.epochs} epochs)",
+            ]
+        )
         return "\n".join(lines)
 
 
@@ -293,9 +297,7 @@ def boltzmann_residual(
 
     # Expected populations from Boltzmann
     expected = (
-        n_ref
-        * (degeneracies / g_ref)
-        * jnp.exp(-(energies_eV - E_ref) / jnp.maximum(T_eV, 0.1))
+        n_ref * (degeneracies / g_ref) * jnp.exp(-(energies_eV - E_ref) / jnp.maximum(T_eV, 0.1))
     )
 
     # Safe comparison avoiding division by zero
@@ -413,9 +415,7 @@ def positivity_penalty(values: Any, eps: float = 1e-6) -> Any:
     return jnp.sum(jnp.maximum(-values + eps, 0.0) ** 2)
 
 
-def range_penalty(
-    value: float, low: float, high: float, sharpness: float = 10.0
-) -> Any:
+def range_penalty(value: float, low: float, high: float, sharpness: float = 10.0) -> Any:
     """
     Soft penalty for values outside a valid range.
 
@@ -519,9 +519,7 @@ if HAS_JAX and HAS_EQUINOX:
             losses = {}
 
             # Closure constraint (concentrations sum to 1)
-            losses["closure"] = self.config.lambda_closure * closure_residual(
-                concentrations
-            )
+            losses["closure"] = self.config.lambda_closure * closure_residual(concentrations)
 
             # Positivity constraint (all concentrations >= 0)
             losses["positivity"] = positivity_penalty(concentrations)
@@ -555,9 +553,7 @@ if HAS_JAX and HAS_EQUINOX:
                 # Penalize extreme ratios that would give unrealistic ionization
                 log_saha = jnp.log10(jnp.maximum(saha_ratios, 1e-30))
                 # Typical LIBS: Saha ratio between 0.01 and 100
-                saha_penalty = jnp.mean(
-                    jnp.maximum(jnp.abs(log_saha) - 2.0, 0.0) ** 2
-                )
+                saha_penalty = jnp.mean(jnp.maximum(jnp.abs(log_saha) - 2.0, 0.0) ** 2)
                 losses["saha"] = self.config.lambda_saha * saha_penalty
 
             return losses
@@ -621,8 +617,7 @@ if HAS_JAX and HAS_EQUINOX:
             keys = random.split(key, len(dims) - 1)
 
             self.layers = [
-                eqx.nn.Linear(dims[i], dims[i + 1], key=keys[i])
-                for i in range(len(dims) - 1)
+                eqx.nn.Linear(dims[i], dims[i + 1], key=keys[i]) for i in range(len(dims) - 1)
             ]
 
             # Set activation function
@@ -636,9 +631,7 @@ if HAS_JAX and HAS_EQUINOX:
             self.activation_fn = activations.get(activation.lower(), jax.nn.gelu)
             self.dropout_rate = dropout_rate
 
-        def __call__(
-            self, x: jnp.ndarray, *, key: Optional[jax.Array] = None
-        ) -> jnp.ndarray:
+        def __call__(self, x: jnp.ndarray, *, key: Optional[jax.Array] = None) -> jnp.ndarray:
             """
             Forward pass through MLP.
 
@@ -772,9 +765,7 @@ if HAS_JAX and HAS_EQUINOX:
 
             # Temperature: sigmoid scaled to valid range
             T_logit = self.T_head(features).squeeze()
-            T_eV = self.T_range[0] + jax.nn.sigmoid(T_logit) * (
-                self.T_range[1] - self.T_range[0]
-            )
+            T_eV = self.T_range[0] + jax.nn.sigmoid(T_logit) * (self.T_range[1] - self.T_range[0])
 
             # Electron density: sigmoid scaled to valid range
             ne_logit = self.ne_head(features).squeeze()
@@ -879,9 +870,7 @@ class DifferentiableForwardModel:
 
         # Compute Gaussian profiles and sum
         diff = wavelength[:, None] - line_positions[None, :]
-        profiles = jnp.exp(-0.5 * (diff / sigma_total) ** 2) / (
-            sigma_total * jnp.sqrt(2 * jnp.pi)
-        )
+        profiles = jnp.exp(-0.5 * (diff / sigma_total) ** 2) / (sigma_total * jnp.sqrt(2 * jnp.pi))
 
         spectrum = jnp.sum(line_intensity * profiles, axis=1)
         return spectrum
@@ -982,7 +971,9 @@ class PINNInverter:
         if not HAS_JAX:
             raise ImportError("JAX required for PINNInverter")
         if not HAS_EQUINOX:
-            raise ImportError("Equinox required for PINNInverter. Install with: pip install equinox")
+            raise ImportError(
+                "Equinox required for PINNInverter. Install with: pip install equinox"
+            )
         if not HAS_OPTAX:
             raise ImportError("Optax required for PINNInverter. Install with: pip install optax")
 
@@ -1020,7 +1011,9 @@ class PINNInverter:
 
         # Optimizer
         self.optimizer = optax.adam(config.learning_rate)
-        self.opt_states = [self.optimizer.init(eqx.filter(enc, eqx.is_array)) for enc in self.encoders]
+        self.opt_states = [
+            self.optimizer.init(eqx.filter(enc, eqx.is_array)) for enc in self.encoders
+        ]
 
         # Training state
         self.trained = False
@@ -1227,9 +1220,7 @@ class PINNInverter:
                 break
 
             if verbose and epoch % 100 == 0:
-                logger.info(
-                    f"Epoch {epoch}: train_loss={train_loss:.4e}, val_loss={val_loss:.4e}"
-                )
+                logger.info(f"Epoch {epoch}: train_loss={train_loss:.4e}, val_loss={val_loss:.4e}")
 
         self.trained = True
         self.train_history = history
@@ -1282,9 +1273,7 @@ class PINNInverter:
         conc_std = np.std(conc_preds, axis=0) if len(conc_preds) > 1 else np.zeros(self.n_elements)
 
         # Compute physics losses
-        physics_losses = self.physics_layer(
-            T_mean, log_ne_mean, jnp.array(conc_mean)
-        )
+        physics_losses = self.physics_layer(T_mean, log_ne_mean, jnp.array(conc_mean))
         total_loss = sum(physics_losses.values())
 
         concentrations = {el: float(conc_mean[i]) for i, el in enumerate(self.elements)}

@@ -119,9 +119,7 @@ def invert_cmd(args):
 
     elements = args.elements or analysis_cfg.get("elements") or config.get("elements")
     if elements is None:
-        raise ValueError(
-            "Elements must be specified via --elements or config 'analysis.elements'."
-        )
+        raise ValueError("Elements must be specified via --elements or config 'analysis.elements'.")
     if isinstance(elements, str):
         elements = [elements]
 
@@ -151,6 +149,7 @@ def invert_cmd(args):
         else analysis_cfg.get("peak_width_nm", 0.2)
     )
     min_relative_intensity = analysis_cfg.get("min_relative_intensity")
+    resolving_power = analysis_cfg.get("resolving_power")
 
     detection = detect_line_observations(
         wavelength=wavelength,
@@ -158,6 +157,7 @@ def invert_cmd(args):
         atomic_db=atomic_db,
         elements=elements,
         wavelength_tolerance_nm=wavelength_tolerance,
+        resolving_power=resolving_power,
         min_peak_height=min_peak_height,
         peak_width_nm=peak_width_nm,
         min_relative_intensity=min_relative_intensity,
@@ -215,9 +215,7 @@ def invert_cmd(args):
 
     print("CF-LIBS inversion results:")
     print(f"  Temperature: {result.temperature_K:.0f} ± {result.temperature_uncertainty_K:.0f} K")
-    print(
-        f"  Electron density: {result.electron_density_cm3:.3e} cm^-3"
-    )
+    print(f"  Electron density: {result.electron_density_cm3:.3e} cm^-3")
     print("  Concentrations:")
     for element, concentration in result.concentrations.items():
         unc = result.concentration_uncertainties.get(element, 0.0)

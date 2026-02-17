@@ -473,12 +473,24 @@ class TestFastAnalyzer:
         # Only 2 lines (need at least 3)
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=100.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=5, A_ki=1e8,
+                wavelength_nm=400.0,
+                intensity=100.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=5,
+                A_ki=1e8,
             ),
             LineObservation(
-                wavelength_nm=500.0, intensity=80.0, intensity_uncertainty=8.0,
-                element="Fe", ionization_stage=1, E_k_ev=4.5, g_k=7, A_ki=8e7,
+                wavelength_nm=500.0,
+                intensity=80.0,
+                intensity_uncertainty=8.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.5,
+                g_k=7,
+                A_ki=8e7,
             ),
         ]
 
@@ -567,7 +579,8 @@ class TestStreamingAnalyzer:
             results_received.append(result)
 
         analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer,
+            mock_atomic_db,
+            buffer,
             config=StreamingConfig(mode=AnalysisMode.FAST),
             result_callback=callback,
             elements=["Fe"],
@@ -590,9 +603,7 @@ class TestStreamingAnalyzer:
         """Test that latency is properly monitored."""
         buffer = SpectrumBuffer(max_size=10)
         config = StreamingConfig(mode=AnalysisMode.FAST, max_latency_ms=1000.0)
-        analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer, config=config, elements=["Fe"]
-        )
+        analyzer = StreamingAnalyzer(mock_atomic_db, buffer, config=config, elements=["Fe"])
 
         analyzer.start()
 
@@ -611,7 +622,8 @@ class TestStreamingAnalyzer:
         """Test retrieving buffered results."""
         buffer = SpectrumBuffer(max_size=10)
         analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer,
+            mock_atomic_db,
+            buffer,
             config=StreamingConfig(mode=AnalysisMode.FAST),
             elements=["Fe"],
         )
@@ -632,9 +644,7 @@ class TestStreamingAnalyzer:
         """Test batch processing mode."""
         buffer = SpectrumBuffer(max_size=20)
         config = StreamingConfig(mode=AnalysisMode.BATCH, batch_size=3)
-        analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer, config=config, elements=["Fe"]
-        )
+        analyzer = StreamingAnalyzer(mock_atomic_db, buffer, config=config, elements=["Fe"])
 
         analyzer.start()
 
@@ -656,7 +666,8 @@ class TestStreamingAnalyzer:
             results_received.append(result)
 
         analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer,
+            mock_atomic_db,
+            buffer,
             config=StreamingConfig(mode=AnalysisMode.FAST),
             result_callback=callback,
             elements=["Fe"],
@@ -723,18 +734,14 @@ class TestEdgeOptimizedModel:
 
     def test_get_partition_function(self, mock_atomic_db):
         """Test partition function retrieval."""
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe"], compile_jax=False
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe"], compile_jax=False)
 
         pf = model.get_partition_function("Fe", 1, 10000.0)
         assert pf > 0
 
     def test_get_partition_function_missing(self, mock_atomic_db):
         """Test partition function for missing element."""
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe"], compile_jax=False
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe"], compile_jax=False)
 
         # Should return default
         pf = model.get_partition_function("Xe", 1, 10000.0)
@@ -742,18 +749,14 @@ class TestEdgeOptimizedModel:
 
     def test_get_ionization_potential(self, mock_atomic_db):
         """Test ionization potential retrieval."""
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe"], compile_jax=False
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe"], compile_jax=False)
 
         ip = model.get_ionization_potential("Fe")
         assert ip > 0
 
     def test_get_transitions(self, mock_atomic_db):
         """Test pruned transitions retrieval."""
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe"], compile_jax=False
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe"], compile_jax=False)
 
         transitions = model.get_transitions("Fe")
         assert len(transitions) <= 50  # Max 50 per element
@@ -764,9 +767,7 @@ class TestEdgeOptimizedModel:
 
     def test_memory_estimation(self, mock_atomic_db):
         """Test memory footprint estimation."""
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe", "Cu"], compile_jax=False
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe", "Cu"], compile_jax=False)
 
         mem_mb = model.estimate_memory_mb()
         assert mem_mb >= 0
@@ -777,9 +778,7 @@ class TestEdgeOptimizedModel:
         """Test JAX function compilation."""
         pytest.importorskip("jax")
 
-        model = EdgeOptimizedModel(
-            mock_atomic_db, elements=["Fe"], compile_jax=True
-        )
+        model = EdgeOptimizedModel(mock_atomic_db, elements=["Fe"], compile_jax=True)
 
         assert "boltzmann_slope" in model._compiled_functions
 
@@ -932,9 +931,7 @@ class TestStreamingIntegration:
         """Test high-throughput scenario."""
         buffer = SpectrumBuffer(max_size=200, drop_old=True)
         config = StreamingConfig(mode=AnalysisMode.FAST, max_latency_ms=100.0)
-        analyzer = StreamingAnalyzer(
-            mock_atomic_db, buffer, config=config, elements=["Fe"]
-        )
+        analyzer = StreamingAnalyzer(mock_atomic_db, buffer, config=config, elements=["Fe"])
 
         analyzer.start()
 

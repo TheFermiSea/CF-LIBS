@@ -88,8 +88,7 @@ def load_benchmark(
             format = BenchmarkFormat.HDF5
         else:
             raise ValueError(
-                f"Cannot detect format from extension: {ext}. "
-                "Please specify format explicitly."
+                f"Cannot detect format from extension: {ext}. " "Please specify format explicitly."
             )
 
     if format == BenchmarkFormat.JSON:
@@ -134,8 +133,7 @@ def save_benchmark(
             format = BenchmarkFormat.HDF5
         else:
             raise ValueError(
-                f"Cannot detect format from extension: {ext}. "
-                "Please specify format explicitly."
+                f"Cannot detect format from extension: {ext}. " "Please specify format explicitly."
             )
 
     if format == BenchmarkFormat.JSON:
@@ -181,9 +179,7 @@ def _load_hdf5(path: Path) -> "BenchmarkDataset":
     try:
         import h5py
     except ImportError:
-        raise ImportError(
-            "h5py required for HDF5 support. Install with: pip install h5py"
-        )
+        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
 
     with h5py.File(path, "r") as f:
         # Read dataset-level metadata
@@ -218,9 +214,7 @@ def _load_hdf5(path: Path) -> "BenchmarkDataset":
                 elem_str = elem.decode() if isinstance(elem, bytes) else elem
                 true_composition[elem_str] = comp_group.attrs[f"{elem_str}_value"]
                 if f"{elem_str}_uncertainty" in comp_group.attrs:
-                    composition_uncertainty[elem_str] = comp_group.attrs[
-                        f"{elem_str}_uncertainty"
-                    ]
+                    composition_uncertainty[elem_str] = comp_group.attrs[f"{elem_str}_uncertainty"]
 
             # Read instrumental conditions
             cond_group = spec_group["conditions"]
@@ -233,7 +227,9 @@ def _load_hdf5(path: Path) -> "BenchmarkDataset":
                 fluence_j_cm2=cond_group.attrs.get("fluence_j_cm2"),
                 gate_delay_us=cond_group.attrs.get("gate_delay_us", 1.0),
                 gate_width_us=cond_group.attrs.get("gate_width_us", 10.0),
-                spectrometer_type=_decode_string(cond_group.attrs.get("spectrometer_type", "Echelle")),
+                spectrometer_type=_decode_string(
+                    cond_group.attrs.get("spectrometer_type", "Echelle")
+                ),
                 spectral_range_nm=tuple(cond_group.attrs.get("spectral_range_nm", [200.0, 900.0])),
                 spectral_resolution_nm=cond_group.attrs.get("spectral_resolution_nm", 0.05),
                 detector_type=_decode_string(cond_group.attrs.get("detector_type", "ICCD")),
@@ -249,11 +245,15 @@ def _load_hdf5(path: Path) -> "BenchmarkDataset":
             metadata = SampleMetadata(
                 sample_id=_decode_string(meta_group.attrs["sample_id"]),
                 sample_type=SampleType(_decode_string(meta_group.attrs.get("sample_type", "crm"))),
-                matrix_type=MatrixType(_decode_string(meta_group.attrs.get("matrix_type", "metal_alloy"))),
+                matrix_type=MatrixType(
+                    _decode_string(meta_group.attrs.get("matrix_type", "metal_alloy"))
+                ),
                 crm_name=_decode_string_optional(meta_group.attrs.get("crm_name")),
                 crm_source=_decode_string_optional(meta_group.attrs.get("crm_source")),
                 preparation=_decode_string(meta_group.attrs.get("preparation", "polished")),
-                surface_condition=_decode_string(meta_group.attrs.get("surface_condition", "polished")),
+                surface_condition=_decode_string(
+                    meta_group.attrs.get("surface_condition", "polished")
+                ),
                 measurement_date=_decode_string_optional(meta_group.attrs.get("measurement_date")),
                 laboratory=_decode_string_optional(meta_group.attrs.get("laboratory")),
                 doi=_decode_string_optional(meta_group.attrs.get("doi")),
@@ -285,9 +285,7 @@ def _load_hdf5(path: Path) -> "BenchmarkDataset":
                 test_ids = [_decode_string(s) for s in split_group["test_ids"][:]]
                 validation_ids = None
                 if "validation_ids" in split_group:
-                    validation_ids = [
-                        _decode_string(s) for s in split_group["validation_ids"][:]
-                    ]
+                    validation_ids = [_decode_string(s) for s in split_group["validation_ids"][:]]
 
                 splits[split_name] = DataSplit(
                     name=split_name,
@@ -322,9 +320,7 @@ def _save_hdf5(
     try:
         import h5py
     except ImportError:
-        raise ImportError(
-            "h5py required for HDF5 support. Install with: pip install h5py"
-        )
+        raise ImportError("h5py required for HDF5 support. Install with: pip install h5py")
 
     with h5py.File(path, "w") as f:
         # Write dataset-level metadata
@@ -345,17 +341,18 @@ def _save_hdf5(
 
             # Write arrays with optional compression
             _create_dataset(
-                spec_group, "wavelength_nm", spectrum.wavelength_nm,
-                compression, compression_level
+                spec_group, "wavelength_nm", spectrum.wavelength_nm, compression, compression_level
             )
             _create_dataset(
-                spec_group, "intensity", spectrum.intensity,
-                compression, compression_level
+                spec_group, "intensity", spectrum.intensity, compression, compression_level
             )
             if spectrum.intensity_uncertainty is not None:
                 _create_dataset(
-                    spec_group, "intensity_uncertainty", spectrum.intensity_uncertainty,
-                    compression, compression_level
+                    spec_group,
+                    "intensity_uncertainty",
+                    spectrum.intensity_uncertainty,
+                    compression,
+                    compression_level,
                 )
 
             # Write scalar attributes
@@ -423,12 +420,8 @@ def _save_hdf5(
                 split_group = splits_group.create_group(name)
                 # Use variable-length strings
                 dt = h5py.special_dtype(vlen=str)
-                split_group.create_dataset(
-                    "train_ids", data=split.train_ids, dtype=dt
-                )
-                split_group.create_dataset(
-                    "test_ids", data=split.test_ids, dtype=dt
-                )
+                split_group.create_dataset("train_ids", data=split.train_ids, dtype=dt)
+                split_group.create_dataset("test_ids", data=split.test_ids, dtype=dt)
                 if split.validation_ids:
                     split_group.create_dataset(
                         "validation_ids", data=split.validation_ids, dtype=dt

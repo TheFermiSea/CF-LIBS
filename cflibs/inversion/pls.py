@@ -275,9 +275,7 @@ class PLSRegression:
             return None
         return self._components.coefficients
 
-    def _preprocess_x(
-        self, X: np.ndarray, fit: bool = False
-    ) -> np.ndarray:
+    def _preprocess_x(self, X: np.ndarray, fit: bool = False) -> np.ndarray:
         """
         Apply preprocessing to X matrix.
 
@@ -326,9 +324,7 @@ class PLSRegression:
         else:
             raise ValueError(f"Unknown preprocessing: {self.preprocessing}")
 
-    def _preprocess_y(
-        self, Y: np.ndarray, fit: bool = False
-    ) -> np.ndarray:
+    def _preprocess_y(self, Y: np.ndarray, fit: bool = False) -> np.ndarray:
         """
         Apply preprocessing to Y matrix (always mean-centered).
 
@@ -366,9 +362,7 @@ class PLSRegression:
             raise RuntimeError("Model must be fitted before postprocessing")
         return Y_pred + self._y_mean
 
-    def _nipals_pls(
-        self, X: np.ndarray, Y: np.ndarray
-    ) -> PLSComponents:
+    def _nipals_pls(self, X: np.ndarray, Y: np.ndarray) -> PLSComponents:
         """
         NIPALS algorithm for PLS regression.
 
@@ -399,8 +393,8 @@ class PLSRegression:
         Yk = Y.copy()
 
         # Variance tracking
-        ss_x_total = np.sum(X ** 2)
-        ss_y_total = np.sum(Y ** 2)
+        ss_x_total = np.sum(X**2)
+        ss_y_total = np.sum(Y**2)
         x_var_explained = np.zeros(n_comp)
         y_var_explained = np.zeros(n_comp)
 
@@ -477,8 +471,8 @@ class PLSRegression:
                 Yk = Yk - np.outer(t, Q[:, k])
 
             # Track explained variance
-            x_var_explained[k] = 1 - np.sum(Xk ** 2) / ss_x_total if ss_x_total > 0 else 0
-            y_var_explained[k] = 1 - np.sum(Yk ** 2) / ss_y_total if ss_y_total > 0 else 0
+            x_var_explained[k] = 1 - np.sum(Xk**2) / ss_x_total if ss_x_total > 0 else 0
+            y_var_explained[k] = 1 - np.sum(Yk**2) / ss_y_total if ss_y_total > 0 else 0
 
         # Track actual number of valid components extracted
         # (n_comp may have been reduced in the loop)
@@ -564,9 +558,7 @@ class PLSRegression:
         # Adjust n_components if needed
         max_components = min(n_samples - 1, n_features)
         if self.n_components > max_components:
-            logger.warning(
-                f"Reducing n_components from {self.n_components} to {max_components}"
-            )
+            logger.warning(f"Reducing n_components from {self.n_components} to {max_components}")
             self.n_components = max_components
 
         logger.info(
@@ -659,7 +651,7 @@ class PLSRegression:
                 Y = Y.reshape(-1, 1)
 
             residuals = Y - Y_pred
-            ss_res = np.sum(residuals ** 2)
+            ss_res = np.sum(residuals**2)
             ss_tot = np.sum((Y - Y.mean(axis=0)) ** 2)
 
             if ss_tot > 1e-10:
@@ -667,7 +659,7 @@ class PLSRegression:
             else:
                 r2 = 0.0
 
-            rmse = float(np.sqrt(np.mean(residuals ** 2)))
+            rmse = float(np.sqrt(np.mean(residuals**2)))
 
         return PLSResult(
             predictions=Y_pred,
@@ -730,10 +722,7 @@ class PLSRegression:
         n_comp = W.shape[1]
 
         # Sum of squares of Y explained by each component
-        ss_y = np.array([
-            np.sum((T[:, k:k+1] @ Q[:, k:k+1].T) ** 2)
-            for k in range(n_comp)
-        ])
+        ss_y = np.array([np.sum((T[:, k : k + 1] @ Q[:, k : k + 1].T) ** 2) for k in range(n_comp)])
 
         # VIP = sqrt(p * sum_k(w_k^2 * ss_y_k) / sum(ss_y))
         vip = np.zeros(n_features)
@@ -841,9 +830,7 @@ class PLSCrossValidator:
         self.selection_criterion = selection_criterion
         self.random_state = random_state
 
-    def _create_folds(
-        self, n_samples: int
-    ) -> List[Tuple[np.ndarray, np.ndarray]]:
+    def _create_folds(self, n_samples: int) -> List[Tuple[np.ndarray, np.ndarray]]:
         """Create train/test indices for each fold."""
         rng = np.random.default_rng(self.random_state)
         indices = rng.permutation(n_samples)
@@ -855,10 +842,7 @@ class PLSCrossValidator:
         current = 0
         for fold_size in fold_sizes:
             test_idx = indices[current : current + fold_size]
-            train_idx = np.concatenate([
-                indices[:current],
-                indices[current + fold_size:]
-            ])
+            train_idx = np.concatenate([indices[:current], indices[current + fold_size :]])
             folds.append((train_idx, test_idx))
             current += fold_size
 
@@ -896,9 +880,7 @@ class PLSCrossValidator:
         # Adjust max components
         max_comp = min(self.max_components, n_samples - 2, n_features)
 
-        logger.info(
-            f"Running {self.n_folds}-fold CV for 1-{max_comp} components"
-        )
+        logger.info(f"Running {self.n_folds}-fold CV for 1-{max_comp} components")
 
         folds = self._create_folds(n_samples)
         n_components_tested = np.arange(1, max_comp + 1)
@@ -936,8 +918,8 @@ class PLSCrossValidator:
             Y_pred = cv_predictions[:, :, n_comp - 1]
             residuals = Y - Y_pred
 
-            press[n_comp - 1] = np.sum(residuals ** 2)
-            cv_rmse[n_comp - 1] = np.sqrt(np.mean(residuals ** 2))
+            press[n_comp - 1] = np.sum(residuals**2)
+            cv_rmse[n_comp - 1] = np.sqrt(np.mean(residuals**2))
 
             if ss_tot > 1e-10:
                 cv_r2[n_comp - 1] = 1 - press[n_comp - 1] / ss_tot
@@ -953,7 +935,9 @@ class PLSCrossValidator:
             threshold = min_rmse + se_estimate
             # Find first model below threshold
             candidates = np.where(cv_rmse <= threshold)[0]
-            optimal_n = int(candidates[0] + 1) if len(candidates) > 0 else int(np.argmin(cv_rmse) + 1)
+            optimal_n = (
+                int(candidates[0] + 1) if len(candidates) > 0 else int(np.argmin(cv_rmse) + 1)
+            )
         else:
             raise ValueError(f"Unknown selection criterion: {self.selection_criterion}")
 
@@ -1042,9 +1026,7 @@ class PLSCalibrationModel:
 
         return concentrations
 
-    def get_important_wavelengths(
-        self, vip_threshold: float = 1.0
-    ) -> Dict[str, List[float]]:
+    def get_important_wavelengths(self, vip_threshold: float = 1.0) -> Dict[str, List[float]]:
         """
         Get wavelengths with VIP > threshold.
 
@@ -1081,7 +1063,9 @@ class PLSCalibrationModel:
             lines.append("-" * 50)
             lines.append("Cross-Validation:")
             lines.append(f"  R2: {self.cv_result.cv_r2[self.cv_result.optimal_n_components-1]:.4f}")
-            lines.append(f"  RMSE: {self.cv_result.cv_rmse[self.cv_result.optimal_n_components-1]:.4f}")
+            lines.append(
+                f"  RMSE: {self.cv_result.cv_rmse[self.cv_result.optimal_n_components-1]:.4f}"
+            )
 
         if self.calibration_range:
             lines.append("-" * 50)

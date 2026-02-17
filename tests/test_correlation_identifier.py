@@ -152,9 +152,7 @@ def test_instrument_fwhm_parameter(temp_db):
 
     db = AtomicDatabase(temp_db)
 
-    identifier = CorrelationIdentifier(
-        db, elements=["Fe"], instrument_fwhm_nm=0.1
-    )
+    identifier = CorrelationIdentifier(db, elements=["Fe"], instrument_fwhm_nm=0.1)
     # sigma should be 0.1/2.355 ≈ 0.0425
     assert hasattr(identifier, "instrument_fwhm_nm")
     assert identifier.instrument_fwhm_nm == 0.1
@@ -186,9 +184,7 @@ def test_noise_only_no_detection(temp_db):
 
     # No element should have high confidence on noise
     for elem in result.all_elements:
-        assert elem.confidence < 0.5, (
-            f"{elem.element} has confidence {elem.confidence} on noise"
-        )
+        assert elem.confidence < 0.5, f"{elem.element} has confidence {elem.confidence} on noise"
 
 
 def test_max_lines_per_element_parameter(temp_db):

@@ -597,43 +597,97 @@ def sample_atomic_transitions():
     transitions = [
         # Fe I lines
         LineObservation(
-            wavelength_nm=371.99, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.33, g_k=11, A_ki=1.0e7
+            wavelength_nm=371.99,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.33,
+            g_k=11,
+            A_ki=1.0e7,
         ),
         LineObservation(
-            wavelength_nm=373.49, intensity=500.0, intensity_uncertainty=15.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.32, g_k=9, A_ki=5.0e6
+            wavelength_nm=373.49,
+            intensity=500.0,
+            intensity_uncertainty=15.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.32,
+            g_k=9,
+            A_ki=5.0e6,
         ),
         LineObservation(
-            wavelength_nm=374.95, intensity=200.0, intensity_uncertainty=10.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.31, g_k=7, A_ki=2.0e6
+            wavelength_nm=374.95,
+            intensity=200.0,
+            intensity_uncertainty=10.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.31,
+            g_k=7,
+            A_ki=2.0e6,
         ),
         LineObservation(
-            wavelength_nm=438.35, intensity=800.0, intensity_uncertainty=18.0,
-            element="Fe", ionization_stage=1, E_k_ev=4.47, g_k=9, A_ki=5.0e6
+            wavelength_nm=438.35,
+            intensity=800.0,
+            intensity_uncertainty=18.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=4.47,
+            g_k=9,
+            A_ki=5.0e6,
         ),
         # Fe II line
         LineObservation(
-            wavelength_nm=238.20, intensity=600.0, intensity_uncertainty=25.0,
-            element="Fe", ionization_stage=2, E_k_ev=5.22, g_k=10, A_ki=3.0e8
+            wavelength_nm=238.20,
+            intensity=600.0,
+            intensity_uncertainty=25.0,
+            element="Fe",
+            ionization_stage=2,
+            E_k_ev=5.22,
+            g_k=10,
+            A_ki=3.0e8,
         ),
         # Cu I lines
         LineObservation(
-            wavelength_nm=324.75, intensity=2000.0, intensity_uncertainty=40.0,
-            element="Cu", ionization_stage=1, E_k_ev=3.82, g_k=4, A_ki=1.4e8
+            wavelength_nm=324.75,
+            intensity=2000.0,
+            intensity_uncertainty=40.0,
+            element="Cu",
+            ionization_stage=1,
+            E_k_ev=3.82,
+            g_k=4,
+            A_ki=1.4e8,
         ),
         LineObservation(
-            wavelength_nm=327.40, intensity=1000.0, intensity_uncertainty=30.0,
-            element="Cu", ionization_stage=1, E_k_ev=3.79, g_k=2, A_ki=1.4e8
+            wavelength_nm=327.40,
+            intensity=1000.0,
+            intensity_uncertainty=30.0,
+            element="Cu",
+            ionization_stage=1,
+            E_k_ev=3.79,
+            g_k=2,
+            A_ki=1.4e8,
         ),
         # Al I lines
         LineObservation(
-            wavelength_nm=394.40, intensity=1500.0, intensity_uncertainty=35.0,
-            element="Al", ionization_stage=1, E_k_ev=3.14, g_k=2, A_ki=5.0e7
+            wavelength_nm=394.40,
+            intensity=1500.0,
+            intensity_uncertainty=35.0,
+            element="Al",
+            ionization_stage=1,
+            E_k_ev=3.14,
+            g_k=2,
+            A_ki=5.0e7,
         ),
         LineObservation(
-            wavelength_nm=396.15, intensity=750.0, intensity_uncertainty=25.0,
-            element="Al", ionization_stage=1, E_k_ev=3.14, g_k=4, A_ki=1.0e8
+            wavelength_nm=396.15,
+            intensity=750.0,
+            intensity_uncertainty=25.0,
+            element="Al",
+            ionization_stage=1,
+            E_k_ev=3.14,
+            g_k=4,
+            A_ki=1.0e8,
         ),
     ]
     return transitions

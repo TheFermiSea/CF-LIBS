@@ -353,35 +353,23 @@ class CSVExporter(Exporter):
 
         T_K = data.get("temperature_K", 0)
         T_err = data.get("temperature_uncertainty_K", 0)
-        lines.append(self.delimiter.join([
-            "temperature",
-            self.float_format % T_K,
-            self.float_format % T_err,
-            "K"
-        ]))
+        lines.append(
+            self.delimiter.join(
+                ["temperature", self.float_format % T_K, self.float_format % T_err, "K"]
+            )
+        )
 
         ne = data.get("electron_density_cm3", 0)
         ne_err = data.get("electron_density_uncertainty_cm3", 0)
-        lines.append(self.delimiter.join([
-            "electron_density",
-            self.float_format % ne,
-            self.float_format % ne_err,
-            "cm^-3"
-        ]))
+        lines.append(
+            self.delimiter.join(
+                ["electron_density", self.float_format % ne, self.float_format % ne_err, "cm^-3"]
+            )
+        )
 
-        lines.append(self.delimiter.join([
-            "iterations",
-            str(data.get("iterations", 0)),
-            "",
-            ""
-        ]))
+        lines.append(self.delimiter.join(["iterations", str(data.get("iterations", 0)), "", ""]))
 
-        lines.append(self.delimiter.join([
-            "converged",
-            str(data.get("converged", False)),
-            "",
-            ""
-        ]))
+        lines.append(self.delimiter.join(["converged", str(data.get("converged", False)), "", ""]))
 
         lines.append("#")
 
@@ -396,11 +384,15 @@ class CSVExporter(Exporter):
         for element in sorted(concentrations.keys()):
             conc = concentrations[element]
             uncert = uncertainties.get(element, 0)
-            lines.append(self.delimiter.join([
-                element,
-                self.float_format % conc,
-                self.float_format % uncert,
-            ]))
+            lines.append(
+                self.delimiter.join(
+                    [
+                        element,
+                        self.float_format % conc,
+                        self.float_format % uncert,
+                    ]
+                )
+            )
 
         # Quality metrics
         if "quality_metrics" in data and data["quality_metrics"]:
@@ -423,34 +415,38 @@ class CSVExporter(Exporter):
         # Summary statistics
         lines.append("# MCMC Summary Statistics")
         if self.include_header:
-            lines.append(self.delimiter.join([
-                "parameter", "mean", "std", "q025", "q975"
-            ]))
+            lines.append(self.delimiter.join(["parameter", "mean", "std", "q025", "q975"]))
 
-        lines.append(self.delimiter.join([
-            "T_eV",
-            self.float_format % data.get("T_eV_mean", 0),
-            self.float_format % data.get("T_eV_std", 0),
-            self.float_format % data.get("T_eV_q025", 0),
-            self.float_format % data.get("T_eV_q975", 0),
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "T_eV",
+                    self.float_format % data.get("T_eV_mean", 0),
+                    self.float_format % data.get("T_eV_std", 0),
+                    self.float_format % data.get("T_eV_q025", 0),
+                    self.float_format % data.get("T_eV_q975", 0),
+                ]
+            )
+        )
 
-        lines.append(self.delimiter.join([
-            "log_ne",
-            self.float_format % data.get("log_ne_mean", 0),
-            self.float_format % data.get("log_ne_std", 0),
-            self.float_format % data.get("log_ne_q025", 0),
-            self.float_format % data.get("log_ne_q975", 0),
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "log_ne",
+                    self.float_format % data.get("log_ne_mean", 0),
+                    self.float_format % data.get("log_ne_std", 0),
+                    self.float_format % data.get("log_ne_q025", 0),
+                    self.float_format % data.get("log_ne_q975", 0),
+                ]
+            )
+        )
 
         lines.append("#")
 
         # Concentration table
         lines.append("# Concentrations")
         if self.include_header:
-            lines.append(self.delimiter.join([
-                "element", "mean", "std", "q025", "q975"
-            ]))
+            lines.append(self.delimiter.join(["element", "mean", "std", "q025", "q975"]))
 
         conc_mean = data.get("concentrations_mean", {})
         conc_std = data.get("concentrations_std", {})
@@ -458,13 +454,17 @@ class CSVExporter(Exporter):
         conc_q975 = data.get("concentrations_q975", {})
 
         for element in sorted(conc_mean.keys()):
-            lines.append(self.delimiter.join([
-                element,
-                self.float_format % conc_mean.get(element, 0),
-                self.float_format % conc_std.get(element, 0),
-                self.float_format % conc_q025.get(element, 0),
-                self.float_format % conc_q975.get(element, 0),
-            ]))
+            lines.append(
+                self.delimiter.join(
+                    [
+                        element,
+                        self.float_format % conc_mean.get(element, 0),
+                        self.float_format % conc_std.get(element, 0),
+                        self.float_format % conc_q025.get(element, 0),
+                        self.float_format % conc_q975.get(element, 0),
+                    ]
+                )
+            )
 
         # Convergence diagnostics
         if "r_hat" in data and data["r_hat"]:
@@ -475,11 +475,15 @@ class CSVExporter(Exporter):
             for param in data["r_hat"]:
                 rhat = data["r_hat"].get(param, 0)
                 ess = data.get("ess", {}).get(param, 0)
-                lines.append(self.delimiter.join([
-                    param,
-                    self.float_format % rhat,
-                    self.float_format % ess,
-                ]))
+                lines.append(
+                    self.delimiter.join(
+                        [
+                            param,
+                            self.float_format % rhat,
+                            self.float_format % ess,
+                        ]
+                    )
+                )
 
         return lines
 
@@ -492,17 +496,25 @@ class CSVExporter(Exporter):
         if self.include_header:
             lines.append(self.delimiter.join(["quantity", "value", "uncertainty"]))
 
-        lines.append(self.delimiter.join([
-            "log_evidence",
-            self.float_format % data.get("log_evidence", 0),
-            self.float_format % data.get("log_evidence_err", 0),
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "log_evidence",
+                    self.float_format % data.get("log_evidence", 0),
+                    self.float_format % data.get("log_evidence_err", 0),
+                ]
+            )
+        )
 
-        lines.append(self.delimiter.join([
-            "information",
-            self.float_format % data.get("information", 0),
-            "",
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "information",
+                    self.float_format % data.get("information", 0),
+                    "",
+                ]
+            )
+        )
 
         lines.append("#")
 
@@ -511,17 +523,25 @@ class CSVExporter(Exporter):
         if self.include_header:
             lines.append(self.delimiter.join(["parameter", "mean", "std"]))
 
-        lines.append(self.delimiter.join([
-            "T_eV",
-            self.float_format % data.get("T_eV_mean", 0),
-            self.float_format % data.get("T_eV_std", 0),
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "T_eV",
+                    self.float_format % data.get("T_eV_mean", 0),
+                    self.float_format % data.get("T_eV_std", 0),
+                ]
+            )
+        )
 
-        lines.append(self.delimiter.join([
-            "log_ne",
-            self.float_format % data.get("log_ne_mean", 0),
-            self.float_format % data.get("log_ne_std", 0),
-        ]))
+        lines.append(
+            self.delimiter.join(
+                [
+                    "log_ne",
+                    self.float_format % data.get("log_ne_mean", 0),
+                    self.float_format % data.get("log_ne_std", 0),
+                ]
+            )
+        )
 
         lines.append("#")
 
@@ -534,11 +554,15 @@ class CSVExporter(Exporter):
         conc_std = data.get("concentrations_std", {})
 
         for element in sorted(conc_mean.keys()):
-            lines.append(self.delimiter.join([
-                element,
-                self.float_format % conc_mean.get(element, 0),
-                self.float_format % conc_std.get(element, 0),
-            ]))
+            lines.append(
+                self.delimiter.join(
+                    [
+                        element,
+                        self.float_format % conc_mean.get(element, 0),
+                        self.float_format % conc_std.get(element, 0),
+                    ]
+                )
+            )
 
         return lines
 
@@ -590,10 +614,14 @@ class CSVExporter(Exporter):
                 # Flatten nested dicts
                 for subkey, subval in value.items():
                     if not isinstance(subval, (list, dict, np.ndarray)):
-                        lines.append(self.delimiter.join([
-                            f"{key}.{subkey}",
-                            str(subval),
-                        ]))
+                        lines.append(
+                            self.delimiter.join(
+                                [
+                                    f"{key}.{subkey}",
+                                    str(subval),
+                                ]
+                            )
+                        )
             else:
                 if isinstance(value, float):
                     lines.append(self.delimiter.join([key, self.float_format % value]))
@@ -652,11 +680,10 @@ class HDF5Exporter(Exporter):
         if self._h5py is None:
             try:
                 import h5py
+
                 self._h5py = h5py
             except ImportError:
-                raise ImportError(
-                    "h5py required for HDF5 export. Install with: pip install h5py"
-                )
+                raise ImportError("h5py required for HDF5 export. Install with: pip install h5py")
         return self._h5py
 
     def get_format(self) -> str:
@@ -779,9 +806,19 @@ class HDF5Exporter(Exporter):
         """Export MCMCResult to HDF5."""
         # Summary statistics
         summary = f.create_group("summary")
-        for key in ["T_eV_mean", "T_eV_std", "T_eV_q025", "T_eV_q975",
-                    "log_ne_mean", "log_ne_std", "log_ne_q025", "log_ne_q975",
-                    "n_samples", "n_chains", "n_warmup"]:
+        for key in [
+            "T_eV_mean",
+            "T_eV_std",
+            "T_eV_q025",
+            "T_eV_q975",
+            "log_ne_mean",
+            "log_ne_std",
+            "log_ne_q025",
+            "log_ne_q975",
+            "n_samples",
+            "n_chains",
+            "n_warmup",
+        ]:
             if key in data:
                 summary.attrs[key] = data[key]
 
@@ -804,9 +841,15 @@ class HDF5Exporter(Exporter):
         if elements:
             conc_group.create_dataset("elements", data=np.array(elements, dtype="S10"))
             conc_group.create_dataset("mean", data=np.array([conc_mean[el] for el in elements]))
-            conc_group.create_dataset("std", data=np.array([conc_std.get(el, 0) for el in elements]))
-            conc_group.create_dataset("q025", data=np.array([conc_q025.get(el, 0) for el in elements]))
-            conc_group.create_dataset("q975", data=np.array([conc_q975.get(el, 0) for el in elements]))
+            conc_group.create_dataset(
+                "std", data=np.array([conc_std.get(el, 0) for el in elements])
+            )
+            conc_group.create_dataset(
+                "q025", data=np.array([conc_q025.get(el, 0) for el in elements])
+            )
+            conc_group.create_dataset(
+                "q975", data=np.array([conc_q975.get(el, 0) for el in elements])
+            )
 
         # Convergence diagnostics
         if "r_hat" in data and data["r_hat"]:
@@ -834,8 +877,15 @@ class HDF5Exporter(Exporter):
 
         # Summary
         summary = f.create_group("summary")
-        for key in ["T_eV_mean", "T_eV_std", "log_ne_mean", "log_ne_std",
-                    "n_live", "n_iterations", "n_calls"]:
+        for key in [
+            "T_eV_mean",
+            "T_eV_std",
+            "log_ne_mean",
+            "log_ne_std",
+            "n_live",
+            "n_iterations",
+            "n_calls",
+        ]:
             if key in data:
                 summary.attrs[key] = data[key]
 
@@ -848,7 +898,9 @@ class HDF5Exporter(Exporter):
         if elements:
             conc_group.create_dataset("elements", data=np.array(elements, dtype="S10"))
             conc_group.create_dataset("mean", data=np.array([conc_mean[el] for el in elements]))
-            conc_group.create_dataset("std", data=np.array([conc_std.get(el, 0) for el in elements]))
+            conc_group.create_dataset(
+                "std", data=np.array([conc_std.get(el, 0) for el in elements])
+            )
 
         # Samples and weights
         if "samples" in data:
@@ -1081,8 +1133,7 @@ def create_exporter(
     else:
         supported = ["csv", "hdf5", "h5", "json"]
         raise ValueError(
-            f"Unsupported export format: '{format}'. "
-            f"Supported formats: {supported}"
+            f"Unsupported export format: '{format}'. " f"Supported formats: {supported}"
         )
 
 

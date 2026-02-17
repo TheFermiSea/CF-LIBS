@@ -517,9 +517,7 @@ class TestBenchmarkMetrics:
             algorithm_version="1.0",
         )
 
-        comparison = metrics.compare_algorithms(
-            [result1, result2], metric=MetricType.RMSEP
-        )
+        comparison = metrics.compare_algorithms([result1, result2], metric=MetricType.RMSEP)
 
         assert "algo_a v1.0" in comparison
         assert comparison["algo_a v1.0"] < comparison["algo_b v1.0"]
@@ -845,10 +843,7 @@ class TestBenchmarkIntegration:
         for elem in dataset.elements:
             true_values[elem] = [s.true_composition[elem] for s in test]
             # Add 5% relative error
-            predictions[elem] = [
-                t * (1 + 0.05 * rng.standard_normal())
-                for t in true_values[elem]
-            ]
+            predictions[elem] = [t * (1 + 0.05 * rng.standard_normal()) for t in true_values[elem]]
 
         # 4. Evaluate
         metrics = BenchmarkMetrics()

@@ -243,9 +243,7 @@ class EvaluationResult:
             "dataset_name": self.dataset_name,
             "split_name": self.split_name,
             "n_spectra": self.n_spectra,
-            "element_metrics": {
-                el: m.to_dict() for el, m in self.element_metrics.items()
-            },
+            "element_metrics": {el: m.to_dict() for el, m in self.element_metrics.items()},
             "overall_rmsep": self.overall_rmsep,
             "overall_mae": self.overall_mae,
             "overall_r_squared": self.overall_r_squared,
@@ -355,9 +353,7 @@ class BenchmarkMetrics:
             if n_spectra is None:
                 n_spectra = pred_len
             elif pred_len != n_spectra:
-                raise ValueError(
-                    "Inconsistent array lengths across elements"
-                )
+                raise ValueError("Inconsistent array lengths across elements")
 
         # Calculate per-element metrics
         element_metrics = {}
@@ -412,7 +408,7 @@ class BenchmarkMetrics:
 
         # R-squared
         ss_res = np.sum(residuals**2)
-        ss_tot = np.sum((true_values - np.mean(true_values))**2)
+        ss_tot = np.sum((true_values - np.mean(true_values)) ** 2)
         if ss_tot > 0:
             r_squared = 1 - ss_res / ss_tot
         else:
@@ -495,10 +491,7 @@ class BenchmarkMetrics:
                     value = result.overall_r_squared
                 else:
                     # Average across elements
-                    values = [
-                        result.get_metric(el, metric)
-                        for el in result.elements
-                    ]
+                    values = [result.get_metric(el, metric) for el in result.elements]
                     value = np.mean(values)
 
             comparison[key] = value
@@ -527,7 +520,7 @@ class BenchmarkMetrics:
         """
         predictions = np.asarray(predictions)
         true_values = np.asarray(true_values)
-        return np.sqrt(np.mean((predictions - true_values)**2))
+        return np.sqrt(np.mean((predictions - true_values) ** 2))
 
     @staticmethod
     def mae(
@@ -627,8 +620,8 @@ class BenchmarkMetrics:
         predictions = np.asarray(predictions)
         true_values = np.asarray(true_values)
 
-        ss_res = np.sum((true_values - predictions)**2)
-        ss_tot = np.sum((true_values - np.mean(true_values))**2)
+        ss_res = np.sum((true_values - predictions) ** 2)
+        ss_tot = np.sum((true_values - np.mean(true_values)) ** 2)
 
         if ss_tot == 0:
             return 0.0

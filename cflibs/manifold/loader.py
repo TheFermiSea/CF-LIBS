@@ -16,6 +16,7 @@ except ImportError:
 
 try:
     import jax.numpy as jnp
+
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
@@ -76,10 +77,7 @@ class ManifoldLoader:
         )
 
     def find_nearest_spectrum(
-        self,
-        measured_spectrum: np.ndarray,
-        method: str = "cosine",
-        use_jax: bool = False
+        self, measured_spectrum: np.ndarray, method: str = "cosine", use_jax: bool = False
     ) -> Tuple[int, float, dict]:
         """
         Find nearest matching spectrum in manifold.
@@ -116,9 +114,7 @@ class ManifoldLoader:
             spectra_j = jnp.asarray(self.spectra)
 
             measured_norm = measured_j / (jnp.linalg.norm(measured_j) + 1e-10)
-            manifold_norms = spectra_j / (
-                jnp.linalg.norm(spectra_j, axis=1, keepdims=True) + 1e-10
-            )
+            manifold_norms = spectra_j / (jnp.linalg.norm(spectra_j, axis=1, keepdims=True) + 1e-10)
 
             if method == "cosine":
                 similarities = jnp.dot(manifold_norms, measured_norm)
