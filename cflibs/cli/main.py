@@ -151,6 +151,7 @@ def invert_cmd(args):
         else analysis_cfg.get("peak_width_nm", 0.2)
     )
     min_relative_intensity = analysis_cfg.get("min_relative_intensity")
+    resolving_power = analysis_cfg.get("resolving_power")
 
     detection = detect_line_observations(
         wavelength=wavelength,
@@ -158,6 +159,7 @@ def invert_cmd(args):
         atomic_db=atomic_db,
         elements=elements,
         wavelength_tolerance_nm=wavelength_tolerance,
+        resolving_power=resolving_power,
         min_peak_height=min_peak_height,
         peak_width_nm=peak_width_nm,
         min_relative_intensity=min_relative_intensity,

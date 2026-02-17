@@ -11,7 +11,6 @@ from collections import defaultdict
 import math
 import numpy as np
 from scipy.optimize import nnls
-from scipy.signal import find_peaks
 from scipy.special import erf
 from scipy.stats import binom
 
@@ -23,7 +22,11 @@ from cflibs.inversion.element_id import (
     ElementIdentification,
     ElementIdentificationResult,
 )
-from cflibs.inversion.preprocessing import estimate_baseline, estimate_noise
+from cflibs.inversion.preprocessing import (
+    detect_peaks as detect_peaks_preprocessed,
+    estimate_baseline,
+    estimate_noise,
+)
 
 
 class ALIASIdentifier:
@@ -90,6 +93,7 @@ class ALIASIdentifier:
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
+        min_relative_intensity: Optional[float] = None,
     ):
         self.atomic_db = atomic_db
         if not (np.isfinite(resolving_power) and resolving_power > 0):
@@ -107,6 +111,7 @@ class ALIASIdentifier:
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
+        self.min_relative_intensity = min_relative_intensity
 
         # Create Saha-Boltzmann solver
         self.solver = SahaBoltzmannSolver(atomic_db)
@@ -434,6 +439,7 @@ class ALIASIdentifier:
                 "n_e_max_cm3": self.n_e_range_cm3[1],
                 "intensity_threshold_factor": self.intensity_threshold_factor,
                 "detection_threshold": self.detection_threshold,
+                "min_relative_intensity": self.min_relative_intensity,
             },
         )
 
@@ -459,25 +465,42 @@ class ALIASIdentifier:
         baseline = estimate_baseline(wavelength, intensity)
         noise_estimate = estimate_noise(intensity, baseline)
 
-        # Threshold in intensity domain (well-calibrated)
-        threshold = noise_estimate * self.intensity_threshold_factor
+        # Use shared baseline/noise-aware detection with resolution-aware separation.
+        peaks = detect_peaks_preprocessed(
+            wavelength=wavelength,
+            intensity=intensity,
+            baseline=baseline,
+            noise=noise_estimate,
+            threshold_factor=self.intensity_threshold_factor,
+            prominence_factor=1.5,
+            resolving_power=self.resolving_power,
+        )
+        if not peaks:
+            return []
 
-        # Find peaks in baseline-corrected intensity
         corrected = intensity - baseline
-        peak_indices, _ = find_peaks(corrected, height=threshold, prominence=threshold / 3)
+        peak_indices = np.array([p[0] for p in peaks], dtype=int)
 
         # Paper (Noël et al. 2025): enhance peak detection using negative 2nd derivative
         # Compute -d²I/dλ², zero negatives — true peaks have positive curvature here
         d2 = -np.gradient(np.gradient(corrected, wavelength), wavelength)
         d2[d2 < 0] = 0.0
 
-        # Filter: keep peaks where d2 > 0 in a ±2-point neighborhood around peak center
-        # This handles discretization effects where d2 peak may be slightly offset
+        # Filter: keep only peaks with sufficiently strong local curvature.
+        positive_d2 = d2[d2 > 0]
+        if positive_d2.size > 0:
+            d2_threshold = np.percentile(positive_d2, 75.0)
+        else:
+            d2_threshold = 0.0
+
         confirmed = []
         for idx in peak_indices:
             lo = max(0, idx - 2)
             hi = min(len(d2), idx + 3)
-            if np.max(d2[lo:hi]) > 0:
+            local = d2[lo:hi]
+            if local.size == 0:
+                continue
+            if d2[idx] >= d2_threshold and d2[idx] >= float(np.max(local)):
                 confirmed.append(idx)
         peak_indices = np.array(confirmed, dtype=int) if confirmed else np.array([], dtype=int)
 
@@ -511,7 +534,11 @@ class ALIASIdentifier:
         for ion_stage in [1, 2]:
             try:
                 trans_list = self.atomic_db.get_transitions(
-                    element, ion_stage, wavelength_min=wl_min, wavelength_max=wl_max
+                    element,
+                    ion_stage,
+                    wavelength_min=wl_min,
+                    wavelength_max=wl_max,
+                    min_relative_intensity=self.min_relative_intensity,
                 )
                 if trans_list:
                     transitions.extend(trans_list)

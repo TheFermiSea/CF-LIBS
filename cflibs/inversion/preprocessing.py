@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.ndimage import median_filter
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 def estimate_baseline(
@@ -75,6 +75,8 @@ def detect_peaks(
     noise: float,
     threshold_factor: float = 4.0,
     prominence_factor: float = 1.5,
+    resolving_power: Optional[float] = None,
+    min_distance_px: Optional[int] = None,
 ) -> List[Tuple[int, float]]:
     """Unified peak detection above baseline.
 
@@ -92,6 +94,12 @@ def detect_peaks(
         Peak height threshold = noise * threshold_factor (default 4.0)
     prominence_factor : float
         Peak prominence threshold = noise * prominence_factor (default 1.5)
+    resolving_power : float, optional
+        Instrument resolving power (lambda/delta_lambda). When provided,
+        minimum peak separation is derived from median(lambda)/R.
+    min_distance_px : int, optional
+        Explicit minimum peak distance in pixels. Overrides resolving_power
+        derived value when provided.
 
     Returns
     -------
@@ -101,8 +109,23 @@ def detect_peaks(
     corrected = intensity - baseline
     threshold = noise * threshold_factor
     prominence = noise * prominence_factor
+    spacing = np.median(np.diff(wavelength)) if wavelength.size > 1 else 1.0
 
-    peak_indices, _ = find_peaks(corrected, height=threshold, prominence=prominence)
+    if min_distance_px is not None:
+        distance_px = max(int(min_distance_px), 1)
+    elif resolving_power is not None and resolving_power > 0 and spacing > 0:
+        mean_wl = float(np.median(wavelength))
+        expected_width_nm = mean_wl / float(resolving_power)
+        distance_px = max(int(expected_width_nm / spacing), 1)
+    else:
+        distance_px = 1
+
+    peak_indices, _ = find_peaks(
+        corrected,
+        height=threshold,
+        prominence=prominence,
+        distance=distance_px,
+    )
     return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
 
 

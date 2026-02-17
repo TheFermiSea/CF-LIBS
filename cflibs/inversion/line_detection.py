@@ -14,16 +14,9 @@ from cflibs.atomic.database import AtomicDatabase
 from cflibs.atomic.structures import Transition
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
+from cflibs.inversion.preprocessing import detect_peaks, estimate_baseline, estimate_noise
 
 logger = get_logger("inversion.line_detection")
-
-try:
-    from scipy.signal import find_peaks
-
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-    find_peaks = None
 
 
 @dataclass
@@ -44,6 +37,7 @@ def detect_line_observations(
     atomic_db: AtomicDatabase,
     elements: List[str],
     wavelength_tolerance_nm: float = 0.1,
+    resolving_power: Optional[float] = None,
     min_peak_height: float = 0.01,
     peak_width_nm: float = 0.2,
     min_relative_intensity: Optional[float] = None,
@@ -64,6 +58,9 @@ def detect_line_observations(
         Elements to match against
     wavelength_tolerance_nm : float
         Matching tolerance for known lines in nm
+    resolving_power : float, optional
+        Instrument resolving power (lambda/delta_lambda). When provided,
+        matching tolerance is tightened to the local resolution element.
     min_peak_height : float
         Minimum peak height as fraction of max intensity
     peak_width_nm : float
@@ -101,7 +98,13 @@ def detect_line_observations(
     if not transitions:
         return LineDetectionResult([], set(), 0, 0, 0, ["no_transitions_found"])
 
-    peaks = _find_peaks(wavelength, intensity, min_peak_height, peak_width_nm)
+    peaks = _find_peaks(
+        wavelength,
+        intensity,
+        min_peak_height=min_peak_height,
+        peak_width_nm=peak_width_nm,
+        resolving_power=resolving_power,
+    )
 
     observations: List[LineObservation] = []
     resonance_lines: Set[Tuple[str, int, float]] = set()
@@ -113,7 +116,12 @@ def detect_line_observations(
     half_width_px = max(int((peak_width_nm / max(wl_step, 1e-9)) / 2), 1)
 
     for peak_idx, peak_wl in peaks:
-        transition = _match_transition(peak_wl, transitions, wavelength_tolerance_nm)
+        transition = _match_transition(
+            peak_wavelength=peak_wl,
+            transitions=transitions,
+            tolerance_nm=wavelength_tolerance_nm,
+            resolving_power=resolving_power,
+        )
         if transition is None:
             continue
 
@@ -199,12 +207,19 @@ def _match_transition(
     peak_wavelength: float,
     transitions: List[Transition],
     tolerance_nm: float,
+    resolving_power: Optional[float] = None,
 ) -> Optional[Transition]:
     best_match = None
     best_distance = float("inf")
     for transition in transitions:
+        effective_tol = tolerance_nm
+        if resolving_power is not None and resolving_power > 0:
+            local_res_nm = peak_wavelength / resolving_power
+            # Keep user tolerance as an upper bound but do not allow windows
+            # broader than one local resolution element.
+            effective_tol = min(tolerance_nm, local_res_nm)
         distance = abs(transition.wavelength_nm - peak_wavelength)
-        if distance <= tolerance_nm and distance < best_distance:
+        if distance <= effective_tol and distance < best_distance:
             best_match = transition
             best_distance = distance
     return best_match
@@ -223,26 +238,40 @@ def _find_peaks(
     intensity: np.ndarray,
     min_peak_height: float,
     peak_width_nm: float,
+    resolving_power: Optional[float] = None,
 ) -> List[Tuple[int, float]]:
     max_intensity = float(np.max(intensity))
     if max_intensity <= 0:
         return []
 
-    normalized = intensity / max_intensity
-    threshold = max(min_peak_height, 0.0)
+    baseline = estimate_baseline(wavelength, intensity)
+    noise = estimate_noise(intensity, baseline)
+    if noise <= 0:
+        return []
 
-    if HAS_SCIPY and find_peaks is not None:
-        wl_step = _estimate_wl_step(wavelength)
-        min_distance_px = max(int(peak_width_nm / max(wl_step, 1e-9)), 1)
-        peak_indices, _ = find_peaks(
-            normalized,
-            height=threshold,
-            distance=min_distance_px,
-            prominence=threshold / 2.0,
-        )
-        return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
+    # Preserve backward compatibility with min_peak_height while operating
+    # in sigma units for robust thresholding.
+    absolute_height = max(min_peak_height, 0.0) * max_intensity
+    threshold_factor = max(2.0, absolute_height / max(noise, 1e-12))
+
+    wl_step = _estimate_wl_step(wavelength)
+    min_distance_px = max(int(peak_width_nm / max(wl_step, 1e-9)), 1)
+    peaks = detect_peaks(
+        wavelength=wavelength,
+        intensity=intensity,
+        baseline=baseline,
+        noise=noise,
+        threshold_factor=threshold_factor,
+        prominence_factor=max(1.0, threshold_factor / 2.0),
+        resolving_power=resolving_power,
+        min_distance_px=min_distance_px,
+    )
+    if peaks:
+        return peaks
 
     # Simple fallback: local maxima above threshold
+    normalized = intensity / max_intensity
+    threshold = max(min_peak_height, 0.0)
     peaks: List[Tuple[int, float]] = []
     for i in range(1, len(intensity) - 1):
         if normalized[i] >= threshold and intensity[i] > intensity[i - 1] and intensity[i] > intensity[i + 1]:

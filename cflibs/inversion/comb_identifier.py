@@ -21,6 +21,7 @@ from cflibs.inversion.element_id import (
     ElementIdentificationResult,
 )
 from cflibs.core.logging_config import get_logger
+from cflibs.inversion.preprocessing import detect_peaks, estimate_noise
 
 logger = get_logger(__name__)
 
@@ -261,11 +262,17 @@ class CombIdentifier:
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
-        # Step 7: Identify experimental peaks (simple threshold-based for now)
-        residual = intensity - baseline
-        peak_mask = residual > threshold
-        peak_indices = np.where(peak_mask)[0]
-        experimental_peaks = [(i, wavelength[i]) for i in peak_indices]
+        # Step 7: Identify experimental peaks with local-max, noise-aware detection.
+        noise = estimate_noise(intensity, baseline)
+        experimental_peaks = detect_peaks(
+            wavelength=wavelength,
+            intensity=intensity,
+            baseline=baseline,
+            noise=noise,
+            threshold_factor=4.0,
+            prominence_factor=1.5,
+            resolving_power=self.resolving_power,
+        )
 
         # Count matched peaks (peaks that have at least one identified line)
         matched_peak_wavelengths = set()

@@ -8,7 +8,6 @@ from experimental spectra using model spectrum correlation matching.
 from typing import Any, List, Optional, Tuple
 import math
 import numpy as np
-from scipy.signal import find_peaks
 from scipy.stats import pearsonr
 
 from cflibs.inversion.element_id import (
@@ -21,6 +20,7 @@ from cflibs.atomic.structures import Transition
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
 from cflibs.core.constants import KB_EV
 from cflibs.core.logging_config import get_logger
+from cflibs.inversion.preprocessing import detect_peaks, estimate_baseline, estimate_noise
 
 logger = get_logger("inversion.correlation_identifier")
 
@@ -160,10 +160,17 @@ class CorrelationIdentifier:
         logger.info(f"Running correlation identifier in {mode} mode")
 
         # Detect experimental peaks
-        peak_indices, _ = find_peaks(
-            intensity, height=np.max(intensity) * 0.05, distance=5
+        baseline = estimate_baseline(wavelength, intensity)
+        noise = estimate_noise(intensity, baseline)
+        experimental_peaks = detect_peaks(
+            wavelength=wavelength,
+            intensity=intensity,
+            baseline=baseline,
+            noise=noise,
+            threshold_factor=4.0,
+            prominence_factor=1.5,
+            resolving_power=self.resolving_power,
         )
-        experimental_peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
 
         logger.info(f"Detected {len(experimental_peaks)} experimental peaks")
 
@@ -481,10 +488,21 @@ class CorrelationIdentifier:
         unmatched_lines : List[Transition]
             Transitions with no experimental match
         """
-        # Detect peaks
-        peak_indices, _ = find_peaks(intensity, height=np.max(intensity) * 0.05, distance=5)
-        peak_wavelengths = wavelength[peak_indices]
-        peak_intensities = intensity[peak_indices]
+        # Detect peaks using baseline/noise-aware preprocessing.
+        baseline = estimate_baseline(wavelength, intensity)
+        noise = estimate_noise(intensity, baseline)
+        peaks = detect_peaks(
+            wavelength=wavelength,
+            intensity=intensity,
+            baseline=baseline,
+            noise=noise,
+            threshold_factor=4.0,
+            prominence_factor=1.5,
+            resolving_power=self.resolving_power,
+        )
+        peak_indices = np.array([p[0] for p in peaks], dtype=int)
+        peak_wavelengths = wavelength[peak_indices] if peak_indices.size else np.array([])
+        peak_intensities = intensity[peak_indices] if peak_indices.size else np.array([])
 
         matched_lines = []
         unmatched_lines = []
