@@ -127,7 +127,7 @@ def detect_line_observations(
         return LineDetectionResult([], set(), 0, 0, 0, ["no_transitions_found"])
 
     # Use the canonical preprocessing pipeline for peak detection
-    peaks, baseline, noise = detect_peaks_auto(
+    peaks, baseline, _noise = detect_peaks_auto(
         wavelength,
         intensity,
         threshold_factor=threshold_factor,
@@ -148,9 +148,7 @@ def detect_line_observations(
         # Resolution-aware tolerance: use resolving_power if available
         tolerance = _get_tolerance(peak_wl, resolving_power, wavelength_tolerance_nm)
 
-        transition = _match_transition(
-            peak_wl, transitions, tolerance, reference_temperature_K
-        )
+        transition = _match_transition(peak_wl, transitions, tolerance, reference_temperature_K)
         if transition is None:
             continue
 
@@ -171,7 +169,11 @@ def detect_line_observations(
         if line_area <= 0:
             continue
 
-        # Poisson noise approximation on raw counts for uncertainty
+        # Poisson noise approximation on raw counts for uncertainty.
+        # Uses rectangular sum (sqrt(sum(counts)) * wl_step) rather than
+        # trapezoidal integration because the Poisson shot noise dominates
+        # and the rectangular approximation is well within the overall
+        # uncertainty budget for LIBS measurements.
         raw_counts = np.maximum(intensity[start_idx:end_idx], 1.0)
         line_unc = float(np.sqrt(np.sum(raw_counts)) * wl_step)
 
@@ -260,6 +262,9 @@ def _match_transition(
     proxy (g_k * A_ki * exp(-E_k / kT)) weighted by proximity.  This
     favours strong, physically plausible lines over weak coincidences.
     """
+    if tolerance_nm <= 0:
+        return None
+
     kT = KB_EV * reference_temperature_K
     if kT <= 0:
         kT = KB_EV * _REFERENCE_T_K
