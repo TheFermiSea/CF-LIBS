@@ -59,13 +59,18 @@ Literature References
 - NIST ASD: Atomic transition probability accuracy grades
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Optional, Tuple, Set, TYPE_CHECKING
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
+
+if TYPE_CHECKING:
+    from cflibs.atomic.database import AtomicDatabase
 
 logger = get_logger("inversion.line_selection")
 
@@ -377,26 +382,55 @@ class LineSelector:
 def identify_resonance_lines(
     observations: List[LineObservation],
     ground_state_threshold_ev: float = 0.5,
+    atomic_db: Optional["AtomicDatabase"] = None,
 ) -> Set[Tuple[str, int, float]]:
     """
     Identify resonance lines (transitions from/to ground state).
 
+    Uses the atomic database ``is_resonance`` flag when available, falling
+    back to a lower-level energy threshold (E_i < ground_state_threshold_ev).
+
     Parameters
     ----------
     observations : List[LineObservation]
-        Line observations with lower level energy if available
+        Line observations to check
     ground_state_threshold_ev : float
-        Energy threshold to consider as ground state
+        Energy threshold below which the lower level is considered
+        ground state (default 0.5 eV)
+    atomic_db : AtomicDatabase, optional
+        If provided, queries the database for the ``is_resonance`` flag
+        and ``E_i_ev`` for each observation's wavelength.
 
     Returns
     -------
     Set[Tuple[str, int, float]]
         Set of (element, ion_stage, wavelength) for resonance lines
     """
-    # Unused parameters kept for future API use
-    _ = observations, ground_state_threshold_ev
+    resonance: Set[Tuple[str, int, float]] = set()
 
-    # Note: This requires lower level energy which is not in the basic
-    # LineObservation dataclass. In practice, this would query the database.
-    # For now, return empty set - caller should provide from database.
-    return set()
+    for obs in observations:
+        key = (obs.element, obs.ionization_stage, obs.wavelength_nm)
+
+        if atomic_db is not None:
+            # Query database for the specific line
+            try:
+                transitions = atomic_db.get_transitions(
+                    obs.element,
+                    ionization_stage=obs.ionization_stage,
+                    wavelength_min=obs.wavelength_nm - 0.01,
+                    wavelength_max=obs.wavelength_nm + 0.01,
+                )
+                for trans in transitions:
+                    if abs(trans.wavelength_nm - obs.wavelength_nm) < 0.01:
+                        if trans.is_resonance:
+                            resonance.add(key)
+                            break
+                        if trans.E_i_ev < ground_state_threshold_ev:
+                            resonance.add(key)
+                            break
+            except Exception:
+                pass
+        # Without database, we cannot determine resonance status from
+        # LineObservation alone (it lacks E_i_ev).
+
+    return resonance

@@ -3,6 +3,10 @@ Line detection utilities for CF-LIBS inversion.
 
 Provides a lightweight peak detection + line matching pipeline to convert
 raw spectra into LineObservation objects for classic CF-LIBS solvers.
+
+Uses the canonical preprocessing pipeline (baseline subtraction, noise
+estimation, prominence-based detection) from ``cflibs.inversion.preprocessing``
+to ensure consistency across all CF-LIBS modules.
 """
 
 from dataclasses import dataclass, field
@@ -12,18 +16,19 @@ import numpy as np
 
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.atomic.structures import Transition
+from cflibs.core.constants import KB_EV
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
+from cflibs.inversion.preprocessing import detect_peaks_auto
 
 logger = get_logger("inversion.line_detection")
 
-try:
-    from scipy.signal import find_peaks
+# Minimum Einstein A coefficient — lines weaker than this are undetectable
+# in typical LIBS conditions and should not participate in matching.
+_MIN_AKI = 1e4  # s^-1
 
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-    find_peaks = None
+# Reference temperature for emissivity-weighted matching (K)
+_REFERENCE_T_K = 10000.0
 
 
 @dataclass
@@ -43,14 +48,22 @@ def detect_line_observations(
     intensity: np.ndarray,
     atomic_db: AtomicDatabase,
     elements: List[str],
+    resolving_power: Optional[float] = None,
     wavelength_tolerance_nm: float = 0.1,
     min_peak_height: float = 0.01,
     peak_width_nm: float = 0.2,
     min_relative_intensity: Optional[float] = None,
     ground_state_threshold_ev: float = 0.1,
+    reference_temperature_K: float = _REFERENCE_T_K,
+    threshold_factor: float = 4.0,
+    prominence_factor: float = 1.5,
 ) -> LineDetectionResult:
     """
     Detect spectral peaks and match them to known atomic transitions.
+
+    Uses the canonical preprocessing pipeline: median-filter baseline
+    estimation, sigma-clipped MAD noise estimation, and prominence-based
+    peak detection with cosmic-ray rejection.
 
     Parameters
     ----------
@@ -62,16 +75,28 @@ def detect_line_observations(
         Atomic database instance
     elements : List[str]
         Elements to match against
+    resolving_power : float, optional
+        Instrument resolving power (lambda/delta_lambda). When provided,
+        the matching tolerance scales as wavelength/resolving_power instead
+        of using the fixed ``wavelength_tolerance_nm``.
     wavelength_tolerance_nm : float
-        Matching tolerance for known lines in nm
+        Fallback matching tolerance in nm (used only when resolving_power
+        is not provided). Default 0.1.
     min_peak_height : float
-        Minimum peak height as fraction of max intensity
+        Deprecated — kept for API compatibility. The canonical pipeline
+        uses noise-scaled thresholds instead.
     peak_width_nm : float
-        Expected peak width for integration (nm)
+        Expected peak width for integration window (nm). Default 0.2.
     min_relative_intensity : float, optional
         Minimum relative intensity threshold for database lines
     ground_state_threshold_ev : float
         Lower-level energy threshold for resonance detection
+    reference_temperature_K : float
+        Reference temperature for emissivity-weighted matching (K)
+    threshold_factor : float
+        Peak height threshold in noise units (default 4.0)
+    prominence_factor : float
+        Peak prominence threshold in noise units (default 1.5)
 
     Returns
     -------
@@ -101,7 +126,14 @@ def detect_line_observations(
     if not transitions:
         return LineDetectionResult([], set(), 0, 0, 0, ["no_transitions_found"])
 
-    peaks = _find_peaks(wavelength, intensity, min_peak_height, peak_width_nm)
+    # Use the canonical preprocessing pipeline for peak detection
+    peaks, baseline, noise = detect_peaks_auto(
+        wavelength,
+        intensity,
+        threshold_factor=threshold_factor,
+        prominence_factor=prominence_factor,
+        resolving_power=resolving_power,
+    )
 
     observations: List[LineObservation] = []
     resonance_lines: Set[Tuple[str, int, float]] = set()
@@ -113,7 +145,12 @@ def detect_line_observations(
     half_width_px = max(int((peak_width_nm / max(wl_step, 1e-9)) / 2), 1)
 
     for peak_idx, peak_wl in peaks:
-        transition = _match_transition(peak_wl, transitions, wavelength_tolerance_nm)
+        # Resolution-aware tolerance: use resolving_power if available
+        tolerance = _get_tolerance(peak_wl, resolving_power, wavelength_tolerance_nm)
+
+        transition = _match_transition(
+            peak_wl, transitions, tolerance, reference_temperature_K
+        )
         if transition is None:
             continue
 
@@ -123,19 +160,20 @@ def detect_line_observations(
         seen_keys.add(key)
         matched_peaks += 1
 
+        # Integrate baseline-subtracted intensity
         start_idx = max(0, peak_idx - half_width_px)
         end_idx = min(len(intensity), peak_idx + half_width_px + 1)
         segment_wl = wavelength[start_idx:end_idx]
-        segment_intensity = intensity[start_idx:end_idx]
+        segment_baseline = baseline[start_idx:end_idx]
+        segment_corrected = intensity[start_idx:end_idx] - segment_baseline
 
-        line_area = float(np.trapezoid(segment_intensity, segment_wl))
-        line_area = max(line_area, float(segment_intensity.max()))
-
-        # Poisson noise approximation for integrated intensity
-        counts = np.maximum(segment_intensity, 1.0)
-        line_unc = float(np.sqrt(np.sum(counts)) * wl_step)
+        line_area = float(np.trapezoid(np.maximum(segment_corrected, 0.0), segment_wl))
         if line_area <= 0:
             continue
+
+        # Poisson noise approximation on raw counts for uncertainty
+        raw_counts = np.maximum(intensity[start_idx:end_idx], 1.0)
+        line_unc = float(np.sqrt(np.sum(raw_counts)) * wl_step)
 
         observations.append(
             LineObservation(
@@ -175,6 +213,21 @@ def detect_line_observations(
     )
 
 
+def _get_tolerance(
+    peak_wl: float,
+    resolving_power: Optional[float],
+    fallback_nm: float,
+) -> float:
+    """Return the wavelength matching tolerance in nm.
+
+    When ``resolving_power`` is provided, the tolerance is the resolution
+    element at the peak wavelength.  Otherwise the fixed fallback is used.
+    """
+    if resolving_power is not None and resolving_power > 0:
+        return peak_wl / resolving_power
+    return fallback_nm
+
+
 def _load_transitions(
     atomic_db: AtomicDatabase,
     elements: List[str],
@@ -184,14 +237,14 @@ def _load_transitions(
 ) -> List[Transition]:
     transitions: List[Transition] = []
     for element in elements:
-        transitions.extend(
-            atomic_db.get_transitions(
-                element,
-                wavelength_min=wavelength_min,
-                wavelength_max=wavelength_max,
-                min_relative_intensity=min_relative_intensity,
-            )
+        raw = atomic_db.get_transitions(
+            element,
+            wavelength_min=wavelength_min,
+            wavelength_max=wavelength_max,
+            min_relative_intensity=min_relative_intensity,
         )
+        # Pre-filter: discard lines with negligible A_ki
+        transitions.extend(t for t in raw if t.A_ki >= _MIN_AKI)
     return transitions
 
 
@@ -199,14 +252,37 @@ def _match_transition(
     peak_wavelength: float,
     transitions: List[Transition],
     tolerance_nm: float,
+    reference_temperature_K: float = _REFERENCE_T_K,
 ) -> Optional[Transition]:
-    best_match = None
-    best_distance = float("inf")
+    """Match a peak to the best candidate transition using physics-aware scoring.
+
+    Candidates within the wavelength tolerance are scored by an emissivity
+    proxy (g_k * A_ki * exp(-E_k / kT)) weighted by proximity.  This
+    favours strong, physically plausible lines over weak coincidences.
+    """
+    kT = KB_EV * reference_temperature_K
+    if kT <= 0:
+        kT = KB_EV * _REFERENCE_T_K
+
+    best_match: Optional[Transition] = None
+    best_score = -1.0
+
     for transition in transitions:
         distance = abs(transition.wavelength_nm - peak_wavelength)
-        if distance <= tolerance_nm and distance < best_distance:
+        if distance > tolerance_nm:
+            continue
+
+        # Emissivity proxy: g_k * A_ki * exp(-E_k / kT)
+        emissivity = transition.g_k * transition.A_ki * np.exp(-transition.E_k_ev / kT)
+
+        # Proximity weight: linearly penalise wavelength offset
+        proximity = 1.0 - (distance / tolerance_nm)
+
+        score = emissivity * proximity
+        if score > best_score:
+            best_score = score
             best_match = transition
-            best_distance = distance
+
     return best_match
 
 
@@ -216,35 +292,3 @@ def _estimate_wl_step(wavelength: np.ndarray) -> float:
     diffs = np.diff(wavelength)
     diffs = diffs[np.isfinite(diffs)]
     return float(np.median(diffs)) if diffs.size else 1.0
-
-
-def _find_peaks(
-    wavelength: np.ndarray,
-    intensity: np.ndarray,
-    min_peak_height: float,
-    peak_width_nm: float,
-) -> List[Tuple[int, float]]:
-    max_intensity = float(np.max(intensity))
-    if max_intensity <= 0:
-        return []
-
-    normalized = intensity / max_intensity
-    threshold = max(min_peak_height, 0.0)
-
-    if HAS_SCIPY and find_peaks is not None:
-        wl_step = _estimate_wl_step(wavelength)
-        min_distance_px = max(int(peak_width_nm / max(wl_step, 1e-9)), 1)
-        peak_indices, _ = find_peaks(
-            normalized,
-            height=threshold,
-            distance=min_distance_px,
-            prominence=threshold / 2.0,
-        )
-        return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
-
-    # Simple fallback: local maxima above threshold
-    peaks: List[Tuple[int, float]] = []
-    for i in range(1, len(intensity) - 1):
-        if normalized[i] >= threshold and intensity[i] > intensity[i - 1] and intensity[i] > intensity[i + 1]:
-            peaks.append((i, float(wavelength[i])))
-    return peaks

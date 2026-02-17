@@ -1,9 +1,14 @@
-"""Shared preprocessing for element identification algorithms."""
+"""Shared preprocessing for element identification algorithms.
+
+Provides the canonical peak detection pipeline for all CF-LIBS modules:
+baseline estimation, noise estimation, peak detection with cosmic-ray
+rejection, and robust normalization.
+"""
 
 import numpy as np
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 from scipy.ndimage import median_filter
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 def estimate_baseline(
@@ -75,8 +80,15 @@ def detect_peaks(
     noise: float,
     threshold_factor: float = 4.0,
     prominence_factor: float = 1.5,
+    min_distance_nm: Optional[float] = None,
+    min_width_pts: int = 2,
 ) -> List[Tuple[int, float]]:
     """Unified peak detection above baseline.
+
+    This is the canonical peak detection function for all CF-LIBS modules.
+    It operates on baseline-subtracted intensity with noise-scaled thresholds,
+    optional minimum peak separation, and cosmic-ray rejection via minimum
+    peak width.
 
     Parameters
     ----------
@@ -92,6 +104,14 @@ def detect_peaks(
         Peak height threshold = noise * threshold_factor (default 4.0)
     prominence_factor : float
         Peak prominence threshold = noise * prominence_factor (default 1.5)
+    min_distance_nm : float, optional
+        Minimum distance between peaks in nm. If None, no distance
+        constraint is applied. For resolution-aware detection, pass
+        the instrument resolution element (wavelength / resolving_power).
+    min_width_pts : int
+        Minimum peak width in data points at half-maximum (default 2).
+        Peaks narrower than this are rejected as cosmic-ray artifacts.
+        Physical emission lines span at least the instrument resolution.
 
     Returns
     -------
@@ -102,8 +122,93 @@ def detect_peaks(
     threshold = noise * threshold_factor
     prominence = noise * prominence_factor
 
-    peak_indices, _ = find_peaks(corrected, height=threshold, prominence=prominence)
+    # Convert min_distance_nm to pixels if provided
+    distance = None
+    if min_distance_nm is not None and len(wavelength) >= 2:
+        spacing = float(np.median(np.diff(wavelength)))
+        if spacing > 0:
+            distance = max(1, int(min_distance_nm / spacing))
+
+    kwargs = {"height": threshold, "prominence": prominence}
+    if distance is not None:
+        kwargs["distance"] = distance
+
+    peak_indices, properties = find_peaks(corrected, **kwargs)
+
+    if len(peak_indices) == 0:
+        return []
+
+    # Cosmic-ray rejection: filter out peaks narrower than min_width_pts
+    if min_width_pts >= 2 and len(peak_indices) > 0:
+        widths, _, _, _ = peak_widths(corrected, peak_indices, rel_height=0.5)
+        width_mask = widths >= min_width_pts
+        peak_indices = peak_indices[width_mask]
+
     return [(int(idx), float(wavelength[idx])) for idx in peak_indices]
+
+
+def detect_peaks_auto(
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    threshold_factor: float = 4.0,
+    prominence_factor: float = 1.5,
+    baseline_window_nm: float = 10.0,
+    resolving_power: Optional[float] = None,
+    min_width_pts: int = 2,
+) -> Tuple[List[Tuple[int, float]], np.ndarray, float]:
+    """High-level peak detection with automatic baseline and noise estimation.
+
+    Convenience wrapper that runs the full preprocessing pipeline:
+    baseline estimation, noise estimation, and peak detection with
+    optional resolution-aware minimum distance.
+
+    Parameters
+    ----------
+    wavelength : np.ndarray
+        Wavelength array in nm
+    intensity : np.ndarray
+        Intensity array
+    threshold_factor : float
+        Peak height threshold in noise units (default 4.0)
+    prominence_factor : float
+        Peak prominence threshold in noise units (default 1.5)
+    baseline_window_nm : float
+        Median filter window for baseline estimation (default 10.0)
+    resolving_power : float, optional
+        Instrument resolving power (lambda/delta_lambda). If provided,
+        the minimum peak distance is set to the resolution element at
+        the mean wavelength.
+    min_width_pts : int
+        Minimum peak width for cosmic-ray rejection (default 2)
+
+    Returns
+    -------
+    peaks : List[Tuple[int, float]]
+        List of (index, wavelength_nm) tuples for detected peaks
+    baseline : np.ndarray
+        Estimated baseline array
+    noise : float
+        Estimated noise level (sigma)
+    """
+    baseline = estimate_baseline(wavelength, intensity, window_nm=baseline_window_nm)
+    noise = estimate_noise(intensity, baseline)
+
+    min_distance_nm = None
+    if resolving_power is not None and resolving_power > 0:
+        mean_wl = float(np.mean(wavelength))
+        min_distance_nm = mean_wl / resolving_power
+
+    peaks = detect_peaks(
+        wavelength,
+        intensity,
+        baseline,
+        noise,
+        threshold_factor=threshold_factor,
+        prominence_factor=prominence_factor,
+        min_distance_nm=min_distance_nm,
+        min_width_pts=min_width_pts,
+    )
+    return peaks, baseline, noise
 
 
 def robust_normalize(intensity: np.ndarray, percentile: float = 95.0) -> np.ndarray:

@@ -23,7 +23,11 @@ from cflibs.inversion.element_id import (
     ElementIdentification,
     ElementIdentificationResult,
 )
-from cflibs.inversion.preprocessing import estimate_baseline, estimate_noise
+from cflibs.inversion.preprocessing import (
+    detect_peaks_auto,
+    estimate_baseline,
+    estimate_noise,
+)
 
 
 class ALIASIdentifier:
@@ -441,7 +445,11 @@ class ALIASIdentifier:
         self, wavelength: np.ndarray, intensity: np.ndarray
     ) -> List[Tuple[int, float]]:
         """
-        Detect peaks using 2nd derivative enhancement.
+        Detect peaks using canonical preprocessing + 2nd derivative enhancement.
+
+        Uses the shared preprocessing pipeline (baseline subtraction, MAD noise,
+        prominence-based detection, cosmic-ray rejection) followed by the
+        Noël et al. (2025) 2nd-derivative confirmation filter.
 
         Parameters
         ----------
@@ -455,36 +463,34 @@ class ALIASIdentifier:
         List[Tuple[int, float]]
             List of (peak_index, peak_wavelength) tuples
         """
-        # Estimate baseline and noise using sigma-clipped MAD
-        baseline = estimate_baseline(wavelength, intensity)
-        noise_estimate = estimate_noise(intensity, baseline)
+        # Use canonical pipeline with resolution-aware distance and cosmic-ray filter
+        peaks, baseline, noise = detect_peaks_auto(
+            wavelength,
+            intensity,
+            threshold_factor=self.intensity_threshold_factor,
+            prominence_factor=self.intensity_threshold_factor / 3.0,
+            resolving_power=self.resolving_power,
+            min_width_pts=2,
+        )
 
-        # Threshold in intensity domain (well-calibrated)
-        threshold = noise_estimate * self.intensity_threshold_factor
-
-        # Find peaks in baseline-corrected intensity
-        corrected = intensity - baseline
-        peak_indices, _ = find_peaks(corrected, height=threshold, prominence=threshold / 3)
+        if not peaks:
+            return []
 
         # Paper (Noël et al. 2025): enhance peak detection using negative 2nd derivative
         # Compute -d²I/dλ², zero negatives — true peaks have positive curvature here
+        corrected = intensity - baseline
         d2 = -np.gradient(np.gradient(corrected, wavelength), wavelength)
         d2[d2 < 0] = 0.0
 
         # Filter: keep peaks where d2 > 0 in a ±2-point neighborhood around peak center
-        # This handles discretization effects where d2 peak may be slightly offset
         confirmed = []
-        for idx in peak_indices:
+        for idx, wl in peaks:
             lo = max(0, idx - 2)
             hi = min(len(d2), idx + 3)
             if np.max(d2[lo:hi]) > 0:
-                confirmed.append(idx)
-        peak_indices = np.array(confirmed, dtype=int) if confirmed else np.array([], dtype=int)
+                confirmed.append((idx, wl))
 
-        # Return as list of (index, wavelength) tuples
-        peaks = [(int(idx), float(wavelength[idx])) for idx in peak_indices]
-
-        return peaks
+        return confirmed
 
     def _compute_element_emissivities(
         self, element: str, wl_min: float, wl_max: float
