@@ -66,6 +66,18 @@ from cflibs.benchmark.synthetic import (
     CompositionRange,
     ConditionVariation,
 )
+from cflibs.benchmark.synthetic_corpus import (
+    CorpusRecipe,
+    PerturbationAxes,
+    build_synthetic_id_corpus,
+    default_axes,
+    default_recipes,
+)
+from cflibs.benchmark.synthetic_eval import (
+    CalibrationOptions,
+    compute_binary_metrics,
+    run_synthetic_benchmark,
+)
 
 from cflibs.benchmark.loaders import (
     load_benchmark,
@@ -89,6 +101,14 @@ __all__ = [
     "SyntheticBenchmarkGenerator",
     "CompositionRange",
     "ConditionVariation",
+    "CorpusRecipe",
+    "PerturbationAxes",
+    "build_synthetic_id_corpus",
+    "default_axes",
+    "default_recipes",
+    "CalibrationOptions",
+    "compute_binary_metrics",
+    "run_synthetic_benchmark",
     # I/O
     "load_benchmark",
     "save_benchmark",

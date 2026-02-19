@@ -665,6 +665,45 @@ class TestSyntheticBenchmarkGenerator:
         assert "Al" in dataset.elements
         assert dataset.name == "synthetic_geological_benchmark"
 
+    def test_generate_uses_forward_model_when_atomic_db_available(self, atomic_db, monkeypatch):
+        """Ensure forward-model path is exercised when atomic DB is provided."""
+        generator = SyntheticBenchmarkGenerator(
+            atomic_db=atomic_db,
+            wavelength_range=(370.0, 375.0),
+            n_wavelength_points=200,
+        )
+
+        # If forward model fails and code falls back, this test should fail.
+        def _fail_simplified(*_args, **_kwargs):
+            raise AssertionError("Unexpected fallback to simplified synthetic model")
+
+        monkeypatch.setattr(generator, "_generate_simplified", _fail_simplified)
+
+        composition_ranges = [
+            CompositionRange("Fe", 1.0, 1.0, distribution="fixed", fixed_value=1.0),
+        ]
+        dataset = generator.generate(
+            n_spectra=1,
+            composition_ranges=composition_ranges,
+            seed=7,
+            create_default_split=False,
+        )
+
+        spectrum = dataset.spectra[0]
+        assert spectrum.intensity.shape == (200,)
+        assert np.all(np.isfinite(spectrum.intensity))
+        assert np.max(spectrum.intensity) > 0
+
+    def test_composition_to_number_density_conversion(self):
+        """Mass-fraction composition should convert to normalized number densities."""
+        densities = SyntheticBenchmarkGenerator._composition_to_number_densities(
+            {"Fe": 0.5, "Cu": 0.5},
+            total_number_density_cm3=1.0e17,
+        )
+        assert np.isclose(sum(densities.values()), 1.0e17, rtol=1e-10)
+        # For equal mass fraction, lighter element has larger number fraction.
+        assert densities["Fe"] > densities["Cu"]
+
 
 # =============================================================================
 # Test I/O

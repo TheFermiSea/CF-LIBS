@@ -35,6 +35,40 @@ from cflibs.benchmark.dataset import (
 
 logger = get_logger("benchmark.synthetic")
 
+# Standard atomic masses used for mass-fraction -> number-density conversion [amu]
+STANDARD_MASSES = {
+    "H": 1.008,
+    "He": 4.003,
+    "Li": 6.941,
+    "Be": 9.012,
+    "B": 10.81,
+    "C": 12.01,
+    "N": 14.01,
+    "O": 16.00,
+    "F": 19.00,
+    "Ne": 20.18,
+    "Na": 22.99,
+    "Mg": 24.31,
+    "Al": 26.98,
+    "Si": 28.09,
+    "P": 30.97,
+    "S": 32.07,
+    "Cl": 35.45,
+    "Ar": 39.95,
+    "K": 39.10,
+    "Ca": 40.08,
+    "Sc": 44.96,
+    "Ti": 47.87,
+    "V": 50.94,
+    "Cr": 52.00,
+    "Mn": 54.94,
+    "Fe": 55.85,
+    "Co": 58.93,
+    "Ni": 58.69,
+    "Cu": 63.55,
+    "Zn": 65.38,
+}
+
 
 @dataclass
 class CompositionRange:
@@ -432,26 +466,84 @@ class SyntheticBenchmarkGenerator:
         try:
             from cflibs.radiation.spectrum_model import SpectrumModel
             from cflibs.plasma.state import SingleZoneLTEPlasma
+            from cflibs.instrument.model import InstrumentModel
+
+            # Convert mass-fraction style composition to number densities.
+            # For synthetic benchmarking we scale to ~charge-neutral total species density.
+            number_densities = self._composition_to_number_densities(
+                composition=composition,
+                total_number_density_cm3=electron_density_cm3,
+            )
 
             # Create plasma state
             plasma = SingleZoneLTEPlasma(
-                temperature_K=temperature_K,
-                electron_density_cm3=electron_density_cm3,
-                composition=composition,
+                T_e=temperature_K,
+                n_e=electron_density_cm3,
+                species=number_densities,
             )
 
-            # Create spectrum model
+            # Create instrument + spectrum model
+            delta_lambda = float(self._wavelength_grid[1] - self._wavelength_grid[0])
+            instrument = InstrumentModel(
+                resolution_fwhm_nm=self.base_conditions.spectral_resolution_nm
+            )
             model = SpectrumModel(
+                plasma=plasma,
                 atomic_db=self.atomic_db,
-                wavelength_grid=self._wavelength_grid,
+                instrument=instrument,
+                lambda_min=float(self._wavelength_grid[0]),
+                lambda_max=float(self._wavelength_grid[-1]),
+                delta_lambda=delta_lambda,
             )
 
             # Generate spectrum
-            return model.compute_spectrum(plasma)
+            wavelength_model, intensity_model = model.compute_spectrum()
+
+            # SpectrumModel builds grid with np.arange; interpolate if edge differs.
+            if wavelength_model.shape != self._wavelength_grid.shape or not np.allclose(
+                wavelength_model, self._wavelength_grid
+            ):
+                return np.interp(
+                    self._wavelength_grid,
+                    wavelength_model,
+                    intensity_model,
+                    left=0.0,
+                    right=0.0,
+                )
+            return intensity_model
 
         except Exception as e:
             logger.warning(f"Forward model failed: {e}, using simplified model")
             return self._generate_simplified(composition, temperature_K, rng)
+
+    @staticmethod
+    def _composition_to_number_densities(
+        composition: Dict[str, float], total_number_density_cm3: float
+    ) -> Dict[str, float]:
+        """
+        Convert mass-fraction-like composition to element number densities.
+
+        Number fraction n_i is proportional to w_i / A_i, where w_i is composition
+        fraction and A_i is atomic mass.
+        """
+        if total_number_density_cm3 <= 0:
+            raise ValueError("total_number_density_cm3 must be positive")
+
+        weighted = {}
+        for element, mass_fraction in composition.items():
+            if mass_fraction <= 0:
+                continue
+            mass_amu = STANDARD_MASSES.get(element, 50.0)
+            weighted[element] = mass_fraction / max(float(mass_amu), 1e-9)
+
+        total_weighted = sum(weighted.values())
+        if total_weighted <= 0:
+            raise ValueError("composition must contain at least one positive component")
+
+        return {
+            element: total_number_density_cm3 * (value / total_weighted)
+            for element, value in weighted.items()
+        }
 
     def _generate_simplified(
         self,
