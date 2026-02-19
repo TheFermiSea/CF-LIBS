@@ -22,19 +22,10 @@ from __future__ import annotations
 
 # pyright: reportMissingImports=false
 
+from importlib.util import find_spec
+
 # Check for optional dependencies
-HAS_WIDGETS = False
-
-try:
-    import ipywidgets
-    import plotly
-
-    HAS_WIDGETS = True
-except ImportError:
-    pass
-
-# Public API (only if widgets available)
-__all__ = ["HAS_WIDGETS"]
+HAS_WIDGETS = find_spec("ipywidgets") is not None and find_spec("plotly") is not None
 
 if HAS_WIDGETS:
     from cflibs.visualization.widgets import (
@@ -44,9 +35,12 @@ if HAS_WIDGETS:
         QualityDashboard,
     )
 
-    __all__.extend([
+    __all__ = [
+        "HAS_WIDGETS",
         "SpectrumViewer",
         "BoltzmannPlotWidget",
         "PosteriorViewer",
         "QualityDashboard",
-    ])
+    ]
+else:
+    __all__ = ["HAS_WIDGETS"]
