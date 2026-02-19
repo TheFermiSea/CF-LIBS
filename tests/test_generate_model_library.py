@@ -10,6 +10,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "generate_model_library.py"
+pytestmark = pytest.mark.unit
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:

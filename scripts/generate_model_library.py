@@ -13,7 +13,7 @@ import argparse
 import shlex
 import sys
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import numpy as np
 
@@ -23,7 +23,7 @@ def _error_exit(message: str, code: int = 1) -> NoReturn:
     sys.exit(code)
 
 
-def _require_h5py():
+def _require_h5py() -> Any:
     try:
         import h5py
     except ImportError:

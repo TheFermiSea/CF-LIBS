@@ -141,17 +141,18 @@ class SlurmJobManager:
         If True, print commands instead of executing (default: False)
     """
 
+    _ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _SBATCH_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
     def __init__(self, dry_run: bool = False) -> None:
         self.dry_run = dry_run
-        self._env_key_pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-        self._sbatch_key_pattern = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
     def _validate_env_key(self, key: str) -> None:
-        if not self._env_key_pattern.fullmatch(key):
+        if not self._ENV_KEY_PATTERN.fullmatch(key):
             raise ValueError(f"Invalid environment variable name: {key!r}")
 
     def _validate_sbatch_key(self, key: str) -> None:
-        if not self._sbatch_key_pattern.fullmatch(key):
+        if not self._SBATCH_KEY_PATTERN.fullmatch(key):
             raise ValueError(f"Invalid SBATCH directive key: {key!r}")
 
     def generate_sbatch_script(self, config: SlurmJobConfig, script_content: str) -> str:
