@@ -68,7 +68,10 @@ def detect_line_observations(
     wavelength_tolerance_nm : float
         Matching tolerance for known lines in nm
     min_peak_height : float
-        Minimum peak height as fraction of max intensity
+        Legacy post-filter minimum peak height as fraction of max raw
+        intensity. Applied after noise-calibrated detection from
+        ``detect_peaks_auto``. Set to ``0.0`` to rely only on the
+        noise-calibrated threshold.
     peak_width_nm : float
         Expected peak width for integration (nm).  Overridden by
         ``resolving_power`` when provided.

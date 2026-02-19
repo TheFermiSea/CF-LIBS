@@ -86,17 +86,20 @@ for name, path, loader, elements, expected, rp in CASES:
             f"{m.get('R_rat', 0):<7.3f} ",
             end="",
         )
-        # Reconstruct P_SNR from CL/k_det/P_maj/P_ab and gates
-        k_det = m.get("k_det", 0)
+        # Prefer direct metadata; only derive as a fallback for legacy outputs.
         P_ab = m.get("P_ab", 1.0)
-        P_maj = m.get("P_maj", 0.5)
-        P_local = m.get("P_local", 1.0)
-        P_mix = m.get("P_mix", 1.0)
-        R_rat = m.get("R_rat", 0.5)
-        # CL = k_det * P_SNR * P_maj * P_ab * gate1 * gate2 * gate3
-        gate1 = float(np.clip(2.0 * P_local, 0.1, 1.0))
-        gate2 = 0.1 + 0.9 * min(P_mix, 1.0)
-        gate3 = 0.5 + 0.5 * R_rat
-        denom = k_det * P_maj * P_ab * gate1 * gate2 * gate3
-        P_SNR = e.confidence / denom if denom > 1e-10 else 0.0
+        P_SNR = m.get("P_SNR")
+        if P_SNR is None:
+            k_det = m.get("k_det", 0.0)
+            P_maj = m.get("P_maj", 0.5)
+            P_local = m.get("P_local", 1.0)
+            P_mix = m.get("P_mix", 1.0)
+            R_rat = m.get("R_rat", 0.5)
+            # CL = k_det * P_SNR * P_maj * P_ab * gate1 * gate2 * gate3
+            # Gates match current ALIAS implementation in alias_identifier.py.
+            gate1 = float(np.clip(2.0 * P_local, 0.25, 1.0))
+            gate2 = 0.25 + 0.75 * min(P_mix, 1.0)
+            gate3 = 0.5 + 0.5 * R_rat
+            denom = k_det * P_maj * P_ab * gate1 * gate2 * gate3
+            P_SNR = e.confidence / denom if denom > 1e-10 else 0.0
         print(f"{P_SNR:<7.3f} {P_ab:<6.2f} {e.n_matched_lines}/{e.n_total_lines}")

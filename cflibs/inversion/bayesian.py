@@ -95,6 +95,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from enum import Enum
+from scipy import stats
 
 from cflibs.core.constants import (
     SAHA_CONST_CM3,
@@ -1767,8 +1768,6 @@ class NestedSampler:
         # Concentrations: Dirichlet-like via stick-breaking
         # For n elements, we have n-1 free parameters
         if self.n_elements > 1:
-            from scipy import stats
-
             # Stick-breaking transformation for Dirichlet(alpha, alpha, ..., alpha)
             alpha = self.prior_config.concentration_alpha
             remaining = 1.0

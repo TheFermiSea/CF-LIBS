@@ -181,6 +181,7 @@ class ALIASIdentifier:
             search_elements = self.elements
 
         # ── Phase 1: Independent scoring ──────────────────────────────
+        global_p_snr = self._compute_p_snr(intensity, peaks)
         candidates: List[dict] = []
 
         for element in search_elements:
@@ -248,6 +249,7 @@ class ALIASIdentifier:
                     "N_matched": N_matched,
                     "P_sig_data": (P_sig, fill_factor, p_chance, p_tail),
                     "k_det": k_det,
+                    "P_SNR": global_p_snr,
                 }
             )
 
@@ -347,6 +349,8 @@ class ALIASIdentifier:
                 k_det = cand["k_det"]
                 CL = cand["initial_CL"]
 
+            P_SNR = cand["P_SNR"] if not competition_ran else global_p_snr
+
             # ── Post-CL discriminators ──────────────────────────────────
             # Two NNLS-derived gates suppress false positives whose peaks
             # ride on a dominant element's lines:
@@ -437,6 +441,7 @@ class ALIASIdentifier:
                     "P_mix": P_mix,
                     "P_local": P_local,
                     "R_rat": R_rat,
+                    "P_SNR": P_SNR,
                     "P_sig": P_sig,
                     "p_tail": p_tail,
                     "p_chance": p_chance,
@@ -1372,6 +1377,18 @@ class ALIASIdentifier:
 
         return P_sig, fill_factor, p_chance, p_tail
 
+    @staticmethod
+    def _compute_p_snr(intensity: np.ndarray, peaks: List[Tuple[int, float]]) -> float:
+        """Compute erf-based SNR quality factor used in CL."""
+        if len(peaks) > 0:
+            peak_intensities_local = [intensity[p[0]] for p in peaks]
+            median_peak = np.median(peak_intensities_local)
+            noise_estimate = np.median(np.abs(intensity - np.median(intensity))) * 1.4826
+            noise_estimate = max(noise_estimate, 1e-10)
+            z = (median_peak - noise_estimate) / (noise_estimate * math.sqrt(2))
+            return 0.5 * (1.0 + float(erf(z)))
+        return 0.5
+
     def _decide(
         self,
         k_sim: float,
@@ -1418,7 +1435,7 @@ class ALIASIdentifier:
         Returns
         -------
         Tuple[float, float]
-            (k_det, CL) detection score and confidence level
+            (k_det, CL) detection score and confidence level.
         """
         # k_det formula — uses N_matched (paper: N_X = matched count)
         # for the blend weighting.  Single-line elements (N_X=1) naturally
@@ -1426,18 +1443,7 @@ class ALIASIdentifier:
         N_X = max(N_matched, 1)
         k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
 
-        # P_SNR: erf-based SNR quality factor (paper formula).
-        # z = (I_median - σ_noise) / (σ_noise × √2)
-        # P_SNR = (1 + erf(z)) / 2
-        if len(peaks) > 0:
-            peak_intensities_local = [intensity[p[0]] for p in peaks]
-            median_peak = np.median(peak_intensities_local)
-            noise_estimate = np.median(np.abs(intensity - np.median(intensity))) * 1.4826
-            noise_estimate = max(noise_estimate, 1e-10)
-            z = (median_peak - noise_estimate) / (noise_estimate * math.sqrt(2))
-            P_SNR = 0.5 * (1.0 + float(erf(z)))
-        else:
-            P_SNR = 0.5
+        P_SNR = self._compute_p_snr(intensity, peaks)
 
         # P_ab — crustal abundance prior
         P_ab = self._compute_P_ab(element)

@@ -71,6 +71,12 @@ class CorrelationIdentifier:
         Scale factor applied to median non-zero score for adaptive rejection
         (default: 1.5). Lower values increase recall; higher values reduce
         false positives.
+    peak_region_threshold : float
+        Normalized intensity threshold used to define peak-region masks for
+        Pearson correlation in classic mode (default: 0.15).
+    peak_region_min_points : int
+        Minimum mask support before fallback from AND-mask to OR-mask in
+        classic mode (default: 5).
 
     Attributes
     ----------
@@ -111,6 +117,8 @@ class CorrelationIdentifier:
         min_line_strength: float = 1e4,
         reference_temperature: float = 10000.0,
         relative_threshold_scale: float = 1.5,
+        peak_region_threshold: float = 0.15,
+        peak_region_min_points: int = 5,
     ):
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
@@ -128,6 +136,8 @@ class CorrelationIdentifier:
         self.min_line_strength = min_line_strength
         self.reference_temperature = reference_temperature
         self.relative_threshold_scale = relative_threshold_scale
+        self.peak_region_threshold = peak_region_threshold
+        self.peak_region_min_points = max(1, int(peak_region_min_points))
 
         self.saha_solver = SahaBoltzmannSolver(atomic_db)
 
@@ -241,6 +251,8 @@ class CorrelationIdentifier:
                 "mode": mode,
                 "wavelength_tolerance_nm": self.wavelength_tolerance_nm,
                 "min_confidence": self.min_confidence,
+                "peak_region_threshold": self.peak_region_threshold,
+                "peak_region_min_points": float(self.peak_region_min_points),
             },
         )
 
@@ -301,18 +313,16 @@ class CorrelationIdentifier:
                         intensity, element, transitions, wavelength, T_eV, n_e
                     )
                     # Peak-region mask: correlate only where BOTH spectra have significant
-                    # signal to avoid baseline-dominated correlations. The 0.15 level and
-                    # fallback minimum support (5 points) were tuned on sparse/weak-line
-                    # cases to preserve recall while still suppressing continuum regions.
+                    # signal to avoid baseline-dominated correlations.
                     i_min, i_max = intensity.min(), intensity.max()
                     m_min, m_max = model_spectrum.min(), model_spectrum.max()
-                    sigma_threshold = 0.15
+                    sigma_threshold = float(self.peak_region_threshold)
                     if (i_max - i_min) > 1e-10 and (m_max - m_min) > 1e-10:
                         exp_norm = (intensity - i_min) / (i_max - i_min)
                         mod_norm = (model_spectrum - m_min) / (m_max - m_min)
                         peak_mask = (exp_norm >= sigma_threshold) & (mod_norm >= sigma_threshold)
-                        # Fallback: if AND is too restrictive (< 5 pts), use OR
-                        if np.sum(peak_mask) < 5:
+                        # Fallback: if AND is too restrictive, use OR.
+                        if np.sum(peak_mask) < self.peak_region_min_points:
                             peak_mask = (exp_norm >= sigma_threshold) | (
                                 mod_norm >= sigma_threshold
                             )

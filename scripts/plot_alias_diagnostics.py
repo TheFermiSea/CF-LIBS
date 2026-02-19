@@ -15,7 +15,6 @@ import os
 os.environ["JAX_PLATFORMS"] = "cpu"
 
 import argparse
-import sys
 from pathlib import Path
 import numpy as np
 import matplotlib
@@ -24,18 +23,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.inversion.alias_identifier import ALIASIdentifier
 
 # Reuse data loading from validate_real_data
-from scripts.validate_real_data import (
-    load_scipp,
-    select_representative_spectrum,
-    DATASET_CONFIGS,
-)
+try:
+    from scripts.validate_real_data import (
+        load_scipp,
+        select_representative_spectrum,
+        DATASET_CONFIGS,
+    )
+except ModuleNotFoundError:
+    from validate_real_data import (  # type: ignore
+        load_scipp,
+        select_representative_spectrum,
+        DATASET_CONFIGS,
+    )
 
 
 def run_alias_with_diagnostics(wavelength, intensity, db, elements, rp):
@@ -59,6 +62,14 @@ def run_alias_with_diagnostics(wavelength, intensity, db, elements, rp):
             "k_det": m.get("k_det", 0.0),
         }
     return result, diag, float(identifier.detection_threshold)
+
+
+def _alias_gate_factors(p_local: float, p_mix: float, r_rat: float) -> tuple[float, float, float]:
+    """Mirror ALIAS post-CL gate formulas for diagnostic plots."""
+    local_gate = float(np.clip(2.0 * p_local, 0.25, 1.0))
+    mix_gate = 0.25 + 0.75 * min(p_mix, 1.0)
+    ratio_gate = 0.5 + 0.5 * r_rat
+    return local_gate, mix_gate, ratio_gate
 
 
 def plot_gate_breakdown(diag, dataset_name, expected, threshold, output_path):
@@ -241,9 +252,11 @@ def plot_suppression_waterfall(diag, dataset_name, expected, threshold, output_p
     for i, e in enumerate(elements):
         d = diag[e]
         cl_pre = d["score"]
-        p_local_gate = float(np.clip(2.0 * d["P_local"], 0.1, 1.0))
-        p_mix_gate = 0.1 + 0.9 * min(d["P_mix"], 1.0)
-        r_rat_gate = 0.5 + 0.5 * d["R_rat"]
+        p_local_gate, p_mix_gate, r_rat_gate = _alias_gate_factors(
+            d["P_local"],
+            d["P_mix"],
+            d["R_rat"],
+        )
 
         # Compute cumulative CL after each gate
         cl0 = cl_pre
