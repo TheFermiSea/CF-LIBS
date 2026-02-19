@@ -36,6 +36,7 @@ from cflibs.inversion.alias_identifier import ALIASIdentifier
 from cflibs.inversion.comb_identifier import CombIdentifier
 from cflibs.inversion.correlation_identifier import CorrelationIdentifier
 from cflibs.inversion.element_id import ElementIdentificationResult
+from cflibs.inversion.wavelength_calibration import calibrate_wavelength_axis
 
 
 # ============================================================================
@@ -581,13 +582,36 @@ def run_all_identifiers(
     results = {}
 
     algorithms = [
-        ("ALIAS", ALIASIdentifier, {"resolving_power": resolving_power}),
-        ("Comb", CombIdentifier, {"resolving_power": resolving_power}),
+        (
+            "ALIAS",
+            ALIASIdentifier,
+            {
+                "resolving_power": resolving_power,
+                # Tuned on labeled real datasets (Fe/Ni/steel + full benchmark set)
+                "intensity_threshold_factor": 3.0,
+                "detection_threshold": 0.01,
+                "chance_window_scale": 0.3,
+            },
+        ),
+        (
+            "Comb",
+            CombIdentifier,
+            {
+                "resolving_power": resolving_power,
+                "min_correlation": 0.08,
+                "tooth_activation_threshold": 0.35,
+                "relative_threshold_scale": 1.4,
+                "min_aki_gk": 3000.0,
+            },
+        ),
         (
             "Correlation",
             CorrelationIdentifier,
             {
                 "resolving_power": resolving_power,
+                "min_confidence": 0.008,
+                "relative_threshold_scale": 1.2,
+                "min_line_strength": 1000.0,
                 "T_range_K": (5000, 15000),
                 "T_steps": 7,
                 "n_e_range_cm3": (1e15, 5e17),
@@ -1041,6 +1065,60 @@ def main():
         action="store_true",
         help="Report depth-scan robustness (per-iteration score variance)",
     )
+    parser.add_argument(
+        "--wavelength-calibration-mode",
+        type=str,
+        default="none",
+        choices=["none", "auto", "shift", "affine", "quadratic"],
+        help="Wavelength calibration model before ID (default: none)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-max-pair-window",
+        type=float,
+        default=2.0,
+        help="Peak-to-line candidate window in nm for robust calibration fit",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-inlier-tol",
+        type=float,
+        default=0.08,
+        help="Inlier tolerance in nm for robust calibration fit",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-disable",
+        action="store_true",
+        help="Disable calibration quality gate (default: False)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-min-inliers",
+        type=int,
+        default=12,
+        help="Quality gate: minimum inlier pairs (default: 12)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-min-peak-match",
+        type=float,
+        default=0.35,
+        help="Quality gate: minimum matched peak fraction (default: 0.35)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-max-rmse",
+        type=float,
+        default=0.10,
+        help="Quality gate: maximum inlier RMSE in nm (default: 0.10)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-min-span-frac",
+        type=float,
+        default=0.25,
+        help="Quality gate: minimum inlier span fraction (default: 0.25)",
+    )
+    parser.add_argument(
+        "--wavelength-calibration-gate-max-abs-correction",
+        type=float,
+        default=2.5,
+        help="Quality gate: maximum absolute correction in nm (default: 2.5)",
+    )
 
     args = parser.parse_args()
 
@@ -1138,17 +1216,59 @@ def main():
         elements = args.elements if args.elements else dataset["elements"]
         expected = dataset["expected"]
 
+        # Robust wavelength calibration before identification
+        wavelength_for_id = wavelength
+        if args.wavelength_calibration_mode != "none":
+            calibration = calibrate_wavelength_axis(
+                wavelength=wavelength,
+                intensity=spectrum,
+                atomic_db=db,
+                elements=elements,
+                mode=args.wavelength_calibration_mode,  # type: ignore[arg-type]
+                max_pair_window_nm=args.wavelength_calibration_max_pair_window,
+                inlier_tolerance_nm=args.wavelength_calibration_inlier_tol,
+                apply_quality_gate=not args.wavelength_calibration_gate_disable,
+                quality_min_inliers=args.wavelength_calibration_gate_min_inliers,
+                quality_min_peak_match_fraction=args.wavelength_calibration_gate_min_peak_match,
+                quality_max_rmse_nm=args.wavelength_calibration_gate_max_rmse,
+                quality_min_inlier_span_fraction=args.wavelength_calibration_gate_min_span_frac,
+                quality_max_abs_correction_nm=(args.wavelength_calibration_gate_max_abs_correction),
+            )
+            if calibration.success and calibration.quality_passed:
+                wavelength_for_id = calibration.corrected_wavelength
+                coeffs = ", ".join(f"{c:.6g}" for c in calibration.coefficients)
+                print(
+                    "  Wavelength calibration:"
+                    f" model={calibration.model}, coeffs=[{coeffs}],"
+                    f" rmse={calibration.rmse_nm:.4f} nm,"
+                    f" inliers={calibration.n_inliers}/{calibration.n_candidates},"
+                    f" peak_match={calibration.matched_peak_fraction:.1%}"
+                )
+            elif calibration.success and not calibration.quality_passed:
+                coeffs = ", ".join(f"{c:.6g}" for c in calibration.coefficients)
+                print(
+                    "  Wavelength calibration: rejected by quality gate"
+                    f" ({calibration.quality_reason});"
+                    f" model={calibration.model}, coeffs=[{coeffs}],"
+                    f" rmse={calibration.rmse_nm:.4f} nm,"
+                    f" inliers={calibration.n_inliers}/{calibration.n_candidates},"
+                    f" peak_match={calibration.matched_peak_fraction:.1%}"
+                )
+            else:
+                reason = calibration.quality_reason or calibration.details.get("reason", "unknown")
+                print(f"  Wavelength calibration: skipped ({reason})")
+
         # Determine resolving power: per-dataset override > auto-detect
         if "resolving_power" in dataset:
             rp = dataset["resolving_power"]
             print(f"  Resolving power: {rp:.0f} (dataset config)")
         else:
-            rp = estimate_resolving_power(wavelength, spectrum)
+            rp = estimate_resolving_power(wavelength_for_id, spectrum)
             print(f"  Resolving power: {rp:.0f} (auto-detected)")
 
         # Run identifiers
         print(f"  Running identifiers for elements: {', '.join(elements)}")
-        results = run_all_identifiers(wavelength, spectrum, db, elements, resolving_power=rp)
+        results = run_all_identifiers(wavelength_for_id, spectrum, db, elements, resolving_power=rp)
 
         # Print results table
         print_result_table(results, dataset["name"], expected)
@@ -1176,7 +1296,7 @@ def main():
             # Spectrum with lines
             spectrum_plot_path = output_dir / f"{dataset['name']}_spectrum.png"
             plot_spectrum_with_lines(
-                wavelength,
+                wavelength_for_id,
                 spectrum,
                 results,
                 f"{dataset['name']} - Element Identification",

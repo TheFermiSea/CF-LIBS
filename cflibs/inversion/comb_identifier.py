@@ -52,6 +52,10 @@ class CombIdentifier:
         Minimum tooth width in data points (default: 5)
     max_width_factor : float, optional
         Maximum width as fraction of resolution element (default: 1.0)
+    relative_threshold_scale : float, optional
+        Scale factor applied to median non-zero score for adaptive rejection
+        (default: 1.5). Lower values increase recall; higher values reduce
+        false positives.
     elements : List[str], optional
         List of elements to search for (default: None means all in database)
     resolving_power : float, optional
@@ -98,6 +102,7 @@ class CombIdentifier:
         max_shift_pts: int = 5,
         min_width_pts: int = 5,
         max_width_factor: float = 1.0,
+        relative_threshold_scale: float = 1.5,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
@@ -114,6 +119,7 @@ class CombIdentifier:
         self.max_shift_pts = max_shift_pts
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor
+        self.relative_threshold_scale = relative_threshold_scale
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
@@ -246,7 +252,7 @@ class CombIdentifier:
         non_zero_scores = [e.score for e in element_identifications if e.score > 0]
         if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
-            relative_threshold = min(1.0, 1.5 * median_score)
+            relative_threshold = min(1.0, self.relative_threshold_scale * median_score)
         else:
             relative_threshold = 0.0
 

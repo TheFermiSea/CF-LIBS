@@ -67,6 +67,10 @@ class CorrelationIdentifier:
         Minimum observable line strength A_ki * g_k (default: 1e4)
     reference_temperature : float
         Reference temperature in K for emissivity ranking (default: 10000.0)
+    relative_threshold_scale : float
+        Scale factor applied to median non-zero score for adaptive rejection
+        (default: 1.5). Lower values increase recall; higher values reduce
+        false positives.
 
     Attributes
     ----------
@@ -106,6 +110,7 @@ class CorrelationIdentifier:
         max_lines_per_element: int = 100,
         min_line_strength: float = 1e4,
         reference_temperature: float = 10000.0,
+        relative_threshold_scale: float = 1.5,
     ):
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
@@ -122,6 +127,7 @@ class CorrelationIdentifier:
         self.max_lines_per_element = max_lines_per_element
         self.min_line_strength = min_line_strength
         self.reference_temperature = reference_temperature
+        self.relative_threshold_scale = relative_threshold_scale
 
         self.saha_solver = SahaBoltzmannSolver(atomic_db)
 
@@ -187,7 +193,7 @@ class CorrelationIdentifier:
         non_zero_scores = [s for _, s, _, _, _ in element_scores if s > 0]
         if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
-            relative_threshold = min(1.0, 1.5 * median_score)
+            relative_threshold = min(1.0, self.relative_threshold_scale * median_score)
         else:
             relative_threshold = 0.0
 
