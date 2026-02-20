@@ -313,8 +313,8 @@ class GoldenSpectrumGenerator:
         self, element: str, ion_stage: int, n_lines: int
     ) -> List[Dict]:
         """Generate synthetic transitions when database is unavailable."""
-        # Use absolute value to ensure non-negative seed
-        seed = abs(hash(element)) + ion_stage
+        # Deterministic seed (avoid process-randomized Python hash()).
+        seed = ion_stage + sum((idx + 1) * ord(ch) for idx, ch in enumerate(element))
         rng = np.random.default_rng(seed)
 
         transitions = []

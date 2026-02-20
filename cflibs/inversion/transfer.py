@@ -1257,10 +1257,11 @@ class FineTuner:
         """NumPy fallback: closed-form linear adaptation."""
         logger.info("Using NumPy fallback (ridge regression)")
 
-        # Simple ridge regression as fallback
-        # y = X @ W + b
-        X_train.shape[1]
-        y_train.shape[1]
+        # Baseline loss with incoming parameters (for comparable history with JAX path).
+        W_init = initial_params.get("W", np.zeros((X_train.shape[1], y_train.shape[1])))
+        b_init = initial_params.get("b", np.zeros(y_train.shape[1]))
+        y_pred_init = np.dot(X_train, W_init) + b_init
+        initial_loss = np.mean((y_pred_init - y_train) ** 2)
 
         # Add bias column
         X_aug = np.hstack([X_train, np.ones((X_train.shape[0], 1))])
@@ -1288,9 +1289,9 @@ class FineTuner:
 
         return FineTuneResult(
             adapted_params=adapted_params,
-            loss_history=[float(train_loss)],
+            loss_history=[float(initial_loss), float(train_loss)],
             validation_loss=float(val_loss),
-            n_epochs=1,
+            n_epochs=2,
             converged=True,
             final_loss=float(train_loss),
         )
