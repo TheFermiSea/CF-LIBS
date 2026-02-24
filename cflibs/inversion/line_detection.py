@@ -6,7 +6,7 @@ raw spectra into LineObservation objects for classic CF-LIBS solvers.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, TypedDict
 
 import numpy as np
 
@@ -115,6 +115,14 @@ class CombScore:
     f1_score: float
     missing_fraction: float
     passes: bool
+
+
+class CombShiftSummary(TypedDict):
+    shift_nm: float
+    scores: Dict[str, CombScore]
+    total_matches: int
+    passed_elements: List[str]
+    total_f1: float
 
 
 def detect_line_observations(
@@ -565,9 +573,9 @@ def _scan_comb_shifts(
     comb_min_precision: float,
     comb_min_recall: float,
     comb_max_missing_fraction: float,
-) -> Tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
-    best_summary: Optional[Dict[str, object]] = None
-    fallback_summary: Optional[Dict[str, object]] = None
+) -> Tuple[Optional[CombShiftSummary], Optional[CombShiftSummary]]:
+    best_summary: Optional[CombShiftSummary] = None
+    fallback_summary: Optional[CombShiftSummary] = None
 
     for shift_nm in shift_grid:
         scores: Dict[str, CombScore] = {}
@@ -607,7 +615,7 @@ def _scan_comb_shifts(
                 "total_f1": total_f1,
             }
         else:
-            prev_matches = fallback_summary.get("total_matches", 0)
+            prev_matches = fallback_summary["total_matches"]
             if total_matches_all > prev_matches or (
                 total_matches_all == prev_matches
                 and abs(shift_nm) < abs(float(fallback_summary["shift_nm"]))
@@ -629,8 +637,8 @@ def _scan_comb_shifts(
                 "total_f1": total_f1,
             }
         else:
-            prev_f1 = best_summary.get("total_f1", 0.0)
-            prev_matches = best_summary.get("total_matches", 0)
+            prev_f1 = best_summary["total_f1"]
+            prev_matches = best_summary["total_matches"]
             better = False
             if total_f1 > prev_f1:
                 better = True
