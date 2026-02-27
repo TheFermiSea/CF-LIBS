@@ -149,9 +149,7 @@ class ResultTableMixin:
 
             if include_ci and conc_ci:
                 ci = conc_ci.get(el, (mean - 2 * std, mean + 2 * std))
-                lines.append(
-                    f"{el:<20} {mean:>12.4f} {std:>12.4f} [{ci[0]:.4f}, {ci[1]:.4f}]"
-                )
+                lines.append(f"{el:<20} {mean:>12.4f} {std:>12.4f} [{ci[0]:.4f}, {ci[1]:.4f}]")
             else:
                 lines.append(f"{el:<20} {mean:>12.4f} {std:>12.4f}")
 

@@ -167,10 +167,7 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
                 "PyYAML is required for YAML config files. " "Install with: pip install pyyaml"
             )
     elif suffix != ".json":
-        raise ValueError(
-            f"Unsupported config file format: {suffix}. "
-            "Use .yaml, .yml, or .json"
-        )
+        raise ValueError(f"Unsupported config file format: {suffix}. " "Use .yaml, .yml, or .json")
 
     with open(config_path, "w") as f:
         if suffix in [".yaml", ".yml"]:

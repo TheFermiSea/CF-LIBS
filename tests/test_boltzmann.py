@@ -299,7 +299,9 @@ class TestHuberFitting:
         )
 
         fitter = BoltzmannPlotFitter(
-            method=FitMethod.HUBER, huber_epsilon=1.35, max_iterations=20
+            method=FitMethod.HUBER,
+            huber_epsilon=1.35,
+            max_iterations=20,
         )
         result = fitter.fit(lines)
 

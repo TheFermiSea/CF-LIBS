@@ -175,33 +175,51 @@ class CorrectionFactorDB:
     # Default correction factors: matrix_type -> {element: (multiplicative, uncertainty)}
     _DEFAULT_FACTORS: Dict[MatrixType, Dict[str, Tuple[float, float]]] = {
         MatrixType.METALLIC: {
-            "Fe": (1.0, 0.05), "Cr": (1.02, 0.08), "Ni": (0.98, 0.06),
-            "Mn": (1.05, 0.10), "Si": (0.95, 0.12), "C": (0.85, 0.15),
-            "Al": (1.0, 0.06), "Cu": (0.98, 0.05), "Ti": (1.03, 0.07),
+            "Fe": (1.0, 0.05),
+            "Cr": (1.02, 0.08),
+            "Ni": (0.98, 0.06),
+            "Mn": (1.05, 0.10),
+            "Si": (0.95, 0.12),
+            "C": (0.85, 0.15),
+            "Al": (1.0, 0.06),
+            "Cu": (0.98, 0.05),
+            "Ti": (1.03, 0.07),
         },
         MatrixType.OXIDE: {
-            "Si": (1.10, 0.12), "Al": (1.08, 0.10), "Fe": (1.15, 0.12),
-            "Ca": (1.05, 0.08), "Mg": (1.12, 0.10), "Na": (0.90, 0.15),
+            "Si": (1.10, 0.12),
+            "Al": (1.08, 0.10),
+            "Fe": (1.15, 0.12),
+            "Ca": (1.05, 0.08),
+            "Mg": (1.12, 0.10),
+            "Na": (0.90, 0.15),
             "K": (0.88, 0.15),
         },
         MatrixType.GEOLOGICAL: {
-            "Si": (1.08, 0.10), "Al": (1.05, 0.10), "Fe": (1.12, 0.12),
-            "Ca": (1.02, 0.08), "Mg": (1.08, 0.10), "Ti": (1.10, 0.12),
+            "Si": (1.08, 0.10),
+            "Al": (1.05, 0.10),
+            "Fe": (1.12, 0.12),
+            "Ca": (1.02, 0.08),
+            "Mg": (1.08, 0.10),
+            "Ti": (1.10, 0.12),
             "Mn": (1.15, 0.15),
         },
         MatrixType.ORGANIC: {
-            "C": (0.70, 0.20), "H": (0.80, 0.25), "N": (0.85, 0.20),
-            "O": (0.90, 0.15), "Ca": (1.20, 0.15), "K": (0.85, 0.18),
-            "Na": (0.82, 0.18), "Mg": (1.15, 0.15), "P": (1.10, 0.15),
+            "C": (0.70, 0.20),
+            "H": (0.80, 0.25),
+            "N": (0.85, 0.20),
+            "O": (0.90, 0.15),
+            "Ca": (1.20, 0.15),
+            "K": (0.85, 0.18),
+            "Na": (0.82, 0.18),
+            "Mg": (1.15, 0.15),
+            "P": (1.10, 0.15),
             "S": (1.05, 0.12),
         },
     }
 
     def __init__(self) -> None:
         """Initialize correction factor database with defaults."""
-        self._factors: Dict[MatrixType, Dict[str, CorrectionFactor]] = {
-            mt: {} for mt in MatrixType
-        }
+        self._factors: Dict[MatrixType, Dict[str, CorrectionFactor]] = {mt: {} for mt in MatrixType}
         self._populate_defaults()
 
     def _populate_defaults(self) -> None:
@@ -209,8 +227,10 @@ class CorrectionFactorDB:
         for matrix_type, elements in self._DEFAULT_FACTORS.items():
             for el, (mult, uncert) in elements.items():
                 self._factors[matrix_type][el] = CorrectionFactor(
-                    element=el, matrix_type=matrix_type,
-                    multiplicative=mult, uncertainty=uncert,
+                    element=el,
+                    matrix_type=matrix_type,
+                    multiplicative=mult,
+                    uncertainty=uncert,
                     source="default_literature",
                 )
 
@@ -229,9 +249,7 @@ class CorrectionFactorDB:
             f"{factor.matrix_type.name}: mult={factor.multiplicative:.3f}"
         )
 
-    def get_factor(
-        self, element: str, matrix_type: MatrixType
-    ) -> Optional[CorrectionFactor]:
+    def get_factor(self, element: str, matrix_type: MatrixType) -> Optional[CorrectionFactor]:
         """
         Retrieve correction factor for an element in a matrix type.
 
@@ -249,9 +267,7 @@ class CorrectionFactorDB:
         """
         return self._factors[matrix_type].get(element)
 
-    def get_factors_for_matrix(
-        self, matrix_type: MatrixType
-    ) -> Dict[str, CorrectionFactor]:
+    def get_factors_for_matrix(self, matrix_type: MatrixType) -> Dict[str, CorrectionFactor]:
         """
         Get all correction factors for a matrix type.
 
@@ -463,15 +479,9 @@ class MatrixEffectCorrector:
         norm_conc = {el: c / total for el, c in concentrations.items()}
 
         # Calculate fraction in each category
-        metallic_fraction = sum(
-            norm_conc.get(el, 0) for el in self.METALLIC_ELEMENTS
-        )
-        organic_fraction = sum(
-            norm_conc.get(el, 0) for el in self.ORGANIC_ELEMENTS
-        )
-        geological_fraction = sum(
-            norm_conc.get(el, 0) for el in self.GEOLOGICAL_MAJORS
-        )
+        metallic_fraction = sum(norm_conc.get(el, 0) for el in self.METALLIC_ELEMENTS)
+        organic_fraction = sum(norm_conc.get(el, 0) for el in self.ORGANIC_ELEMENTS)
+        geological_fraction = sum(norm_conc.get(el, 0) for el in self.GEOLOGICAL_MAJORS)
 
         # Check for specific patterns
         o_fraction = norm_conc.get("O", 0)
@@ -520,9 +530,7 @@ class MatrixEffectCorrector:
                 )
 
             # Geological: multiple major elements present
-            major_count = sum(
-                1 for el in self.GEOLOGICAL_MAJORS if norm_conc.get(el, 0) > 0.02
-            )
+            major_count = sum(1 for el in self.GEOLOGICAL_MAJORS if norm_conc.get(el, 0) > 0.02)
             if major_count >= 4:
                 return MatrixClassificationResult(
                     matrix_type=MatrixType.GEOLOGICAL,
@@ -752,9 +760,7 @@ class InternalStandardizer:
             Known (or assumed) concentration of standard element (mass fraction)
         """
         if known_concentration <= 0 or known_concentration > 1:
-            raise ValueError(
-                f"Known concentration must be in (0, 1], got {known_concentration}"
-            )
+            raise ValueError(f"Known concentration must be in (0, 1], got {known_concentration}")
 
         self.standard_element = standard_element
         self.known_concentration = known_concentration
@@ -799,9 +805,7 @@ class InternalStandardizer:
         scale_factor = self.known_concentration / measured_standard
 
         # Apply scaling
-        standardized = {
-            el: conc * scale_factor for el, conc in concentrations.items()
-        }
+        standardized = {el: conc * scale_factor for el, conc in concentrations.items()}
 
         # The standard element should now have the known concentration
         standardized[self.standard_element] = self.known_concentration
@@ -859,17 +863,13 @@ class InternalStandardizer:
             Ratios C_element / C_standard for each element
         """
         if self.standard_element not in concentrations:
-            raise ValueError(
-                f"Standard element '{self.standard_element}' not in concentrations"
-            )
+            raise ValueError(f"Standard element '{self.standard_element}' not in concentrations")
 
         standard_conc = concentrations[self.standard_element]
         if standard_conc <= 0:
             raise ValueError("Standard concentration is zero or negative")
 
-        return {
-            el: conc / standard_conc for el, conc in concentrations.items()
-        }
+        return {el: conc / standard_conc for el, conc in concentrations.items()}
 
 
 def combine_corrections(

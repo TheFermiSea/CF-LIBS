@@ -189,9 +189,7 @@ class TestNoiseModel:
         noisy_low = noise_low.apply(golden, seed=100)
 
         # High noise
-        noise_high = NoiseModel(
-            shot_noise=True, readout_noise=20.0, multiplicative_noise=0.10
-        )
+        noise_high = NoiseModel(shot_noise=True, readout_noise=20.0, multiplicative_noise=0.10)
         noisy_high = noise_high.apply(golden, seed=100)
 
         # High noise should have larger uncertainty
@@ -255,9 +253,9 @@ class TestRoundTripValidator:
         assert result.converged, f"Solver did not converge: {result.iterations} iterations"
 
         # Check errors are reasonable
-        assert result.temperature_error_frac < 0.50, (
-            f"Temperature error too high: {result.temperature_error_frac*100:.1f}%"
-        )
+        assert (
+            result.temperature_error_frac < 0.50
+        ), f"Temperature error too high: {result.temperature_error_frac*100:.1f}%"
 
     @pytest.mark.requires_db
     @pytest.mark.slow

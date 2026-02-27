@@ -17,17 +17,19 @@ def test_correlation_identifier_classic_mode(temp_db):
 
     db = AtomicDatabase(temp_db)
 
-    # Create synthetic spectrum with Fe lines
+    # Create synthetic spectrum with Gaussian Fe lines (realistic shape)
     wavelength = np.linspace(370, 380, 1000)
     intensity = np.zeros_like(wavelength)
+    sigma = 0.05  # ~0.12 nm FWHM, typical for moderate resolving power
 
     # Add Fe lines from test database: 371.99, 373.49, 374.95
     for wl in [371.99, 373.49, 374.95]:
-        idx = np.argmin(np.abs(wavelength - wl))
-        intensity[idx] = 1.0
+        intensity += 1000.0 * np.exp(-0.5 * ((wavelength - wl) / sigma) ** 2)
 
     # Add noise
-    intensity += np.random.rand(len(intensity)) * 0.1
+    rng = np.random.default_rng(42)
+    intensity += rng.normal(0, 10, len(intensity))
+    intensity = np.maximum(intensity, 0.0)
 
     # Run identification
     identifier = CorrelationIdentifier(
@@ -64,7 +66,8 @@ def test_correlation_identifier_min_confidence_threshold(temp_db):
 
     # Weak spectrum
     wavelength = np.linspace(370, 380, 500)
-    intensity = np.random.rand(500) * 0.1  # Mostly noise
+    rng = np.random.default_rng(99)
+    intensity = rng.random(500) * 0.1  # Mostly noise
 
     identifier = CorrelationIdentifier(
         db,
@@ -119,13 +122,13 @@ def test_correlation_identifier_matched_lines(temp_db):
 
     db = AtomicDatabase(temp_db)
 
-    # Create spectrum with known Fe lines
+    # Create spectrum with known Fe lines (Gaussian peaks)
     wavelength = np.linspace(370, 380, 1000)
     intensity = np.zeros_like(wavelength)
+    sigma = 0.05
 
     # Add Fe I 371.99 nm line
-    idx = np.argmin(np.abs(wavelength - 371.99))
-    intensity[idx] = 1.0
+    intensity += 500.0 * np.exp(-0.5 * ((wavelength - 371.99) / sigma) ** 2)
 
     identifier = CorrelationIdentifier(
         db,
@@ -150,9 +153,7 @@ def test_instrument_fwhm_parameter(temp_db):
 
     db = AtomicDatabase(temp_db)
 
-    identifier = CorrelationIdentifier(
-        db, elements=["Fe"], instrument_fwhm_nm=0.1
-    )
+    identifier = CorrelationIdentifier(db, elements=["Fe"], instrument_fwhm_nm=0.1)
     # sigma should be 0.1/2.355 ≈ 0.0425
     assert hasattr(identifier, "instrument_fwhm_nm")
     assert identifier.instrument_fwhm_nm == 0.1
@@ -184,9 +185,7 @@ def test_noise_only_no_detection(temp_db):
 
     # No element should have high confidence on noise
     for elem in result.all_elements:
-        assert elem.confidence < 0.5, (
-            f"{elem.element} has confidence {elem.confidence} on noise"
-        )
+        assert elem.confidence < 0.5, f"{elem.element} has confidence {elem.confidence} on noise"
 
 
 def test_max_lines_per_element_parameter(temp_db):
@@ -211,3 +210,31 @@ def test_default_min_confidence_lowered(temp_db):
 
     identifier = CorrelationIdentifier(db)
     assert identifier.min_confidence == 0.03
+
+
+def test_sparse_weak_lines_produce_finite_scores(temp_db):
+    """Sparse/weak spectra should still produce stable finite correlation scores."""
+    from cflibs.atomic.database import AtomicDatabase
+
+    db = AtomicDatabase(temp_db)
+
+    wavelength = np.linspace(370, 380, 220)
+    intensity = np.zeros_like(wavelength)
+    intensity += 2.5 * np.exp(-0.5 * ((wavelength - 371.99) / 0.03) ** 2)
+    rng = np.random.default_rng(123)
+    intensity += rng.normal(0, 0.15, size=intensity.size)
+    intensity = np.clip(intensity, 0.0, None)
+
+    identifier = CorrelationIdentifier(
+        db,
+        elements=["Fe"],
+        T_steps=2,
+        n_e_steps=2,
+        max_lines_per_element=5,
+        min_confidence=0.0,
+    )
+    result = identifier.identify(wavelength, intensity, mode="classic")
+
+    fe = next(e for e in result.all_elements if e.element == "Fe")
+    assert np.isfinite(fe.score)
+    assert np.isfinite(fe.confidence)

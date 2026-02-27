@@ -20,6 +20,7 @@ from cflibs.inversion.element_id import (
     ElementIdentification,
     ElementIdentificationResult,
 )
+from cflibs.inversion.preprocessing import detect_peaks_auto
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -51,11 +52,17 @@ class CombIdentifier:
         Minimum tooth width in data points (default: 5)
     max_width_factor : float, optional
         Maximum width as fraction of resolution element (default: 1.0)
+    relative_threshold_scale : float, optional
+        Scale factor applied to median non-zero score for adaptive rejection
+        (default: 1.5). Lower values increase recall; higher values reduce
+        false positives.
     elements : List[str], optional
         List of elements to search for (default: None means all in database)
     resolving_power : float, optional
         Instrument resolving power (λ/Δλ). If set, tooth width is derived from
         center wavelength / resolving_power instead of fixed 0.1 nm (default: None).
+    min_aki_gk : float, optional
+        Minimum observable line strength A_ki * g_k (default: 1e4).
 
     Attributes
     ----------
@@ -95,22 +102,28 @@ class CombIdentifier:
         max_shift_pts: int = 5,
         min_width_pts: int = 5,
         max_width_factor: float = 1.0,
+        relative_threshold_scale: float = 1.5,
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 50,
         reference_temperature: float = 10000.0,
+        min_aki_gk: float = 1e4,
     ):
         self.atomic_db = atomic_db
         self.resolving_power = resolving_power
         self.baseline_window_nm = baseline_window_nm
         self.threshold_percentile = threshold_percentile
         self.min_correlation = min_correlation  # fingerprint detection threshold
-        self.tooth_activation_threshold = tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        self.tooth_activation_threshold = (
+            tooth_activation_threshold  # per-tooth threshold (paper: 0.5)
+        )
         self.max_shift_pts = max_shift_pts
         self.min_width_pts = min_width_pts
         self.max_width_factor = max_width_factor
+        self.relative_threshold_scale = relative_threshold_scale
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
+        self.min_aki_gk = min_aki_gk
 
     def identify(
         self, wavelength: np.ndarray, intensity: np.ndarray
@@ -130,6 +143,31 @@ class CombIdentifier:
         ElementIdentificationResult
             Complete identification results with algorithm="comb"
         """
+        # Guard against empty arrays
+        if len(wavelength) == 0 or len(intensity) == 0:
+            logger.warning("Empty wavelength or intensity array")
+            return ElementIdentificationResult(
+                detected_elements=[],
+                rejected_elements=[],
+                all_elements=[],
+                experimental_peaks=[],
+                n_peaks=0,
+                n_matched_peaks=0,
+                n_unmatched_peaks=0,
+                algorithm="comb",
+                parameters={},
+            )
+
+        # Validate input arrays
+        if len(wavelength) != len(intensity):
+            raise ValueError(
+                f"Wavelength and intensity arrays must have same length: "
+                f"{len(wavelength)} vs {len(intensity)}"
+            )
+
+        if not np.all(np.diff(wavelength) > 0):
+            raise ValueError("Wavelength array must be monotonically increasing")
+
         logger.info(
             f"Starting comb identification on spectrum: "
             f"{wavelength[0]:.1f}-{wavelength[-1]:.1f} nm, {len(wavelength)} points"
@@ -141,9 +179,7 @@ class CombIdentifier:
 
         # Step 2: Determine elements to search
         if self.elements is None:
-            # TODO: Get all elements from database
-            # For now, use common LIBS elements
-            elements_to_search = ["Fe", "Cu", "Al", "Ca", "Mg", "Ti", "H"]
+            elements_to_search = self.atomic_db.get_available_elements()
         else:
             elements_to_search = self.elements
 
@@ -181,7 +217,8 @@ class CombIdentifier:
                             element=element,
                             ionization_stage=trans.ionization_stage,
                             intensity_exp=intensity[
-                                int(np.argmin(np.abs(wavelength - tooth_result["center_nm"])))
+                                np.argmin(np.abs(wavelength - tooth_result["center_nm"]))
+                                + tooth_result["best_shift"]
                             ],
                             emissivity_th=0.0,
                             transition=trans,
@@ -226,9 +263,8 @@ class CombIdentifier:
                 for line in element_id.matched_lines:
                     # Check if this line's wavelength is interfered
                     for tooth in element_teeth[element]:
-                        if (
-                            abs(tooth["center_nm"] - line.wavelength_th_nm) < 0.01
-                            and "interfering_elements" in tooth
+                        if abs(tooth["center_nm"] - line.wavelength_th_nm) < 0.01 and tooth.get(
+                            "interfering_elements"
                         ):
                             line.is_interfered = True
                             line.interfering_elements = tooth["interfering_elements"]
@@ -239,7 +275,7 @@ class CombIdentifier:
         non_zero_scores = [e.score for e in element_identifications if e.score > 0]
         if len(non_zero_scores) >= 3:
             median_score = np.median(non_zero_scores)
-            relative_threshold = min(1.0, 1.5 * median_score)
+            relative_threshold = min(1.0, self.relative_threshold_scale * median_score)
         else:
             relative_threshold = 0.0
 
@@ -261,11 +297,14 @@ class CombIdentifier:
         detected_elements = [e for e in element_identifications if e.detected]
         rejected_elements = [e for e in element_identifications if not e.detected]
 
-        # Step 7: Identify experimental peaks (simple threshold-based for now)
-        residual = intensity - baseline
-        peak_mask = residual > threshold
-        peak_indices = np.where(peak_mask)[0]
-        experimental_peaks = [(i, wavelength[i]) for i in peak_indices]
+        # Step 7: Identify experimental peaks using canonical peak detection
+        # (not pixel-level threshold which over-counts broad peaks)
+        experimental_peaks, _, _ = detect_peaks_auto(
+            wavelength,
+            intensity,
+            resolving_power=self.resolving_power,
+            baseline_window_nm=self.baseline_window_nm,
+        )
 
         # Count matched peaks (peaks that have at least one identified line)
         matched_peak_wavelengths = set()
@@ -327,6 +366,8 @@ class CombIdentifier:
         transitions = self.atomic_db.get_transitions(
             element, wavelength_min=wl_min, wavelength_max=wl_max
         )
+        # Remove unobservable weak lines
+        transitions = [t for t in transitions if t.A_ki * t.g_k >= self.min_aki_gk]
         if len(transitions) > self.max_lines_per_element:
             kT = KB_EV * self.reference_temperature
             transitions = sorted(
@@ -461,6 +502,9 @@ class CombIdentifier:
 
         # Search over widths (odd values only)
         for width in range(self.min_width_pts, max_width_pts + 1, 2):
+            # Build template once per width (cache across shifts)
+            template = self._build_triangular_template(width)
+
             # Search over shifts
             for shift in range(-self.max_shift_pts, self.max_shift_pts + 1):
                 shifted_idx = center_idx + shift
@@ -474,9 +518,6 @@ class CombIdentifier:
                     continue
 
                 data_segment = intensity[start_idx:end_idx] - baseline[start_idx:end_idx]
-
-                # Build template
-                template = self._build_triangular_template(width)
 
                 # Ensure same length
                 if len(data_segment) != len(template):
@@ -495,6 +536,9 @@ class CombIdentifier:
                     best_correlation = correlation
                     best_shift = shift
                     best_width = width
+
+        # Clamp negative correlations to 0 (downstream expects 0-1 metric)
+        best_correlation = max(best_correlation, 0.0)
 
         # Check if there's actually signal above threshold at the best position
         shifted_idx = center_idx + best_shift
@@ -541,19 +585,38 @@ class CombIdentifier:
                 if tooth["active"]:
                     all_active_teeth.append((element, tooth))
 
-        # Check each active tooth against all others
-        for i, (element_i, tooth_i) in enumerate(all_active_teeth):
-            interfering = []
-            for j, (element_j, tooth_j) in enumerate(all_active_teeth):
-                if i != j and element_i != element_j:
-                    # Check wavelength overlap
-                    if abs(tooth_i["center_nm"] - tooth_j["center_nm"]) < wl_tolerance_nm:
-                        interfering.append(element_j)
+        # Sort by wavelength for efficient sliding-window comparison
+        all_active_teeth.sort(key=lambda x: x[1]["center_nm"])
 
+        # Two-pointer interference detection
+        n = len(all_active_teeth)
+        for i in range(n):
+            element_i, tooth_i = all_active_teeth[i]
+            interfering = []
+            # Look forward while within tolerance
+            j = i + 1
+            while (
+                j < n
+                and (all_active_teeth[j][1]["center_nm"] - tooth_i["center_nm"]) < wl_tolerance_nm
+            ):
+                element_j, tooth_j = all_active_teeth[j]
+                if element_i != element_j:
+                    interfering.append(element_j)
+                    # Also mark the other tooth (reciprocal marking)
+                    if "interfering_elements" not in tooth_j:
+                        tooth_j["interfering_elements"] = []
+                    if element_i not in tooth_j["interfering_elements"]:
+                        tooth_j["interfering_elements"].append(element_i)
+                        tooth_j["is_interfered"] = True
+                j += 1
+
+            # Only update if not already set by reciprocal marking
             if interfering:
                 tooth_i["is_interfered"] = True
-                tooth_i["interfering_elements"] = interfering
-            else:
+                existing = tooth_i.get("interfering_elements", [])
+                tooth_i["interfering_elements"] = sorted(set(existing + interfering))
+            elif "is_interfered" not in tooth_i:
+                # Only set to False if not already marked from a previous iteration
                 tooth_i["is_interfered"] = False
                 tooth_i["interfering_elements"] = []
 
@@ -561,12 +624,11 @@ class CombIdentifier:
 
     def _compute_fingerprint(self, teeth: List[dict]) -> float:
         """
-        Compute fingerprint as coverage-penalized mean of active correlations.
+        Compute fingerprint as coverage-penalized mean correlation.
 
-        Paper formula (Gajarska et al. 2024): fingerprint = mean(active_correlations)
-        Hybrid: fingerprint = mean(active_corr) × (n_active / n_total)
-        The hybrid preserves the coverage penalty while using the correct mean,
-        preventing 1 lucky tooth from producing fingerprint = 0.9.
+        Score = sum(active correlations) / total teeth count.
+        This penalizes elements with few active teeth out of many total,
+        preventing false positives when only a handful of lines match noise.
 
         Parameters
         ----------
@@ -583,11 +645,7 @@ class CombIdentifier:
         active_teeth = [t for t in teeth if t["active"]]
         if not active_teeth:
             return 0.0
-        # Hybrid: mean of active correlations × sqrt coverage penalty.
-        # sqrt softens the linear coverage penalty to avoid crushing
-        # elements with many theoretical lines but few visible peaks
-        # (common at low RP where lines merge).
-        mean_corr = sum(t["best_correlation"] for t in active_teeth) / len(active_teeth)
-        coverage = len(active_teeth) / len(teeth)
-        fingerprint = mean_corr * np.sqrt(coverage)
+        # Sum of active correlations divided by TOTAL teeth count
+        total_correlation = sum(t["best_correlation"] for t in active_teeth)
+        fingerprint = total_correlation / len(teeth)
         return fingerprint

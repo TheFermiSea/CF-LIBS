@@ -243,6 +243,8 @@ class PLSRegression:
     ):
         if n_components < 1:
             raise ValueError(f"n_components must be >= 1, got {n_components}")
+        if max_iter < 1:
+            raise ValueError(f"max_iter must be >= 1, got {max_iter}")
 
         self.n_components = n_components
         self.algorithm = algorithm
@@ -254,7 +256,6 @@ class PLSRegression:
         self._x_mean: Optional[np.ndarray] = None
         self._x_std: Optional[np.ndarray] = None
         self._y_mean: Optional[np.ndarray] = None
-        self._y_std: Optional[np.ndarray] = None
         self._components: Optional[PLSComponents] = None
         self._is_fitted: bool = False
 
@@ -275,9 +276,7 @@ class PLSRegression:
             return None
         return self._components.coefficients
 
-    def _preprocess_x(
-        self, X: np.ndarray, fit: bool = False
-    ) -> np.ndarray:
+    def _preprocess_x(self, X: np.ndarray, fit: bool = False) -> np.ndarray:
         """
         Apply preprocessing to X matrix.
 
@@ -326,9 +325,7 @@ class PLSRegression:
         else:
             raise ValueError(f"Unknown preprocessing: {self.preprocessing}")
 
-    def _preprocess_y(
-        self, Y: np.ndarray, fit: bool = False
-    ) -> np.ndarray:
+    def _preprocess_y(self, Y: np.ndarray, fit: bool = False) -> np.ndarray:
         """
         Apply preprocessing to Y matrix (always mean-centered).
 
@@ -352,8 +349,6 @@ class PLSRegression:
 
         if fit:
             self._y_mean = Y.mean(axis=0)
-            self._y_std = Y.std(axis=0, ddof=1)
-            self._y_std = np.where(self._y_std < 1e-10, 1.0, self._y_std)
 
         if self._y_mean is None:
             raise RuntimeError("Model must be fitted before preprocessing")
@@ -367,7 +362,10 @@ class PLSRegression:
         return Y_pred + self._y_mean
 
     def _nipals_pls(
-        self, X: np.ndarray, Y: np.ndarray
+        self,
+        X: np.ndarray,
+        Y: np.ndarray,
+        n_components: Optional[int] = None,
     ) -> PLSComponents:
         """
         NIPALS algorithm for PLS regression.
@@ -386,7 +384,8 @@ class PLSRegression:
         """
         n_samples, n_features = X.shape
         n_targets = Y.shape[1]
-        n_comp = min(self.n_components, n_samples, n_features)
+        requested_components = self.n_components if n_components is None else n_components
+        n_comp = min(requested_components, n_samples, n_features)
 
         # Initialize storage
         T = np.zeros((n_samples, n_comp))  # X scores
@@ -399,8 +398,8 @@ class PLSRegression:
         Yk = Y.copy()
 
         # Variance tracking
-        ss_x_total = np.sum(X ** 2)
-        ss_y_total = np.sum(Y ** 2)
+        ss_x_total = np.sum(X**2)
+        ss_y_total = np.sum(Y**2)
         x_var_explained = np.zeros(n_comp)
         y_var_explained = np.zeros(n_comp)
 
@@ -413,6 +412,10 @@ class PLSRegression:
             t = np.zeros(n_samples)
             q = np.zeros(n_targets)
             converged = False
+            stop_due_numerics = False
+            w_norm = 0.0
+            diff = np.inf
+            iteration = -1
 
             for iteration in range(self.max_iter):
                 # X block: w = X'u / u'u
@@ -422,6 +425,7 @@ class PLSRegression:
                     logger.warning(f"Component {k+1}: near-zero weight vector, stopping")
                     # No more useful components can be extracted
                     n_comp = k
+                    stop_due_numerics = True
                     break
                 w = w / w_norm
 
@@ -433,6 +437,7 @@ class PLSRegression:
                 if t_sq < 1e-10:
                     logger.warning(f"Component {k+1}: near-zero score vector, stopping")
                     n_comp = k
+                    stop_due_numerics = True
                     break
 
                 q = Yk.T @ t / t_sq
@@ -454,8 +459,16 @@ class PLSRegression:
                     converged = True
                     break
 
+            if not converged and not stop_due_numerics:
+                logger.warning(
+                    "Component %d: NIPALS did not converge in %d iterations (final diff=%.2e)",
+                    k + 1,
+                    self.max_iter,
+                    diff,
+                )
+
             # If we broke early due to numerical issues, stop extracting components
-            if not converged and iteration == 0 and w_norm < 1e-10:
+            if stop_due_numerics:
                 break
 
             # Store component
@@ -477,8 +490,8 @@ class PLSRegression:
                 Yk = Yk - np.outer(t, Q[:, k])
 
             # Track explained variance
-            x_var_explained[k] = 1 - np.sum(Xk ** 2) / ss_x_total if ss_x_total > 0 else 0
-            y_var_explained[k] = 1 - np.sum(Yk ** 2) / ss_y_total if ss_y_total > 0 else 0
+            x_var_explained[k] = 1 - np.sum(Xk**2) / ss_x_total if ss_x_total > 0 else 0
+            y_var_explained[k] = 1 - np.sum(Yk**2) / ss_y_total if ss_y_total > 0 else 0
 
         # Track actual number of valid components extracted
         # (n_comp may have been reduced in the loop)
@@ -563,14 +576,17 @@ class PLSRegression:
 
         # Adjust n_components if needed
         max_components = min(n_samples - 1, n_features)
-        if self.n_components > max_components:
+        n_components = self.n_components
+        if n_components > max_components:
             logger.warning(
-                f"Reducing n_components from {self.n_components} to {max_components}"
+                "Reducing n_components from %d to %d for this fit",
+                n_components,
+                max_components,
             )
-            self.n_components = max_components
+            n_components = max_components
 
         logger.info(
-            f"Fitting PLS with {self.n_components} components on "
+            f"Fitting PLS with {n_components} components on "
             f"{n_samples} samples x {n_features} features -> {n_targets} targets"
         )
 
@@ -580,11 +596,11 @@ class PLSRegression:
 
         # Fit using selected algorithm
         if self.algorithm == PLSAlgorithm.NIPALS:
-            self._components = self._nipals_pls(X_proc, Y_proc)
+            self._components = self._nipals_pls(X_proc, Y_proc, n_components=n_components)
         else:
             # SIMPLS (not yet implemented, fall back to NIPALS)
             logger.warning("SIMPLS not implemented, using NIPALS")
-            self._components = self._nipals_pls(X_proc, Y_proc)
+            self._components = self._nipals_pls(X_proc, Y_proc, n_components=n_components)
 
         self._is_fitted = True
         logger.info(
@@ -659,7 +675,7 @@ class PLSRegression:
                 Y = Y.reshape(-1, 1)
 
             residuals = Y - Y_pred
-            ss_res = np.sum(residuals ** 2)
+            ss_res = np.sum(residuals**2)
             ss_tot = np.sum((Y - Y.mean(axis=0)) ** 2)
 
             if ss_tot > 1e-10:
@@ -667,7 +683,7 @@ class PLSRegression:
             else:
                 r2 = 0.0
 
-            rmse = float(np.sqrt(np.mean(residuals ** 2)))
+            rmse = float(np.sqrt(np.mean(residuals**2)))
 
         return PLSResult(
             predictions=Y_pred,
@@ -730,10 +746,7 @@ class PLSRegression:
         n_comp = W.shape[1]
 
         # Sum of squares of Y explained by each component
-        ss_y = np.array([
-            np.sum((T[:, k:k+1] @ Q[:, k:k+1].T) ** 2)
-            for k in range(n_comp)
-        ])
+        ss_y = np.sum(T**2, axis=0) * np.sum(Q**2, axis=0)
 
         # VIP = sqrt(p * sum_k(w_k^2 * ss_y_k) / sum(ss_y))
         vip = np.zeros(n_features)
@@ -841,9 +854,7 @@ class PLSCrossValidator:
         self.selection_criterion = selection_criterion
         self.random_state = random_state
 
-    def _create_folds(
-        self, n_samples: int
-    ) -> List[Tuple[np.ndarray, np.ndarray]]:
+    def _create_folds(self, n_samples: int) -> List[Tuple[np.ndarray, np.ndarray]]:
         """Create train/test indices for each fold."""
         rng = np.random.default_rng(self.random_state)
         indices = rng.permutation(n_samples)
@@ -855,10 +866,7 @@ class PLSCrossValidator:
         current = 0
         for fold_size in fold_sizes:
             test_idx = indices[current : current + fold_size]
-            train_idx = np.concatenate([
-                indices[:current],
-                indices[current + fold_size:]
-            ])
+            train_idx = np.concatenate([indices[:current], indices[current + fold_size :]])
             folds.append((train_idx, test_idx))
             current += fold_size
 
@@ -895,10 +903,13 @@ class PLSCrossValidator:
 
         # Adjust max components
         max_comp = min(self.max_components, n_samples - 2, n_features)
+        if max_comp < 1:
+            raise ValueError(
+                "Cannot perform cross-validation: need at least 3 samples and 1 feature "
+                f"(got n_samples={n_samples}, n_features={n_features})."
+            )
 
-        logger.info(
-            f"Running {self.n_folds}-fold CV for 1-{max_comp} components"
-        )
+        logger.info(f"Running {self.n_folds}-fold CV for 1-{max_comp} components")
 
         folds = self._create_folds(n_samples)
         n_components_tested = np.arange(1, max_comp + 1)
@@ -936,8 +947,8 @@ class PLSCrossValidator:
             Y_pred = cv_predictions[:, :, n_comp - 1]
             residuals = Y - Y_pred
 
-            press[n_comp - 1] = np.sum(residuals ** 2)
-            cv_rmse[n_comp - 1] = np.sqrt(np.mean(residuals ** 2))
+            press[n_comp - 1] = np.sum(residuals**2)
+            cv_rmse[n_comp - 1] = np.sqrt(np.mean(residuals**2))
 
             if ss_tot > 1e-10:
                 cv_r2[n_comp - 1] = 1 - press[n_comp - 1] / ss_tot
@@ -953,7 +964,9 @@ class PLSCrossValidator:
             threshold = min_rmse + se_estimate
             # Find first model below threshold
             candidates = np.where(cv_rmse <= threshold)[0]
-            optimal_n = int(candidates[0] + 1) if len(candidates) > 0 else int(np.argmin(cv_rmse) + 1)
+            optimal_n = (
+                int(candidates[0] + 1) if len(candidates) > 0 else int(np.argmin(cv_rmse) + 1)
+            )
         else:
             raise ValueError(f"Unknown selection criterion: {self.selection_criterion}")
 
@@ -1042,9 +1055,7 @@ class PLSCalibrationModel:
 
         return concentrations
 
-    def get_important_wavelengths(
-        self, vip_threshold: float = 1.0
-    ) -> Dict[str, List[float]]:
+    def get_important_wavelengths(self, vip_threshold: float = 1.0) -> Dict[str, List[float]]:
         """
         Get wavelengths with VIP > threshold.
 
@@ -1081,7 +1092,9 @@ class PLSCalibrationModel:
             lines.append("-" * 50)
             lines.append("Cross-Validation:")
             lines.append(f"  R2: {self.cv_result.cv_r2[self.cv_result.optimal_n_components-1]:.4f}")
-            lines.append(f"  RMSE: {self.cv_result.cv_rmse[self.cv_result.optimal_n_components-1]:.4f}")
+            lines.append(
+                f"  RMSE: {self.cv_result.cv_rmse[self.cv_result.optimal_n_components-1]:.4f}"
+            )
 
         if self.calibration_range:
             lines.append("-" * 50)

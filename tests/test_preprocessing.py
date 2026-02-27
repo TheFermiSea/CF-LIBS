@@ -1,4 +1,5 @@
 """Tests for shared preprocessing module."""
+
 import numpy as np
 from cflibs.inversion.preprocessing import (
     estimate_baseline,

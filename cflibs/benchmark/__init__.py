@@ -66,6 +66,13 @@ from cflibs.benchmark.synthetic import (
     CompositionRange,
     ConditionVariation,
 )
+from cflibs.benchmark.synthetic_corpus import (
+    CorpusRecipe,
+    PerturbationAxes,
+    build_synthetic_id_corpus,
+    default_axes,
+    default_recipes,
+)
 
 from cflibs.benchmark.loaders import (
     load_benchmark,
@@ -89,8 +96,27 @@ __all__ = [
     "SyntheticBenchmarkGenerator",
     "CompositionRange",
     "ConditionVariation",
+    "CorpusRecipe",
+    "PerturbationAxes",
+    "build_synthetic_id_corpus",
+    "default_axes",
+    "default_recipes",
+    "CalibrationOptions",
+    "compute_binary_metrics",
+    "run_synthetic_benchmark",
     # I/O
     "load_benchmark",
     "save_benchmark",
     "BenchmarkFormat",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy-load heavy synthetic benchmark evaluation helpers."""
+    if name in {"CalibrationOptions", "compute_binary_metrics", "run_synthetic_benchmark"}:
+        from cflibs.benchmark import synthetic_eval as _synthetic_eval
+
+        value = getattr(_synthetic_eval, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

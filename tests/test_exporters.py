@@ -44,9 +44,7 @@ class MockCFLIBSResult:
     temperature_uncertainty_K: float = 500.0
     electron_density_cm3: float = 1e17
     electron_density_uncertainty_cm3: float = 1e16
-    concentrations: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.8, "Cu": 0.2}
-    )
+    concentrations: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.8, "Cu": 0.2})
     concentration_uncertainties: Dict[str, float] = field(
         default_factory=lambda: {"Fe": 0.05, "Cu": 0.03}
     )
@@ -77,24 +75,12 @@ class MockMCMCResult:
     log_ne_std: float = 0.5
     log_ne_q025: float = 16.0
     log_ne_q975: float = 18.0
-    concentrations_mean: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.8, "Cu": 0.2}
-    )
-    concentrations_std: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.05, "Cu": 0.03}
-    )
-    concentrations_q025: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.7, "Cu": 0.15}
-    )
-    concentrations_q975: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.9, "Cu": 0.25}
-    )
-    r_hat: Dict[str, float] = field(
-        default_factory=lambda: {"T_eV": 1.001, "log_ne": 1.002}
-    )
-    ess: Dict[str, float] = field(
-        default_factory=lambda: {"T_eV": 450, "log_ne": 420}
-    )
+    concentrations_mean: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.8, "Cu": 0.2})
+    concentrations_std: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.05, "Cu": 0.03})
+    concentrations_q025: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.7, "Cu": 0.15})
+    concentrations_q975: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.9, "Cu": 0.25})
+    r_hat: Dict[str, float] = field(default_factory=lambda: {"T_eV": 1.001, "log_ne": 1.002})
+    ess: Dict[str, float] = field(default_factory=lambda: {"T_eV": 450, "log_ne": 420})
     convergence_status: str = "converged"
     n_samples: int = 100
     n_chains: int = 1
@@ -111,9 +97,7 @@ class MockNestedSamplingResult:
             "log_ne": np.random.normal(17.0, 0.5, 100),
         }
     )
-    weights: np.ndarray = field(
-        default_factory=lambda: np.ones(100) / 100
-    )
+    weights: np.ndarray = field(default_factory=lambda: np.ones(100) / 100)
     log_evidence: float = -150.5
     log_evidence_err: float = 0.5
     information: float = 12.3
@@ -121,12 +105,8 @@ class MockNestedSamplingResult:
     T_eV_std: float = 0.1
     log_ne_mean: float = 17.0
     log_ne_std: float = 0.5
-    concentrations_mean: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.8, "Cu": 0.2}
-    )
-    concentrations_std: Dict[str, float] = field(
-        default_factory=lambda: {"Fe": 0.05, "Cu": 0.03}
-    )
+    concentrations_mean: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.8, "Cu": 0.2})
+    concentrations_std: Dict[str, float] = field(default_factory=lambda: {"Fe": 0.05, "Cu": 0.03})
     n_live: int = 100
     n_iterations: int = 500
     n_calls: int = 5000
@@ -711,11 +691,7 @@ class TestEdgeCases:
 
     def test_nested_dict(self, temp_path):
         """Test exporting nested dictionary."""
-        data = {
-            "level1": {
-                "level2": {"value": 42}
-            }
-        }
+        data = {"level1": {"level2": {"value": 42}}}
         exporter = JSONExporter()
         exporter.export(data, temp_path)
 
@@ -800,8 +776,7 @@ class TestIntegration:
         assert loaded["data"]["concentrations"]["Fe"] == cflibs_result.concentrations["Fe"]
 
     @pytest.mark.skipif(
-        not pytest.importorskip("h5py", reason="h5py not available"),
-        reason="h5py required"
+        not pytest.importorskip("h5py", reason="h5py not available"), reason="h5py required"
     )
     def test_round_trip_hdf5(self, mcmc_result, temp_path):
         """Test HDF5 round-trip preserves data."""

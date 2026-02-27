@@ -267,20 +267,18 @@ def _load_lines_from_db(
         if not col.isidentifier():
             raise ValueError(f"Invalid column name: {col}")
 
-
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-
 
         placeholders = ",".join(["?"] * len(elements))
         col_str = ", ".join(columns)
         query = f"SELECT {col_str} FROM lines WHERE element IN ({placeholders})"
-    
+
         params = list(elements)
         if min_rel_int is not None:
             query += " AND rel_int > ?"
             params.append(min_rel_int)
-        
+
         query += " ORDER BY rel_int DESC"
 
         cursor.execute(query, params)
@@ -295,7 +293,6 @@ def _load_lines_from_db(
                     val = val if val is not None else 0.0
                 line[col] = val
             lines.append(line)
-
 
     return lines
 
@@ -535,10 +532,13 @@ class PhysicsGuidedFeatureExtractor:
         start_idx = max(0, peak_idx - half_width_pixels)
         end_idx = min(len(spectrum), peak_idx + half_width_pixels + 1)
 
-        peak_area = float(np.trapezoid(spectrum[start_idx:end_idx], wavelengths[start_idx:end_idx]))
-        area_unc = float(
-            np.sqrt(np.sum(uncertainty[start_idx:end_idx] ** 2)) * wl_step
-        )
+        if hasattr(np, "trapezoid"):
+            peak_area = float(
+                np.trapezoid(spectrum[start_idx:end_idx], wavelengths[start_idx:end_idx])
+            )
+        else:
+            peak_area = float(np.trapz(spectrum[start_idx:end_idx], wavelengths[start_idx:end_idx]))
+        area_unc = float(np.sqrt(np.sum(uncertainty[start_idx:end_idx] ** 2)) * wl_step)
 
         features.append(
             SpectralFeature(
@@ -775,7 +775,9 @@ class SpectralExplainer:
 
         # Get prediction and base value
         prediction = float(self._call_model(spectrum)[0])
-        base_value = float(explainer.expected_value) if hasattr(explainer, "expected_value") else 0.0
+        base_value = (
+            float(explainer.expected_value) if hasattr(explainer, "expected_value") else 0.0
+        )
 
         # Sort by absolute importance
         sorted_features = sorted(
@@ -1110,9 +1112,7 @@ class ExplanationValidator:
             matched_line = self._find_matching_line(wavelength)
 
             if matched_line is not None:
-                matched_lines.append(
-                    (matched_line["element"], wavelength, importance)
-                )
+                matched_lines.append((matched_line["element"], wavelength, importance))
                 matched_importance += abs(importance)
             else:
                 unmatched_features.append((feature_name, importance))
@@ -1226,7 +1226,9 @@ class ExplanationValidator:
 
         if validation.matched_lines:
             for element, wavelength, importance in validation.matched_lines[:10]:
-                lines.append(f"  {element:>4} @ {wavelength:>8.2f} nm  (importance: {importance:+.4f})")
+                lines.append(
+                    f"  {element:>4} @ {wavelength:>8.2f} nm  (importance: {importance:+.4f})"
+                )
         else:
             lines.append("  None")
 

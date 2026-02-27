@@ -11,6 +11,7 @@ This approach combines the global search capability of the manifold lookup
 References:
 - Tognoni et al., "CF-LIBS: State of the art" (2010)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ logger = get_logger("inversion.hybrid")
 try:
     import jax
     import jax.numpy as jnp
+
     # jit, grad, value_and_grad available via jax module
     from jax.scipy.optimize import minimize as jax_minimize
 

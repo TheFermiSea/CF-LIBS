@@ -103,6 +103,27 @@ class QualityAssessor:
         self.closure_weight = closure_weight
         self.fitter = BoltzmannPlotFitter(outlier_sigma=2.5)
 
+    @staticmethod
+    def _resolve_neutral_ion_stages(stage_keys: List[int]) -> Optional[Tuple[int, int]]:
+        """
+        Resolve neutral/ion stage pair from observed stage keys.
+
+        Supports both common conventions:
+        - 0/1 (neutral/ion)
+        - 1/2 (neutral/ion)
+        """
+        stage_set = set(stage_keys)
+        if 0 in stage_set and 1 in stage_set:
+            return (0, 1)
+        if 1 in stage_set and 2 in stage_set:
+            return (1, 2)
+        if not stage_set:
+            return None
+        base = min(stage_set)
+        if base + 1 in stage_set:
+            return (base, base + 1)
+        return None
+
     def assess(
         self,
         observations: List[LineObservation],
@@ -212,6 +233,18 @@ class QualityAssessor:
             return 0.0
 
         T_eV = temperature_K / EV_TO_K
+        safe_ne_cm3 = max(float(electron_density_cm3), 1e10)
+        obs_by_element_stage: DefaultDict[str, DefaultDict[int, List[LineObservation]]] = (
+            defaultdict(lambda: defaultdict(list))
+        )
+        for obs in observations:
+            obs_by_element_stage[obs.element][obs.ionization_stage].append(obs)
+
+        stage_pairs: Dict[str, Tuple[int, int]] = {}
+        for element, stages in obs_by_element_stage.items():
+            pair = self._resolve_neutral_ion_stages(list(stages.keys()))
+            if pair is not None:
+                stage_pairs[element] = pair
 
         # Apply Saha corrections and collect points
         x_all = []
@@ -224,16 +257,22 @@ class QualityAssessor:
             U_II = partition_funcs_II.get(el, 15.0)
 
             # Calculate Saha ratio
-            S_raw = (SAHA_CONST_CM3 / electron_density_cm3) * (T_eV**1.5) * np.exp(-ip / T_eV)
+            S_raw = (SAHA_CONST_CM3 / safe_ne_cm3) * (T_eV**1.5) * np.exp(-ip / T_eV)
             S = S_raw * 2.0 * (U_II / U_I)
-            correction = np.log(S * U_I / U_II) if obs.ionization_stage == 2 else 0.0
+            stage_pair = stage_pairs.get(el)
+            ion_stage = stage_pair[1] if stage_pair is not None else None
+            correction = (
+                np.log(S * U_I / U_II)
+                if ion_stage is not None and obs.ionization_stage == ion_stage
+                else 0.0
+            )
 
             y = obs.y_value
             if not np.isfinite(y):
                 continue
 
             # Apply correction
-            if obs.ionization_stage == 2:
+            if ion_stage is not None and obs.ionization_stage == ion_stage:
                 y -= correction
                 x = obs.E_k_ev + ip
             else:
@@ -302,19 +341,39 @@ class QualityAssessor:
         """
         Check Saha-Boltzmann consistency.
 
-        Compare the temperature from Boltzmann slope to the temperature
-        that would be needed to reproduce observed ion/neutral intensity ratios
-        via Saha equation.
+        For elements with both neutral (I) and singly-ionized (II) lines,
+        estimate the temperature implied by the observed intensity ratio
+        via the Saha equation and compare to the Boltzmann-fitted T.
+
+        The Saha ratio at temperature T is:
+
+            S(T) = (C_Saha / n_e) * T_eV^1.5 * exp(-IP / T_eV) * 2 * U_II / U_I
+
+        The observed II/I intensity ratio is proportional to S(T), so we
+        solve for T_saha by bisection on:
+
+            R_obs = mean(I_II) / mean(I_I) ~ S(T_saha)
+
+        Parameters
+        ----------
+        observations : List[LineObservation]
+            Line observations
+        temperature_K : float
+            Boltzmann-fitted temperature in K
+        electron_density_cm3 : float
+            Electron density in cm^-3
+        ionization_potentials : Dict[str, float]
+            Ionization potentials for each element in eV
+        partition_funcs_I : Dict[str, float]
+            Neutral partition functions U_I(T)
+        partition_funcs_II : Dict[str, float]
+            Ion partition functions U_II(T)
 
         Returns
         -------
         Tuple[float, float]
             (relative_difference, T_saha_estimate)
         """
-        # Unused parameters kept for API compatibility
-        _ = electron_density_cm3, ionization_potentials, partition_funcs_I, partition_funcs_II
-
-
         # Group by element and ionization stage
         obs_by_element_stage: DefaultDict[str, DefaultDict[int, List[LineObservation]]] = (
             defaultdict(lambda: defaultdict(list))
@@ -322,24 +381,85 @@ class QualityAssessor:
         for obs in observations:
             obs_by_element_stage[obs.element][obs.ionization_stage].append(obs)
 
-        # For elements with both I and II lines, compute implied T from Saha
         t_saha_estimates = []
 
-        for _element, stages in obs_by_element_stage.items():
-            if 1 not in stages or 2 not in stages:
+        for element, stages in obs_by_element_stage.items():
+            pair = self._resolve_neutral_ion_stages(list(stages.keys()))
+            if pair is None:
+                continue
+            neutral_stage, ion_stage = pair
+
+            ip = ionization_potentials.get(element)
+            U_I = partition_funcs_I.get(element)
+            U_II = partition_funcs_II.get(element)
+            if ip is None or U_I is None or U_II is None:
+                continue
+            if U_I <= 0 or U_II <= 0:
                 continue
 
-            # Average intensity ratio (simplified)
-            I_neutral = float(np.mean(np.asarray([obs.intensity for obs in stages[1]])))
-            I_ion = float(np.mean(np.asarray([obs.intensity for obs in stages[2]])))
-
+            # Observed intensity ratio (ion / neutral)
+            I_neutral = float(np.mean(np.asarray([obs.intensity for obs in stages[neutral_stage]])))
+            I_ion = float(np.mean(np.asarray([obs.intensity for obs in stages[ion_stage]])))
             if I_neutral <= 0 or I_ion <= 0:
                 continue
+            R_obs = I_ion / I_neutral
 
-            # For simplicity, just check if current T is consistent
-            # A full implementation would solve for T from observed ion/neutral ratios
-            # For now, store the current T as the Saha estimate
-            t_saha_estimates.append(temperature_K)
+            # NOTE: U_I and U_II are evaluated at the input temperature_K as an
+            # approximation. For large differences between T_saha and temperature_K,
+            # this introduces error. A future improvement could accept callables.
+            safe_ne_cm3 = max(float(electron_density_cm3), 1e10)
+
+            # Saha ratio as function of temperature
+            def saha_ratio(T_K: float) -> float:
+                T_eV_local = T_K * KB_EV
+                if T_eV_local <= 0:
+                    return 0.0
+                S = (
+                    (SAHA_CONST_CM3 / safe_ne_cm3)
+                    * (T_eV_local**1.5)
+                    * np.exp(-ip / T_eV_local)
+                    * 2.0
+                    * (U_II / U_I)
+                )
+                return S
+
+            # Bisection to find T_saha where saha_ratio(T) ~ R_obs
+            T_lo, T_hi = 3000.0, 50000.0
+            S_lo = saha_ratio(T_lo)
+            S_hi = saha_ratio(T_hi)
+
+            # Saha ratio is monotonically increasing with T
+            if S_hi <= R_obs:
+                logger.debug(
+                    "Saha consistency clamp high for %s: R_obs=%.3e S_hi=%.3e",
+                    element,
+                    R_obs,
+                    S_hi,
+                )
+                t_saha_estimates.append(T_hi)
+                continue
+            if S_lo >= R_obs:
+                logger.debug(
+                    "Saha consistency clamp low for %s: R_obs=%.3e S_lo=%.3e",
+                    element,
+                    R_obs,
+                    S_lo,
+                )
+                t_saha_estimates.append(T_lo)
+                continue
+
+            max_iterations = 50
+            iteration = 0
+            while iteration < max_iterations and abs(T_hi - T_lo) >= 10.0:
+                T_mid = 0.5 * (T_lo + T_hi)
+                S_mid = saha_ratio(T_mid)
+                if S_mid < R_obs:
+                    T_lo = T_mid
+                else:
+                    T_hi = T_mid
+                iteration += 1
+
+            t_saha_estimates.append(0.5 * (T_lo + T_hi))
 
         if len(t_saha_estimates) == 0:
             return 0.0, temperature_K

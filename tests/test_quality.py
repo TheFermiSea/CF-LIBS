@@ -308,9 +308,7 @@ class TestComputeChiSquared:
         measured = np.array([100.0, 200.0, 300.0, 400.0, 500.0])
         modeled = measured.copy()
 
-        chi2, reduced_chi2, n_dof = compute_reconstruction_chi_squared(
-            measured, modeled
-        )
+        chi2, reduced_chi2, n_dof = compute_reconstruction_chi_squared(measured, modeled)
 
         assert chi2 == pytest.approx(0.0, abs=1e-10)
 
@@ -333,9 +331,7 @@ class TestComputeChiSquared:
         measured = np.array([100.0, 400.0, 900.0])
         modeled = measured + np.array([10.0, 20.0, 30.0])
 
-        chi2, reduced_chi2, n_dof = compute_reconstruction_chi_squared(
-            measured, modeled
-        )
+        chi2, reduced_chi2, n_dof = compute_reconstruction_chi_squared(measured, modeled)
 
         # Uncertainties should be sqrt(measured)
         # Residuals / uncertainties = [10/10, 20/20, 30/30] = [1, 1, 1]

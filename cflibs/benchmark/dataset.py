@@ -29,14 +29,84 @@ logger = get_logger("benchmark.dataset")
 
 # Common elements in LIBS analysis
 SUPPORTED_ELEMENTS = [
-    "H", "Li", "Be", "B", "C", "N", "O", "F", "Na", "Mg",
-    "Al", "Si", "P", "S", "Cl", "K", "Ca", "Sc", "Ti", "V",
-    "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As",
-    "Se", "Br", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Ru", "Rh",
-    "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Cs", "Ba",
-    "La", "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho",
-    "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir",
-    "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Th", "U",
+    "H",
+    "Li",
+    "Be",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Na",
+    "Mg",
+    "Al",
+    "Si",
+    "P",
+    "S",
+    "Cl",
+    "K",
+    "Ca",
+    "Sc",
+    "Ti",
+    "V",
+    "Cr",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Ga",
+    "Ge",
+    "As",
+    "Se",
+    "Br",
+    "Rb",
+    "Sr",
+    "Y",
+    "Zr",
+    "Nb",
+    "Mo",
+    "Ru",
+    "Rh",
+    "Pd",
+    "Ag",
+    "Cd",
+    "In",
+    "Sn",
+    "Sb",
+    "Te",
+    "I",
+    "Cs",
+    "Ba",
+    "La",
+    "Ce",
+    "Pr",
+    "Nd",
+    "Sm",
+    "Eu",
+    "Gd",
+    "Tb",
+    "Dy",
+    "Ho",
+    "Er",
+    "Tm",
+    "Yb",
+    "Lu",
+    "Hf",
+    "Ta",
+    "W",
+    "Re",
+    "Os",
+    "Ir",
+    "Pt",
+    "Au",
+    "Hg",
+    "Tl",
+    "Pb",
+    "Bi",
+    "Th",
+    "U",
 ]
 
 
@@ -315,8 +385,7 @@ class BenchmarkSpectrum:
         total = sum(self.true_composition.values())
         if abs(total - 1.0) > 0.05:
             logger.warning(
-                f"Spectrum {self.spectrum_id}: composition sums to {total:.4f}, "
-                "expected ~1.0"
+                f"Spectrum {self.spectrum_id}: composition sums to {total:.4f}, " "expected ~1.0"
             )
 
     @property
@@ -334,9 +403,7 @@ class BenchmarkSpectrum:
         """Wavelength range (min, max) in nm."""
         return float(self.wavelength_nm.min()), float(self.wavelength_nm.max())
 
-    def get_composition_with_uncertainty(
-        self, element: str
-    ) -> Tuple[float, float]:
+    def get_composition_with_uncertainty(self, element: str) -> Tuple[float, float]:
         """
         Get composition and uncertainty for an element.
 
@@ -506,9 +573,7 @@ class BenchmarkDataset:
     description: str = ""
     citation: str = ""
     license: str = "CC-BY-4.0"
-    created_date: str = field(
-        default_factory=lambda: datetime.now().strftime("%Y-%m-%d")
-    )
+    created_date: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
     contributors: List[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -522,9 +587,7 @@ class BenchmarkDataset:
         for split_name, split in self.splits.items():
             for id_ in split.train_ids + split.test_ids:
                 if id_ not in valid_ids:
-                    raise ValueError(
-                        f"Split '{split_name}' references unknown spectrum ID: {id_}"
-                    )
+                    raise ValueError(f"Split '{split_name}' references unknown spectrum ID: {id_}")
             if split.validation_ids:
                 for id_ in split.validation_ids:
                     if id_ not in valid_ids:
@@ -590,18 +653,14 @@ class BenchmarkDataset:
         """
         if split_name not in self.splits:
             available = list(self.splits.keys())
-            raise KeyError(
-                f"Split '{split_name}' not found. Available: {available}"
-            )
+            raise KeyError(f"Split '{split_name}' not found. Available: {available}")
 
         split = self.splits[split_name]
         train = [self._id_to_spectrum[id_] for id_ in split.train_ids]
         test = [self._id_to_spectrum[id_] for id_ in split.test_ids]
         return train, test
 
-    def get_split_with_validation(
-        self, split_name: str = "default"
-    ) -> Tuple[
+    def get_split_with_validation(self, split_name: str = "default") -> Tuple[
         List[BenchmarkSpectrum],
         List[BenchmarkSpectrum],
         Optional[List[BenchmarkSpectrum]],
@@ -676,8 +735,7 @@ class BenchmarkDataset:
         if stratify_by is not None:
             # Stratified split based on composition quartiles
             compositions = [
-                self._id_to_spectrum[id_].true_composition.get(stratify_by, 0.0)
-                for id_ in ids
+                self._id_to_spectrum[id_].true_composition.get(stratify_by, 0.0) for id_ in ids
             ]
             # Create quartile bins
             quartiles = np.percentile(compositions, [25, 50, 75])
@@ -876,9 +934,7 @@ class BenchmarkDataset:
         for i, elem in enumerate(elements):
             col = comp_matrix[:, i]
             if col.max() > 0:
-                lines.append(
-                    f"    {elem}: {col.min()*100:.2f}% - {col.max()*100:.2f}%"
-                )
+                lines.append(f"    {elem}: {col.min()*100:.2f}% - {col.max()*100:.2f}%")
 
         return "\n".join(lines)
 
@@ -901,10 +957,7 @@ class BenchmarkDataset:
     def from_dict(cls, d: Dict) -> "BenchmarkDataset":
         """Create from dictionary representation."""
         spectra = [BenchmarkSpectrum.from_dict(s) for s in d["spectra"]]
-        splits = {
-            name: DataSplit.from_dict(split)
-            for name, split in d.get("splits", {}).items()
-        }
+        splits = {name: DataSplit.from_dict(split) for name, split in d.get("splits", {}).items()}
 
         return cls(
             name=d["name"],

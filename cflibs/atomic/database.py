@@ -159,29 +159,35 @@ class AtomicDatabase(AtomicDataSource):
     def _populate_energy_levels(cursor: sqlite3.Cursor):
         """Extract unique energy levels from the lines table."""
         # Lower levels (INSERT OR IGNORE for idempotent migration)
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT OR IGNORE INTO energy_levels (element, sp_num, g_level, energy_ev)
             SELECT DISTINCT element, sp_num, CAST(gi AS INTEGER), ROUND(ei_ev, 8)
             FROM lines
             WHERE gi IS NOT NULL AND ei_ev IS NOT NULL
-        """)
+        """
+        )
         # Upper levels (avoid duplicates)
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT OR IGNORE INTO energy_levels (element, sp_num, g_level, energy_ev)
             SELECT DISTINCT element, sp_num, CAST(gk AS INTEGER), ROUND(ek_ev, 8)
             FROM lines
             WHERE gk IS NOT NULL AND ek_ev IS NOT NULL
-        """)
+        """
+        )
         # Deduplicate by (element, sp_num, g_level, energy_ev) so distinct levels
         # (different g_level or energy) are preserved for partition-function sums
-        cursor.execute("""
+        cursor.execute(
+            """
             DELETE FROM energy_levels
             WHERE rowid NOT IN (
                 SELECT MIN(rowid)
                 FROM energy_levels
                 GROUP BY element, sp_num, g_level, ROUND(energy_ev, 8)
             )
-        """)
+        """
+        )
         cursor.execute("SELECT COUNT(*) FROM energy_levels")
         n = cursor.fetchone()[0]
         logger.info(f"Populated {n} energy levels from lines table")
@@ -344,11 +350,9 @@ class AtomicDatabase(AtomicDataSource):
                 wavelength_nm=float(row["wavelength_nm"]),
                 A_ki=float(row["aki"]),
                 E_k_ev=float(row["ek_ev"]),
-                E_i_ev=float(0.0)
-                if pd.isna(row.get("ei_ev", 0.0))
-                else float(row.get("ei_ev", 0.0)),
+                E_i_ev=(0.0 if pd.isna(row.get("ei_ev", 0.0)) else float(row.get("ei_ev", 0.0))),
                 g_k=int(row["gk"]),
-                g_i=int(1) if pd.isna(row.get("gi", 1)) else int(row.get("gi", 1)),
+                g_i=1 if pd.isna(row.get("gi", 1)) else int(row.get("gi", 1)),
                 relative_intensity=(
                     float(row.get("rel_int", 0.0)) if pd.notna(row.get("rel_int")) else None
                 ),

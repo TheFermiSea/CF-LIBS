@@ -2,6 +2,7 @@
 Saha-Boltzmann solver for LTE plasma.
 """
 
+import threading
 from typing import Dict, Tuple
 import numpy as np
 
@@ -13,6 +14,8 @@ from cflibs.core.logging_config import get_logger
 from cflibs.plasma.partition import PartitionFunctionEvaluator
 
 logger = get_logger("plasma.saha_boltzmann")
+_MISSING_LEVEL_WARNED: set[tuple[str, int]] = set()
+_MISSING_LEVEL_WARNED_LOCK = threading.Lock()
 
 
 class SahaBoltzmannSolver(SolverStrategy):
@@ -73,10 +76,7 @@ class SahaBoltzmannSolver(SolverStrategy):
         U_II = self.calculate_partition_function(element, 2, T_e_eV)
 
         saha_ratio_I = (
-            (SAHA_CONST_CM3 / n_e_cm3)
-            * (T_e_eV**1.5)
-            * (U_II / U_I)
-            * np.exp(-ip_I / T_e_eV)
+            (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_e_eV)
         )
 
         # n_I + n_II = n_total
@@ -144,9 +144,15 @@ class SahaBoltzmannSolver(SolverStrategy):
         if not levels:
             # Fallback: assume simple approximation
             # For many elements, U ~ 2 * g_ground at low T
-            logger.warning(
-                f"No energy levels for {element} {ionization_stage}, " "using approximation"
-            )
+            key = (element, ionization_stage)
+            with _MISSING_LEVEL_WARNED_LOCK:
+                should_warn = key not in _MISSING_LEVEL_WARNED
+                if should_warn:
+                    _MISSING_LEVEL_WARNED.add(key)
+            if should_warn:
+                logger.warning(
+                    "No energy levels for %s %s, using approximation", element, ionization_stage
+                )
             return 2.0  # Rough approximation
 
         # Partition function: U = sum(g_i * exp(-E_i / kT))

@@ -192,10 +192,7 @@ def test_fingerprint_computation(atomic_db):
     ]
 
     fingerprint = identifier._compute_fingerprint(teeth)
-    # Hybrid formula: mean(active_corr) * sqrt(coverage)
-    mean_corr = (0.8 + 0.6 + 0.7) / 3
-    coverage = 3 / 4
-    expected = mean_corr * (coverage ** 0.5)
+    expected = (0.8 + 0.6 + 0.7) / 4  # Divide by total teeth (4), not active (3)
     assert abs(fingerprint - expected) < 1e-6
 
     # Test with no active teeth
@@ -382,9 +379,7 @@ def test_identify_empty_wavelength_range(atomic_db):
 def test_identify_high_correlation_threshold(atomic_db, synthetic_libs_spectrum):
     """Test identify with very high correlation threshold."""
     identifier = CombIdentifier(
-        atomic_db,
-        elements=["Fe", "H"],
-        min_correlation=0.95  # Very high threshold
+        atomic_db, elements=["Fe", "H"], min_correlation=0.95  # Very high threshold
     )
 
     spectrum = synthetic_libs_spectrum(
@@ -420,9 +415,7 @@ def test_analyze_interferences_inactive_teeth(atomic_db):
 
     element_teeth = {
         "Fe": [{"center_nm": 400.0, "best_correlation": 0.8, "active": True}],
-        "Cu": [
-            {"center_nm": 400.05, "best_correlation": 0.3, "active": False}  # Inactive
-        ],
+        "Cu": [{"center_nm": 400.05, "best_correlation": 0.3, "active": False}],  # Inactive
     }
 
     updated_teeth = identifier._analyze_interferences(element_teeth)
@@ -462,10 +455,7 @@ def test_fingerprint_with_mixed_correlations(atomic_db):
     ]
 
     fingerprint = identifier._compute_fingerprint(teeth)
-    # Hybrid formula: mean(active_corr) * sqrt(coverage)
-    mean_corr = (0.9 + 0.7 + 0.5) / 3
-    coverage = 3 / 5
-    expected = mean_corr * (coverage ** 0.5)
+    expected = (0.9 + 0.7 + 0.5) / 5  # Divide by total teeth (5)
     np.testing.assert_allclose(fingerprint, expected)
 
 
@@ -618,9 +608,9 @@ def test_false_positive_noise_only(atomic_db):
 
     result = identifier.identify(wavelength, intensity)
     # No element should be detected in pure noise
-    assert len(result.detected_elements) == 0, (
-        f"False positives on noise: {[e.element for e in result.detected_elements]}"
-    )
+    assert (
+        len(result.detected_elements) == 0
+    ), f"False positives on noise: {[e.element for e in result.detected_elements]}"
 
 
 def test_coverage_penalty_reduces_score(atomic_db):
@@ -636,8 +626,9 @@ def test_coverage_penalty_reduces_score(atomic_db):
             teeth.append({"active": False, "best_correlation": 0.1})
 
     score = identifier._compute_fingerprint(teeth)
-    # mean(0.9) * sqrt(3/50) = 0.9 * 0.245 ≈ 0.22, still penalized by low coverage
-    assert score < 0.25, f"Score {score} too high for 3/50 active teeth"
+    # 3 * 0.9 / 50 = 0.054, should be much less than min_correlation
+    assert score < 0.1, f"Score {score} too high for 3/50 active teeth"
+
 
 def test_max_lines_per_element_parameter(atomic_db):
     """Test that max_lines_per_element caps transition count."""

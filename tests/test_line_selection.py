@@ -74,12 +74,24 @@ class TestIsolationFactor:
     def test_isolation_zero_separation(self, selector):
         """Verify isolation ≈ 0 when lines overlap."""
         obs1 = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
         obs2 = LineObservation(
-            wavelength_nm=400.0, intensity=800.0, intensity_uncertainty=16.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            wavelength_nm=400.0,
+            intensity=800.0,
+            intensity_uncertainty=16.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.5,
+            g_k=7,
+            A_ki=8e6,
         )
 
         isolation = selector._compute_isolation(obs1, [obs1, obs2])
@@ -90,12 +102,24 @@ class TestIsolationFactor:
     def test_isolation_large_separation(self, selector):
         """Verify isolation ≈ 1 for well-separated lines."""
         obs1 = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
         obs2 = LineObservation(
-            wavelength_nm=500.0, intensity=800.0, intensity_uncertainty=16.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            wavelength_nm=500.0,
+            intensity=800.0,
+            intensity_uncertainty=16.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.5,
+            g_k=7,
+            A_ki=8e6,
         )
 
         isolation = selector._compute_isolation(obs1, [obs1, obs2])
@@ -106,12 +130,24 @@ class TestIsolationFactor:
     def test_isolation_formula(self, selector):
         """Verify isolation = 1 - exp(-separation/isolation_wavelength_nm)."""
         obs1 = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
         obs2 = LineObservation(
-            wavelength_nm=400.1, intensity=800.0, intensity_uncertainty=16.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+            wavelength_nm=400.1,
+            intensity=800.0,
+            intensity_uncertainty=16.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.5,
+            g_k=7,
+            A_ki=8e6,
         )
 
         isolation = selector._compute_isolation(obs1, [obs1, obs2])
@@ -124,8 +160,14 @@ class TestIsolationFactor:
     def test_isolation_single_line(self, selector):
         """Verify isolation = 1 for single line (no neighbors)."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         isolation = selector._compute_isolation(obs, [obs])
@@ -148,8 +190,14 @@ class TestScoringFormula:
     def test_score_formula(self, selector):
         """Verify score = SNR × (1/uncertainty) × isolation."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,  # SNR = 100
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=10.0,  # SNR = 100
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         atomic_uncertainties = {("Fe", 1, 400.0): 0.05}  # 5% uncertainty
@@ -170,8 +218,14 @@ class TestScoringFormula:
     def test_score_with_default_uncertainty(self, selector):
         """Verify default 10% uncertainty is used when not provided."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,  # SNR = 50
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,  # SNR = 50
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         score_info = selector._score_line(
@@ -183,8 +237,14 @@ class TestScoringFormula:
     def test_score_snr_from_intensity_ratio(self, selector):
         """Verify SNR is calculated as intensity / uncertainty."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=500.0, intensity_uncertainty=25.0,  # SNR = 20
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=500.0,
+            intensity_uncertainty=25.0,  # SNR = 20
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         score_info = selector._score_line(
@@ -196,8 +256,14 @@ class TestScoringFormula:
     def test_score_zero_uncertainty_gives_high_snr(self, selector):
         """Verify zero intensity_uncertainty gives default high SNR."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=0.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=0.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         score_info = selector._score_line(
@@ -209,8 +275,14 @@ class TestScoringFormula:
     def test_resonance_line_flagged(self, selector):
         """Verify resonance lines are flagged correctly."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         resonance_lines = {("Fe", 1, 400.0)}
@@ -251,12 +323,24 @@ class TestLineSelectorSelect:
         """Verify lines below min_snr are rejected."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=100.0, intensity_uncertainty=50.0,  # SNR = 2
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=100.0,
+                intensity_uncertainty=50.0,  # SNR = 2
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=1000.0, intensity_uncertainty=10.0,  # SNR = 100
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,  # SNR = 100
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
         ]
 
@@ -294,8 +378,14 @@ class TestLineSelectorSelect:
         """Verify rejection reasons are recorded."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=100.0, intensity_uncertainty=100.0,  # SNR = 1
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=100.0,
+                intensity_uncertainty=100.0,  # SNR = 1
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -310,16 +400,34 @@ class TestLineSelectorSelect:
         """Verify selected lines are sorted by score descending."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=500.0, intensity_uncertainty=10.0,  # SNR = 50
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=500.0,
+                intensity_uncertainty=10.0,  # SNR = 50
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=1000.0, intensity_uncertainty=10.0,  # SNR = 100
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,  # SNR = 100
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
             LineObservation(
-                wavelength_nm=420.0, intensity=200.0, intensity_uncertainty=10.0,  # SNR = 20
-                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=5, A_ki=5e6,
+                wavelength_nm=420.0,
+                intensity=200.0,
+                intensity_uncertainty=10.0,  # SNR = 20
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=5,
+                A_ki=5e6,
             ),
         ]
 
@@ -339,16 +447,34 @@ class TestLineSelectorSelect:
         # All lines at similar energy
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.1, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.1,
+                g_k=7,
+                A_ki=8e6,
             ),
             LineObservation(
-                wavelength_nm=420.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.2, g_k=5, A_ki=5e6,
+                wavelength_nm=420.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.2,
+                g_k=5,
+                A_ki=5e6,
             ),
         ]
 
@@ -363,12 +489,24 @@ class TestLineSelectorSelect:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
         ]
 
@@ -383,8 +521,14 @@ class TestLineSelectorSelect:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -403,8 +547,14 @@ class TestLineSelectorSelect:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -428,8 +578,14 @@ class TestLineSelectorSelect:
         """Verify graceful handling when all lines are rejected."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=10.0, intensity_uncertainty=100.0,  # SNR = 0.1
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=10.0,
+                intensity_uncertainty=100.0,  # SNR = 0.1
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -450,8 +606,14 @@ class TestLineScore:
     def test_dataclass_creation(self):
         """Verify LineScore can be instantiated."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         score = LineScore(
@@ -475,8 +637,14 @@ class TestLineScore:
     def test_rejection_reason_default(self):
         """Verify rejection_reason defaults to None."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         score = LineScore(
@@ -502,8 +670,14 @@ class TestLineSelectionResult:
     def test_dataclass_creation(self):
         """Verify LineSelectionResult can be instantiated."""
         obs = LineObservation(
-            wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-            element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+            wavelength_nm=400.0,
+            intensity=1000.0,
+            intensity_uncertainty=20.0,
+            element="Fe",
+            ionization_stage=1,
+            E_k_ev=3.0,
+            g_k=9,
+            A_ki=1e7,
         )
 
         result = LineSelectionResult(
@@ -546,8 +720,14 @@ class TestIdentifyResonanceLines:
         """Verify stub returns empty set."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=20.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -560,8 +740,14 @@ class TestIdentifyResonanceLines:
         """Verify function accepts ground_state_threshold_ev parameter."""
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=20.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=20.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
         ]
 
@@ -585,12 +771,24 @@ class TestRecommendLines:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=324.0, intensity=2000.0, intensity_uncertainty=20.0,
-                element="Cu", ionization_stage=1, E_k_ev=3.8, g_k=4, A_ki=1.4e8,
+                wavelength_nm=324.0,
+                intensity=2000.0,
+                intensity_uncertainty=20.0,
+                element="Cu",
+                ionization_stage=1,
+                E_k_ev=3.8,
+                g_k=4,
+                A_ki=1.4e8,
             ),
         ]
 
@@ -639,21 +837,45 @@ class TestMultiElementSelection:
         observations = [
             # Fe lines
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=800.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=800.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=7,
+                A_ki=8e6,
             ),
             # Cu lines
             LineObservation(
-                wavelength_nm=324.0, intensity=2000.0, intensity_uncertainty=20.0,
-                element="Cu", ionization_stage=1, E_k_ev=3.8, g_k=4, A_ki=1.4e8,
+                wavelength_nm=324.0,
+                intensity=2000.0,
+                intensity_uncertainty=20.0,
+                element="Cu",
+                ionization_stage=1,
+                E_k_ev=3.8,
+                g_k=4,
+                A_ki=1.4e8,
             ),
             LineObservation(
-                wavelength_nm=327.0, intensity=1000.0, intensity_uncertainty=15.0,
-                element="Cu", ionization_stage=1, E_k_ev=3.8, g_k=2, A_ki=1.4e8,
+                wavelength_nm=327.0,
+                intensity=1000.0,
+                intensity_uncertainty=15.0,
+                element="Cu",
+                ionization_stage=1,
+                E_k_ev=3.8,
+                g_k=2,
+                A_ki=1.4e8,
             ),
         ]
 
@@ -672,16 +894,34 @@ class TestMultiElementSelection:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=324.0, intensity=2000.0, intensity_uncertainty=20.0,
-                element="Cu", ionization_stage=1, E_k_ev=3.8, g_k=4, A_ki=1.4e8,
+                wavelength_nm=324.0,
+                intensity=2000.0,
+                intensity_uncertainty=20.0,
+                element="Cu",
+                ionization_stage=1,
+                E_k_ev=3.8,
+                g_k=4,
+                A_ki=1.4e8,
             ),
             LineObservation(
-                wavelength_nm=394.0, intensity=1500.0, intensity_uncertainty=15.0,
-                element="Al", ionization_stage=1, E_k_ev=3.1, g_k=2, A_ki=5e7,
+                wavelength_nm=394.0,
+                intensity=1500.0,
+                intensity_uncertainty=15.0,
+                element="Al",
+                ionization_stage=1,
+                E_k_ev=3.1,
+                g_k=2,
+                A_ki=5e7,
             ),
         ]
 
@@ -833,16 +1073,34 @@ class TestAutoVsManualLineSelection:
         # Create lines with varying SNR
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,  # SNR=100
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,  # SNR=100
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=200.0, intensity_uncertainty=10.0,  # SNR=20
-                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=200.0,
+                intensity_uncertainty=10.0,  # SNR=20
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=7,
+                A_ki=8e6,
             ),
             LineObservation(
-                wavelength_nm=420.0, intensity=500.0, intensity_uncertainty=10.0,  # SNR=50
-                element="Fe", ionization_stage=1, E_k_ev=5.0, g_k=5, A_ki=5e6,
+                wavelength_nm=420.0,
+                intensity=500.0,
+                intensity_uncertainty=10.0,  # SNR=50
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=5.0,
+                g_k=5,
+                A_ki=5e6,
             ),
         ]
 
@@ -863,16 +1121,34 @@ class TestAutoVsManualLineSelection:
         # Create closely spaced lines (blended)
         observations = [
             LineObservation(
-                wavelength_nm=400.00, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.00,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=400.01, intensity=800.0, intensity_uncertainty=10.0,  # 0.01 nm away
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=400.01,
+                intensity=800.0,
+                intensity_uncertainty=10.0,  # 0.01 nm away
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
             LineObservation(
-                wavelength_nm=500.0, intensity=500.0, intensity_uncertainty=10.0,  # Well isolated
-                element="Fe", ionization_stage=1, E_k_ev=4.0, g_k=5, A_ki=5e6,
+                wavelength_nm=500.0,
+                intensity=500.0,
+                intensity_uncertainty=10.0,  # Well isolated
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=4.0,
+                g_k=5,
+                A_ki=5e6,
             ),
         ]
 
@@ -899,16 +1175,34 @@ class TestAutoVsManualLineSelection:
         # Create lines with good energy spread
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=2.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=2.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=420.0, intensity=800.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=420.0,
+                intensity=800.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
             LineObservation(
-                wavelength_nm=440.0, intensity=600.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=5.0, g_k=5, A_ki=5e6,
+                wavelength_nm=440.0,
+                intensity=600.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=5.0,
+                g_k=5,
+                A_ki=5e6,
             ),
         ]
 
@@ -1063,13 +1357,24 @@ class TestCrowdedSpectraEdgeCases:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=1000.0, intensity_uncertainty=10.0,
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=1000.0,
+                intensity_uncertainty=10.0,
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=800.0, intensity_uncertainty=10.0,
+                wavelength_nm=410.0,
+                intensity=800.0,
+                intensity_uncertainty=10.0,
                 element="Zr",  # Rare element with potentially missing data
-                ionization_stage=1, E_k_ev=3.5, g_k=5, A_ki=1e6,
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=5,
+                A_ki=1e6,
             ),
         ]
 
@@ -1087,12 +1392,24 @@ class TestCrowdedSpectraEdgeCases:
 
         observations = [
             LineObservation(
-                wavelength_nm=400.0, intensity=100.0, intensity_uncertainty=10.0,  # SNR=10
-                element="Fe", ionization_stage=1, E_k_ev=3.0, g_k=9, A_ki=1e7,
+                wavelength_nm=400.0,
+                intensity=100.0,
+                intensity_uncertainty=10.0,  # SNR=10
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.0,
+                g_k=9,
+                A_ki=1e7,
             ),
             LineObservation(
-                wavelength_nm=410.0, intensity=50.0, intensity_uncertainty=10.0,  # SNR=5
-                element="Fe", ionization_stage=1, E_k_ev=3.5, g_k=7, A_ki=8e6,
+                wavelength_nm=410.0,
+                intensity=50.0,
+                intensity_uncertainty=10.0,  # SNR=5
+                element="Fe",
+                ionization_stage=1,
+                E_k_ev=3.5,
+                g_k=7,
+                A_ki=8e6,
             ),
         ]
 

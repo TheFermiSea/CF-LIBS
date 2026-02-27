@@ -4,6 +4,7 @@ Tests for plasma state and Saha-Boltzmann solver.
 
 import pytest
 from cflibs.plasma.state import PlasmaState, SingleZoneLTEPlasma
+from cflibs.plasma import saha_boltzmann as saha_module
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
 
 
@@ -108,6 +109,32 @@ def test_calculate_partition_function(atomic_db):
     assert U > 0
     # Partition function should be reasonable (typically 1-100 for most elements)
     assert 1 <= U <= 1000
+
+
+@pytest.mark.unit
+def test_missing_levels_warning_emitted_once(caplog):
+    """Repeated missing-level fallback should warn only once per element/stage."""
+
+    class _NoLevelsDB:
+        def get_partition_coefficients(self, element, ionization_stage):
+            return None
+
+        def get_energy_levels(self, element, ionization_stage):
+            return []
+
+    solver = SahaBoltzmannSolver(_NoLevelsDB())
+    previous = set(saha_module._MISSING_LEVEL_WARNED)
+    try:
+        saha_module._MISSING_LEVEL_WARNED.clear()
+        with caplog.at_level("WARNING"):
+            solver.calculate_partition_function.__wrapped__(solver, "Xx", 3, 1.0)
+            solver.calculate_partition_function.__wrapped__(solver, "Xx", 3, 1.2)
+
+        messages = [m for m in caplog.messages if "No energy levels for" in m]
+        assert len(messages) == 1
+    finally:
+        saha_module._MISSING_LEVEL_WARNED.clear()
+        saha_module._MISSING_LEVEL_WARNED.update(previous)
 
 
 def test_solve_level_population(atomic_db):

@@ -4,6 +4,7 @@ Includes Gaussian, Lorentzian, and Voigt profiles.
 """
 
 import numpy as np
+import warnings
 from typing import Union, Callable
 
 try:
@@ -267,21 +268,62 @@ def total_lorentzian_width(
 # --- JAX IMPLEMENTATION ---
 
 if HAS_JAX:
+    x64_enabled = bool(getattr(jax.config, "jax_enable_x64", False))
+    _weideman_dtype = jnp.float64 if x64_enabled else jnp.float32
+    if not x64_enabled:
+        warnings.warn(
+            "JAX x64 mode is disabled. Voigt profile coefficients will use float32 precision. "
+            "Enable float64 with jax.config.update('jax_enable_x64', True) before importing "
+            "cflibs.radiation.profiles for highest accuracy.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Weideman (1994) coefficients for Faddeeva function approximation
     # Reference: Weideman, SIAM J. Numer. Anal. 31, 1497 (1994)
-    # N = 36 terms, provides ~15 digits of accuracy
+    # N = 36 terms, provides up to ~15 digits in float64 mode
     _WEIDEMAN_L = 5.0453784915222872
-    _WEIDEMAN_COEFFS = jnp.array([
-        5.3552841173932895e-14, -8.0527261170976810e-14, -3.2398883441056261e-13, 4.4307993809438665e-13,
-        2.0979949804464113e-12, -2.1169169127002517e-12, -1.4312512495461891e-11, 6.3463874290909676e-12,
-        9.9393262862192946e-11, 3.1971993994865226e-11, -6.6348465239446123e-10, -9.0922385524685665e-10,
-        3.7734430504796621e-09, 1.1883887203463527e-08, -1.0962277931636141e-08, -1.1303157199293924e-07,
-        -1.2894842925653411e-07, 6.7416556638248690e-07, 2.7654086656368491e-06, 1.4187058478641208e-06,
-        -2.1741186565542035e-05, -8.8177971418517626e-05, -1.1396630644455730e-04, 4.6290316939990987e-04,
-        3.5484447086997187e-03, 1.3898253763251489e-02, 4.1051043016576978e-02, 1.0084293371847958e-01,
-        2.1501636320107403e-01, 4.0734241895033424e-01, 6.9566219189710010e-01, 1.0813580371765887e+00,
-        1.5401625788153652e+00, 2.0193976436113505e+00, 2.4453784928519209e+00, 2.7407450274098601e+00,
-    ])
+    _WEIDEMAN_COEFFS = jnp.array(
+        [
+            5.3552841173932895e-14,
+            -8.0527261170976810e-14,
+            -3.2398883441056261e-13,
+            4.4307993809438665e-13,
+            2.0979949804464113e-12,
+            -2.1169169127002517e-12,
+            -1.4312512495461891e-11,
+            6.3463874290909676e-12,
+            9.9393262862192946e-11,
+            3.1971993994865226e-11,
+            -6.6348465239446123e-10,
+            -9.0922385524685665e-10,
+            3.7734430504796621e-09,
+            1.1883887203463527e-08,
+            -1.0962277931636141e-08,
+            -1.1303157199293924e-07,
+            -1.2894842925653411e-07,
+            6.7416556638248690e-07,
+            2.7654086656368491e-06,
+            1.4187058478641208e-06,
+            -2.1741186565542035e-05,
+            -8.8177971418517626e-05,
+            -1.1396630644455730e-04,
+            4.6290316939990987e-04,
+            3.5484447086997187e-03,
+            1.3898253763251489e-02,
+            4.1051043016576978e-02,
+            1.0084293371847958e-01,
+            2.1501636320107403e-01,
+            4.0734241895033424e-01,
+            6.9566219189710010e-01,
+            1.0813580371765887e00,
+            1.5401625788153652e00,
+            2.0193976436113505e00,
+            2.4453784928519209e00,
+            2.7407450274098601e00,
+        ],
+        dtype=_weideman_dtype,
+    )
 
     @jit
     def _faddeeva_weideman_jax(z: jnp.ndarray) -> jnp.ndarray:
@@ -291,8 +333,8 @@ if HAS_JAX:
         This is a branch-free implementation with stable gradients for all z,
         making it suitable for use with JAX autodiff (including MCMC sampling).
 
-        The approximation uses N=36 terms and achieves ~15 digits of accuracy
-        across the entire complex plane.
+        The approximation uses N=36 terms and achieves up to ~15 digits in
+        float64 mode across the complex plane.
 
         Parameters
         ----------
@@ -375,11 +417,8 @@ if HAS_JAX:
 
         # Region 3: s < 5.5 and y >= 0.195 * |x| - 0.176
         def region3(x, y, t):
-            w = (
-                16.4955 + t * (20.20933 + t * (11.96482 + t * (3.778987 + t * 0.5642236)))
-            ) / (
-                16.4955
-                + t * (38.82363 + t * (39.27121 + t * (21.69274 + t * (6.699398 + t))))
+            w = (16.4955 + t * (20.20933 + t * (11.96482 + t * (3.778987 + t * 0.5642236)))) / (
+                16.4955 + t * (38.82363 + t * (39.27121 + t * (21.69274 + t * (6.699398 + t))))
             )
             return w
 
@@ -391,14 +430,19 @@ if HAS_JAX:
                 - u
                 * (
                     3321.9905
-                    - u * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419))))
+                    - u
+                    * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419))))
                 )
             ) / (
                 32066.6
                 - u
                 * (
                     24322.84
-                    - u * (9022.228 - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u)))))
+                    - u
+                    * (
+                        9022.228
+                        - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u))))
+                    )
                 )
             )
             return w

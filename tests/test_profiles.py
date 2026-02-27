@@ -14,13 +14,19 @@ from cflibs.radiation.profiles import (
 )
 
 
+def _trapezoid(y: np.ndarray, x: np.ndarray) -> float:
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y, x))
+    return float(np.trapz(y, x))
+
+
 def test_gaussian_integral():
     """Test Gaussian profile integrates to amplitude."""
     x = np.linspace(-10, 10, 1000)
     sigma = 1.0
     amp = 5.0
     y = gaussian_profile(x, 0.0, sigma, amp)
-    integral = np.trapezoid(y, x)
+    integral = _trapezoid(y, x)
     assert np.isclose(integral, amp, rtol=1e-3)
 
 
@@ -32,7 +38,7 @@ def test_lorentzian_integral():
     amp = 5.0
     y = lorentzian_profile(x, 0.0, gamma, amp)
 
-    integral = np.trapezoid(y, x)
+    integral = _trapezoid(y, x)
     # 1e-2 tolerance due to finite integration range
     assert np.isclose(integral, amp, rtol=1e-2)
 
@@ -161,9 +167,7 @@ class TestWidemanFaddeeva:
             params = jnp.array([sigma, gamma])
             grad = grad_fn(params)
 
-            assert jnp.isfinite(grad).all(), (
-                f"NaN/Inf gradient at log_ne={log_ne}: grad={grad}"
-            )
+            assert jnp.isfinite(grad).all(), f"NaN/Inf gradient at log_ne={log_ne}: grad={grad}"
 
     def test_voigt_jax_gradient_finite(self):
         """Test Voigt profile has finite gradients for typical LIBS parameters."""
@@ -198,9 +202,9 @@ class TestWidemanFaddeeva:
         for T_eV, log_ne in test_params:
             params = jnp.array([T_eV, log_ne])
             grad = grad_fn(params)
-            assert jnp.isfinite(grad).all(), (
-                f"NaN/Inf gradient at T={T_eV}eV, log_ne={log_ne}: grad={grad}"
-            )
+            assert jnp.isfinite(
+                grad
+            ).all(), f"NaN/Inf gradient at T={T_eV}eV, log_ne={log_ne}: grad={grad}"
 
     def test_voigt_jax_matches_numpy(self):
         """Test JAX Voigt profile matches NumPy version."""
@@ -216,6 +220,6 @@ class TestWidemanFaddeeva:
         v_numpy = voigt_profile(wavelength, center, sigma, gamma, amplitude)
         v_jax = np.array(voigt_profile_jax(jnp.array(wavelength), center, sigma, gamma, amplitude))
 
-        assert np.allclose(v_numpy, v_jax, rtol=1e-4), (
-            f"Max diff: {np.max(np.abs(v_numpy - v_jax))}"
-        )
+        assert np.allclose(
+            v_numpy, v_jax, rtol=1e-4
+        ), f"Max diff: {np.max(np.abs(v_numpy - v_jax))}"

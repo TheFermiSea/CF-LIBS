@@ -519,9 +519,7 @@ class MonteCarloResult:
             mean = self.concentrations_mean[el]
             std = self.concentrations_std[el]
             ci = self.concentrations_ci_95.get(el, (mean - 2 * std, mean + 2 * std))
-            lines.append(
-                f"{el:<20} {mean:>12.4f} {std:>12.4f} [{ci[0]:.4f}, {ci[1]:.4f}]"
-            )
+            lines.append(f"{el:<20} {mean:>12.4f} {std:>12.4f} [{ci[0]:.4f}, {ci[1]:.4f}]")
 
         lines.append("=" * 70)
         return "\n".join(lines)
@@ -555,9 +553,7 @@ class MonteCarloResult:
             "T_ne_corr": float(corr[0, 1]),
         }
 
-    def compare_with_bayesian(
-        self, bayesian_result: Any, tolerance: float = 0.1
-    ) -> Dict[str, Any]:
+    def compare_with_bayesian(self, bayesian_result: Any, tolerance: float = 0.1) -> Dict[str, Any]:
         """
         Compare Monte Carlo results with Bayesian credible intervals.
 
@@ -618,7 +614,11 @@ class MonteCarloResult:
         ci_overlap_ne = not (mc_ne_upper < bayes_ne_lower or mc_ne_lower > bayes_ne_upper)
 
         # Summary
-        status = "AGREE" if (T_agreement and ne_agreement and ci_overlap_T and ci_overlap_ne) else "DISAGREE"
+        status = (
+            "AGREE"
+            if (T_agreement and ne_agreement and ci_overlap_T and ci_overlap_ne)
+            else "DISAGREE"
+        )
         summary = (
             f"Monte Carlo vs Bayesian: {status}\n"
             f"  T: MC={self.T_mean:.0f}+/-{self.T_std:.0f} K, "
@@ -761,9 +761,7 @@ class MonteCarloUQ:
             for i, obs_set in enumerate(perturbed_sets):
                 if self.verbose and (i + 1) % 50 == 0:
                     logger.info(f"Monte Carlo sample {i+1}/{self.n_samples}")
-                results.append(
-                    self._run_single(obs_set, closure_mode, **closure_kwargs)
-                )
+                results.append(self._run_single(obs_set, closure_mode, **closure_kwargs))
         else:
             # Parallel execution with joblib
             results = Parallel(n_jobs=self.n_jobs, verbose=10 if self.verbose else 0)(
@@ -894,7 +892,9 @@ class MonteCarloUQ:
 
         n_successful = len(successful)
         if n_successful < 2:
-            logger.warning(f"Only {n_successful} successful MC samples - insufficient for statistics")
+            logger.warning(
+                f"Only {n_successful} successful MC samples - insufficient for statistics"
+            )
             return self._empty_result(perturbation_type, failed_indices)
 
         # Extract samples
@@ -904,8 +904,7 @@ class MonteCarloUQ:
         # Get elements from first result
         elements = list(successful[0].concentrations.keys())
         concentration_samples = {
-            el: np.array([r.concentrations.get(el, 0.0) for r in successful])
-            for el in elements
+            el: np.array([r.concentrations.get(el, 0.0) for r in successful]) for el in elements
         }
 
         # Compute statistics
@@ -919,8 +918,12 @@ class MonteCarloUQ:
         ne_ci_68 = (float(np.percentile(ne_samples, 16)), float(np.percentile(ne_samples, 84)))
         ne_ci_95 = (float(np.percentile(ne_samples, 2.5)), float(np.percentile(ne_samples, 97.5)))
 
-        concentrations_mean = {el: float(np.mean(samples)) for el, samples in concentration_samples.items()}
-        concentrations_std = {el: float(np.std(samples, ddof=1)) for el, samples in concentration_samples.items()}
+        concentrations_mean = {
+            el: float(np.mean(samples)) for el, samples in concentration_samples.items()
+        }
+        concentrations_std = {
+            el: float(np.std(samples, ddof=1)) for el, samples in concentration_samples.items()
+        }
         concentrations_ci_68 = {
             el: (float(np.percentile(samples, 16)), float(np.percentile(samples, 84)))
             for el, samples in concentration_samples.items()

@@ -234,11 +234,7 @@ class TestCorrectionFactorDB:
 
     def test_load_json_unknown_matrix_type(self):
         """Test loading JSON with unknown matrix type logs warning."""
-        data = {
-            "NONEXISTENT_TYPE": {
-                "Fe": {"multiplicative": 1.0}
-            }
-        }
+        data = {"NONEXISTENT_TYPE": {"Fe": {"multiplicative": 1.0}}}
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(data, f)
@@ -461,12 +457,14 @@ class TestMatrixCorrection:
         """Test using a custom correction database."""
         custom_db = CorrectionFactorDB()
         # Override Fe factor
-        custom_db.add_factor(CorrectionFactor(
-            element="Fe",
-            matrix_type=MatrixType.METALLIC,
-            multiplicative=1.50,  # Large correction for testing
-            uncertainty=0.01,
-        ))
+        custom_db.add_factor(
+            CorrectionFactor(
+                element="Fe",
+                matrix_type=MatrixType.METALLIC,
+                multiplicative=1.50,  # Large correction for testing
+                uncertainty=0.01,
+            )
+        )
 
         corrector = MatrixEffectCorrector(correction_db=custom_db)
         result = corrector.correct(steel_result)
@@ -673,12 +671,14 @@ class TestCombineCorrections:
     def test_combine_custom_db(self, result):
         """Test with custom correction database."""
         custom_db = CorrectionFactorDB()
-        custom_db.add_factor(CorrectionFactor(
-            element="Fe",
-            matrix_type=MatrixType.METALLIC,
-            multiplicative=1.0,  # No correction
-            uncertainty=0.0,
-        ))
+        custom_db.add_factor(
+            CorrectionFactor(
+                element="Fe",
+                matrix_type=MatrixType.METALLIC,
+                multiplicative=1.0,  # No correction
+                uncertainty=0.0,
+            )
+        )
 
         corrected = combine_corrections(
             result,

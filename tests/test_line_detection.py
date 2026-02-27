@@ -9,10 +9,7 @@ def _gaussian(wavelength: np.ndarray, center: float, sigma: float, amplitude: fl
 
 def test_detect_line_observations_matches_known_lines(atomic_db):
     wavelength = np.linspace(371.0, 375.0, 2000)
-    intensity = (
-        _gaussian(wavelength, 371.99, 0.03, 10.0)
-        + _gaussian(wavelength, 373.49, 0.03, 5.0)
-    )
+    intensity = _gaussian(wavelength, 371.99, 0.03, 10.0) + _gaussian(wavelength, 373.49, 0.03, 5.0)
 
     result = detect_line_observations(
         wavelength=wavelength,

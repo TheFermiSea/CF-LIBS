@@ -440,9 +440,11 @@ class IterativeCFLIBSSolver:
                 # Fallback to independent uncertainties
                 intercepts_u[el] = ufloat(
                     fit_result.intercept,
-                    fit_result.intercept_uncertainty
-                    if np.isfinite(fit_result.intercept_uncertainty)
-                    else 0.0,
+                    (
+                        max(fit_result.intercept_uncertainty, 0.0)
+                        if np.isfinite(fit_result.intercept_uncertainty)
+                        else 0.0
+                    ),
                 )
 
         # Get partition functions at converged T

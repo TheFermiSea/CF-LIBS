@@ -22,6 +22,7 @@ References:
 - Tognoni et al., "CF-LIBS: State of the art" (2010) - limitations of sequential analysis
 - Ciucci et al., "New procedure for quantitative elemental analysis" (1999)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -45,7 +46,9 @@ try:
 except ImportError:
     HAS_JAX = False
     jnp = None
-    def jit(f): return f  # noqa: E731
+
+    def jit(f):
+        return f
 
 
 class LossType(Enum):

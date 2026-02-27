@@ -114,22 +114,26 @@ class TestPairwiseAngles:
 
     def test_pairwise_diagonal_zero(self):
         """Diagonal of pairwise matrix should be zero."""
-        spectra = np.array([
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [7.0, 8.0, 9.0],
-        ])
+        spectra = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0],
+                [7.0, 8.0, 9.0],
+            ]
+        )
         sam = SpectralAngleMapper()
         angles = sam.pairwise_angles(spectra)
         np.testing.assert_array_almost_equal(np.diag(angles), 0.0)
 
     def test_pairwise_symmetric(self):
         """Pairwise matrix should be symmetric."""
-        spectra = np.array([
-            [1.0, 2.0, 3.0],
-            [4.0, 3.0, 2.0],
-            [1.0, 1.0, 1.0],
-        ])
+        spectra = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 3.0, 2.0],
+                [1.0, 1.0, 1.0],
+            ]
+        )
         sam = SpectralAngleMapper()
         angles = sam.pairwise_angles(spectra)
         np.testing.assert_array_almost_equal(angles, angles.T)
@@ -156,11 +160,13 @@ class TestAnglesFromReference:
 
     def test_angles_from_mean_reference(self):
         """Test angles computed from mean reference."""
-        spectra = np.array([
-            [1.0, 2.0, 3.0],
-            [1.0, 2.0, 3.0],  # Same as first
-            [1.0, 2.0, 3.0],  # Same as first
-        ])
+        spectra = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [1.0, 2.0, 3.0],  # Same as first
+                [1.0, 2.0, 3.0],  # Same as first
+            ]
+        )
         sam = SpectralAngleMapper(reference_method="mean")
         angles, ref = sam.angles_from_reference(spectra)
         # All spectra are identical to mean, angles should be 0
@@ -168,11 +174,13 @@ class TestAnglesFromReference:
 
     def test_angles_from_median_reference(self):
         """Test angles computed from median reference."""
-        spectra = np.array([
-            [1.0, 2.0, 3.0],
-            [1.0, 2.0, 3.0],
-            [100.0, 200.0, 300.0],  # Outlier (same shape, different scale)
-        ])
+        spectra = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [1.0, 2.0, 3.0],
+                [100.0, 200.0, 300.0],  # Outlier (same shape, different scale)
+            ]
+        )
         sam = SpectralAngleMapper(reference_method="median")
         angles, ref = sam.angles_from_reference(spectra)
         # Median should be [1, 2, 3], all have same shape so angle = 0
@@ -180,11 +188,13 @@ class TestAnglesFromReference:
 
     def test_custom_reference(self):
         """Test angles from custom reference spectrum."""
-        spectra = np.array([
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ])
+        spectra = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         reference = np.array([1.0, 0.0, 0.0])
         sam = SpectralAngleMapper()
         angles, ref = sam.angles_from_reference(spectra, reference=reference)
@@ -216,7 +226,9 @@ class TestOutlierDetection:
         base_spectrum = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         spectra = np.tile(base_spectrum, (10, 1))
         # Make the last spectrum orthogonal
-        spectra[9] = np.array([5.0, 4.0, 3.0, 2.0, 1.0]) * 0.01 + np.array([0.0, 0.0, 10.0, 0.0, 0.0])
+        spectra[9] = np.array([5.0, 4.0, 3.0, 2.0, 1.0]) * 0.01 + np.array(
+            [0.0, 0.0, 10.0, 0.0, 0.0]
+        )
 
         sam = SpectralAngleMapper(threshold_sigma=2.0)
         result = sam.detect_outliers(spectra)
@@ -313,12 +325,14 @@ class TestFilterSpectra:
     def test_filter_removes_outliers(self):
         """Filtering should remove outlier spectra."""
         base = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        spectra = np.array([
-            base,
-            base * 1.01,  # Similar
-            base * 0.99,  # Similar
-            np.array([5.0, 4.0, 3.0, 2.0, 1.0]),  # Very different
-        ])
+        spectra = np.array(
+            [
+                base,
+                base * 1.01,  # Similar
+                base * 0.99,  # Similar
+                np.array([5.0, 4.0, 3.0, 2.0, 1.0]),  # Very different
+            ]
+        )
 
         sam = SpectralAngleMapper(threshold_sigma=2.0)
         filtered, result = sam.filter_spectra(spectra)
@@ -342,10 +356,12 @@ class TestEdgeCases:
 
     def test_two_spectra(self):
         """Two spectra should work correctly."""
-        spectra = np.array([
-            [1.0, 2.0, 3.0],
-            [3.0, 2.0, 1.0],
-        ])
+        spectra = np.array(
+            [
+                [1.0, 2.0, 3.0],
+                [3.0, 2.0, 1.0],
+            ]
+        )
         sam = SpectralAngleMapper()
         result = sam.detect_outliers(spectra)
 
@@ -637,14 +653,16 @@ class TestMADChannelMode:
     def test_clean_channels_interpolate(self):
         """Test cleaning channels with interpolation."""
         # Need more spectra for robust MAD estimation
-        spectra = np.array([
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [10.0, 20.0, 30.0, 40.0, 50.0],
-            [10.0, 20.0, 1000.0, 40.0, 50.0],  # Spike at index 2
-        ])
+        spectra = np.array(
+            [
+                [10.0, 20.0, 30.0, 40.0, 50.0],
+                [10.0, 20.0, 30.0, 40.0, 50.0],
+                [10.0, 20.0, 30.0, 40.0, 50.0],
+                [10.0, 20.0, 30.0, 40.0, 50.0],
+                [10.0, 20.0, 30.0, 40.0, 50.0],
+                [10.0, 20.0, 1000.0, 40.0, 50.0],  # Spike at index 2
+            ]
+        )
 
         cleaned, result = mad_clean_channels(spectra, threshold=2.0, replacement="interpolate")
 
@@ -786,7 +804,7 @@ class TestMADRealisticScenarios:
 
         # Add cosmic ray spikes (single channel, very high)
         spectra[2, 50] = 10000  # Cosmic ray
-        spectra[7, 30] = 8000   # Another cosmic ray
+        spectra[7, 30] = 8000  # Another cosmic ray
 
         cleaned, result = mad_clean_channels(spectra, threshold=3.0)
 
