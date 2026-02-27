@@ -713,6 +713,7 @@ class PosteriorViewer:
             Self for method chaining
         """
         samples = result.samples
+        self._samples = {}
 
         # Extract and flatten samples
         self._samples["T_eV"] = np.asarray(samples["T_eV"]).flatten()
@@ -752,6 +753,7 @@ class PosteriorViewer:
             Self for method chaining
         """
         samples = result.samples
+        self._samples = {}
 
         self._samples["T_eV"] = np.asarray(samples["T_eV"]).flatten()
         self._samples["log_ne"] = np.asarray(samples["log_ne"]).flatten()
@@ -807,21 +809,10 @@ class PosteriorViewer:
             raise ValueError("No samples loaded. Call from_*() first.")
 
         params = params or list(self._samples.keys())
-        n_params = len(params)
-        base_n = len(self._samples[params[0]]) if params else 0
-        weights: Optional[np.ndarray] = None
-        if self._weights is not None:
-            candidate = np.asarray(self._weights, dtype=float).reshape(-1)
-            if candidate.size != base_n:
-                raise ValueError(
-                    "weights length must match sample length when plotting posterior samples"
-                )
-            total_weight = float(np.sum(candidate))
-            if total_weight > 0:
-                weights = candidate / total_weight
 
-        if n_params < 1:
+        if not params:
             raise ValueError("At least one parameter required.")
+        n_params = len(params)
 
         missing = [p for p in params if p not in self._samples]
         if missing:
@@ -832,6 +823,27 @@ class PosteriorViewer:
         if empty:
             empty_str = ", ".join(sorted(empty))
             raise ValueError(f"Cannot plot empty posterior samples for parameter(s): {empty_str}")
+
+        lengths = {p: np.asarray(self._samples[p]).size for p in params}
+        unique_lengths = set(lengths.values())
+        if len(unique_lengths) != 1:
+            lengths_str = ", ".join(f"{k}={v}" for k, v in lengths.items())
+            raise ValueError(
+                "All selected posterior parameters must have equal sample length "
+                f"(got: {lengths_str})"
+            )
+
+        base_n = lengths[params[0]]
+        weights: Optional[np.ndarray] = None
+        if self._weights is not None:
+            candidate = np.asarray(self._weights, dtype=float).reshape(-1)
+            if candidate.size != base_n:
+                raise ValueError(
+                    "weights length must match sample length when plotting posterior samples"
+                )
+            total_weight = float(np.sum(candidate))
+            if total_weight > 0:
+                weights = candidate / total_weight
 
         if n_params == 1:
             # Single histogram
@@ -948,8 +960,23 @@ class PosteriorViewer:
                         idx = np.array([], dtype=int)
                     elif n_plot == n_samples:
                         idx = np.arange(n_samples)
-                    else:
+                    elif weights is None:
                         idx = np.random.choice(n_samples, n_plot, replace=False)
+                    else:
+                        positive = np.flatnonzero(weights > 0)
+                        if positive.size == 0:
+                            idx = np.random.choice(n_samples, n_plot, replace=False)
+                        elif n_plot >= positive.size:
+                            idx = positive
+                        else:
+                            sample_weights = weights[positive]
+                            sample_weights = sample_weights / np.sum(sample_weights)
+                            idx = np.random.choice(
+                                positive,
+                                n_plot,
+                                replace=False,
+                                p=sample_weights,
+                            )
 
                     fig.add_trace(
                         go.Scatter(
