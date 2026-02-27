@@ -10,11 +10,25 @@ Supports three modes:
 """
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
+from typing import Any, NoReturn
 
-import h5py
 import numpy as np
+
+
+def _error_exit(message: str, code: int = 1) -> NoReturn:
+    print(f"ERROR: {message}")
+    sys.exit(code)
+
+
+def _require_h5py() -> Any:
+    try:
+        import h5py
+    except ImportError:
+        _error_exit("h5py not available. Install h5py: pip install h5py")
+    return h5py
 
 
 def chunk_mode(
@@ -49,11 +63,17 @@ def chunk_mode(
     n_spectra_per_chunk : int
         Number of spectra to generate per chunk
     """
+    if n_chunks < 1:
+        _error_exit(f"n_chunks must be >= 1, got {n_chunks}")
+    if not (0 <= chunk_id < n_chunks):
+        _error_exit(f"chunk_id must be in range [0, {n_chunks}), got {chunk_id}")
+
+    h5py = _require_h5py()
+
     try:
         from cflibs.inversion.manifold import ManifoldGenerator  # noqa: F401
     except ImportError:
-        print("ERROR: ManifoldGenerator not available. Install cflibs first.")
-        sys.exit(1)
+        _error_exit("ManifoldGenerator not available. Install cflibs first.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,10 +119,11 @@ def consolidate_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing chunk files
     """
+    h5py = _require_h5py()
+
     chunk_files = sorted(output_dir.glob("chunk_*.h5"))
     if not chunk_files:
-        print(f"ERROR: No chunk files found in {output_dir}")
-        sys.exit(1)
+        _error_exit(f"No chunk files found in {output_dir}")
 
     print(f"Consolidating {len(chunk_files)} chunks...")
 
@@ -155,20 +176,16 @@ def build_index_mode(output_dir: Path) -> None:
     output_dir : Path
         Directory containing model_library.h5
     """
-    print("Building FAISS index...")
-    print("NOTE: Index building not yet implemented.")
-    print("This is a placeholder for future FAISS integration.")
-
     library_file = output_dir / "model_library.h5"
     if not library_file.exists():
-        print(f"ERROR: Library file not found: {library_file}")
-        sys.exit(1)
+        _error_exit(f"Library file not found: {library_file}")
 
-    # TODO: Implement FAISS index building
-    # 1. Load spectra from model_library.h5
-    # 2. Optionally apply dimensionality reduction (PCA, wavelength subset)
-    # 3. Build FAISS index (IVF or HNSW)
-    # 4. Save index to disk
+    _error_exit(
+        "FAISS index building is not implemented yet. "
+        "Planned steps: load model_library.h5, apply optional dimensionality reduction, "
+        "build FAISS IVF/HNSW index, and persist index artifacts.",
+        code=2,
+    )
 
 
 def submit_mode(
@@ -198,10 +215,16 @@ def submit_mode(
         Max concurrent array tasks (default: 20)
     """
     try:
-        from cflibs.hpc import ArrayJobConfig, SlurmJobManager
+        from cflibs.hpc import ArrayJobConfig, SlurmJobConfig, SlurmJobManager
     except ImportError:
-        print("ERROR: cflibs.hpc not available. Install cflibs first.")
-        sys.exit(1)
+        _error_exit("cflibs.hpc not available. Install cflibs first.")
+
+    if n_chunks < 1:
+        _error_exit(f"n_chunks must be >= 1, got {n_chunks}")
+    if max_concurrent < 0:
+        _error_exit(f"max_concurrent must be >= 0, got {max_concurrent}")
+    if mem_gb < 1:
+        _error_exit(f"mem_gb must be >= 1, got {mem_gb}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manager = SlurmJobManager(dry_run=False)
@@ -232,7 +255,7 @@ python {script_path} chunk \\
     print(f"Submitted chunk job: {chunk_job_id}")
 
     # Consolidation job with dependency
-    consolidate_config = ArrayJobConfig(
+    consolidate_config = SlurmJobConfig(
         job_name="cflibs_consolidate",
         partition=partition,
         cpus_per_task=1,
@@ -243,7 +266,7 @@ python {script_path} chunk \\
     )
 
     consolidate_script = f"""
-python {script_path} consolidate --output-dir {output_dir}
+python {shlex.quote(str(script_path))} consolidate --output-dir {shlex.quote(str(output_dir))}
 """
 
     print("Submitting consolidation job (depends on chunk completion)...")

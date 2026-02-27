@@ -1517,11 +1517,13 @@ class TransferLearningPipeline:
             ])
 
         if self._transfer_result is not None:
+            r2 = self._transfer_result.metrics.get("r_squared")
+            r2_text = f"{float(r2):.4f}" if r2 is not None else "N/A"
             lines.extend([
                 "Calibration Transfer:",
                 f"  Method: {self._transfer_result.method}",
                 f"  Samples: {self._transfer_result.n_transfer_samples}",
-                f"  R-squared: {self._transfer_result.metrics.get('r_squared', 'N/A'):.4f}",
+                f"  R-squared: {r2_text}",
             ])
 
         lines.append("=" * 60)

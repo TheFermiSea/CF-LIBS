@@ -5,9 +5,11 @@ Provides classes and utilities for submitting, monitoring, and managing
 SLURM jobs for CF-LIBS model spectrum generation.
 """
 
+import re
+import shlex
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -92,6 +94,13 @@ class ArrayJobConfig(SlurmJobConfig):
     array_size: int = 1
     max_concurrent: int = 0
 
+    def __post_init__(self) -> None:
+        """Validate array job configuration parameters."""
+        if self.array_size < 1:
+            raise ValueError(f"array_size must be >= 1, got {self.array_size}")
+        if self.max_concurrent < 0:
+            raise ValueError(f"max_concurrent must be >= 0, got {self.max_concurrent}")
+
 
 @dataclass
 class SlurmJobStatus:
@@ -132,8 +141,19 @@ class SlurmJobManager:
         If True, print commands instead of executing (default: False)
     """
 
-    def __init__(self, dry_run: bool = False):
+    _ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _SBATCH_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+    def __init__(self, dry_run: bool = False) -> None:
         self.dry_run = dry_run
+
+    def _validate_env_key(self, key: str) -> None:
+        if not self._ENV_KEY_PATTERN.fullmatch(key):
+            raise ValueError(f"Invalid environment variable name: {key!r}")
+
+    def _validate_sbatch_key(self, key: str) -> None:
+        if not self._SBATCH_KEY_PATTERN.fullmatch(key):
+            raise ValueError(f"Invalid SBATCH directive key: {key!r}")
 
     def generate_sbatch_script(self, config: SlurmJobConfig, script_content: str) -> str:
         """
@@ -176,20 +196,28 @@ class SlurmJobManager:
 
         # Extra SBATCH directives
         for key, value in config.extra_sbatch.items():
+            self._validate_sbatch_key(key)
+            if "\n" in value:
+                raise ValueError(f"SBATCH directive value for {key!r} must not contain newlines")
             lines.append(f"#SBATCH --{key}={value}")
 
         lines.append("")
 
         # Module loads
         for module in config.modules:
-            lines.append(f"module load {module}")
+            lines.append(f"module load {shlex.quote(module)}")
 
         if config.modules:
             lines.append("")
 
         # Environment variables
         for key, value in config.env_vars.items():
-            lines.append(f"export {key}={value}")
+            self._validate_env_key(key)
+            if "\n" in value:
+                raise ValueError(
+                    f"Environment variable value for {key!r} must not contain newlines"
+                )
+            lines.append(f"export {key}={shlex.quote(value)}")
 
         if config.env_vars:
             lines.append("")
@@ -277,25 +305,20 @@ class SlurmJobManager:
         str
             Job ID (or "DRY_RUN_<jobname>" if dry_run=True)
         """
+        if not depends_on:
+            raise ValueError("depends_on must contain at least one job ID")
+
         # Add dependency directive to extra_sbatch
-        config_copy = SlurmJobConfig(
-            job_name=config.job_name,
-            partition=config.partition,
-            nodes=config.nodes,
-            ntasks=config.ntasks,
-            cpus_per_task=config.cpus_per_task,
-            mem_gb=config.mem_gb,
-            time_limit=config.time_limit,
-            account=config.account,
-            output_path=config.output_path,
-            error_path=config.error_path,
-            extra_sbatch=config.extra_sbatch.copy(),
+        extra_sbatch_copy = config.extra_sbatch.copy()
+        dependency_str = f"{dependency_type}:" + ":".join(depends_on)
+        extra_sbatch_copy["dependency"] = dependency_str
+
+        config_copy = replace(
+            config,
+            extra_sbatch=extra_sbatch_copy,
             env_vars=config.env_vars.copy(),
             modules=config.modules.copy(),
         )
-
-        dependency_str = f"{dependency_type}:" + ":".join(depends_on)
-        config_copy.extra_sbatch["dependency"] = dependency_str
 
         return self.submit(config_copy, script_content, work_dir)
 
@@ -313,7 +336,7 @@ class SlurmJobManager:
         SlurmJobStatus
             Job status information
         """
-        if self.dry_run and job_id.startswith("DRY_RUN_"):
+        if self.dry_run:
             return SlurmJobStatus(job_id=job_id, state=SlurmJobState.COMPLETED, exit_code=0)
 
         # Try squeue first (for running/pending jobs)
@@ -426,7 +449,10 @@ class SlurmJobManager:
 
     @staticmethod
     def _run_command(
-        cmd: List[str], input_text: Optional[str] = None, cwd: Optional[str] = None
+        cmd: List[str],
+        input_text: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[int, str, str]:
         """
         Run a shell command and return (returncode, stdout, stderr).
@@ -439,6 +465,8 @@ class SlurmJobManager:
             Text to send to stdin
         cwd : Optional[str]
             Working directory
+        timeout : Optional[float]
+            Command timeout in seconds (default: None)
 
         Returns
         -------
@@ -451,6 +479,7 @@ class SlurmJobManager:
             capture_output=True,
             text=True,
             cwd=cwd,
+            timeout=timeout,
         )
         return result.returncode, result.stdout, result.stderr
 
@@ -476,9 +505,9 @@ class SlurmJobManager:
             return SlurmJobState.RUNNING
         elif "COMP" in state_upper:
             return SlurmJobState.COMPLETED
-        elif "FAIL" in state_upper:
+        elif "FAIL" in state_upper or "OUT_OF_MEMORY" in state_upper:
             return SlurmJobState.FAILED
-        elif "CANC" in state_upper:
+        elif "CANC" in state_upper or "PREEMPT" in state_upper:
             return SlurmJobState.CANCELLED
         elif "TIMEOUT" in state_upper or "TO" == state_upper:
             return SlurmJobState.TIMEOUT
