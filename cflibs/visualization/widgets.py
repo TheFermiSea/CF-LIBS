@@ -25,6 +25,7 @@ Install with: pip install cflibs[widgets]
 from __future__ import annotations
 
 from html import escape as html_escape
+import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import numpy as np
 
@@ -56,11 +57,38 @@ except ImportError:
     make_subplots = None  # type: ignore[assignment]
 
 HAS_WIDGETS = HAS_IPYWIDGETS and HAS_PLOTLY
+_SAFE_COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20})$")
 
 
 def _escape_html(value: Any) -> str:
     """Escape dynamic values rendered via widgets.HTML."""
     return html_escape(str(value), quote=True)
+
+
+def _sanitize_css_color(value: Any, default: str = "#1f77b4") -> str:
+    """Allow simple CSS color tokens and reject unsafe style fragments."""
+    text = str(value).strip()
+    return text if _SAFE_COLOR_RE.fullmatch(text) else default
+
+
+def _weighted_percentiles(
+    samples: np.ndarray, weights: Optional[np.ndarray], percentiles: np.ndarray
+) -> np.ndarray:
+    """Compute weighted percentiles; falls back to unweighted when weights are absent."""
+    if weights is None:
+        return np.percentile(samples, percentiles)
+
+    if samples.size == 0:
+        return np.array([np.nan] * len(percentiles), dtype=float)
+
+    sorter = np.argsort(samples)
+    sorted_samples = samples[sorter]
+    sorted_weights = weights[sorter]
+    cdf = np.cumsum(sorted_weights)
+    if cdf[-1] <= 0:
+        return np.percentile(samples, percentiles)
+    cdf = cdf / cdf[-1]
+    return np.interp(percentiles / 100.0, cdf, sorted_samples)
 
 
 def _require_widgets() -> None:
@@ -152,10 +180,20 @@ class SpectrumViewer:
         SpectrumViewer
             Self for method chaining
         """
+        wavelength_arr = np.asarray(wavelength)
+        intensity_arr = np.asarray(intensity)
+
+        if wavelength_arr.ndim != 1 or intensity_arr.ndim != 1:
+            raise ValueError("wavelength and intensity must be 1D arrays")
+        if wavelength_arr.shape != intensity_arr.shape:
+            raise ValueError("wavelength and intensity must have matching shapes")
+        if wavelength_arr.size == 0:
+            raise ValueError("wavelength and intensity must not be empty")
+
         self._spectra.append(
             {
-                "wavelength": np.asarray(wavelength),
-                "intensity": np.asarray(intensity),
+                "wavelength": wavelength_arr,
+                "intensity": intensity_arr,
                 "label": label,
                 "color": color,
                 "line_width": line_width,
@@ -403,6 +441,9 @@ class BoltzmannPlotWidget:
 
         obs = self._observations
         result = self._result
+
+        if len(obs) == 0:
+            raise ValueError("No observations provided. Call plot() with at least one line.")
 
         # Extract data
         x_all = np.array([o.E_k_ev for o in obs])
@@ -767,6 +808,17 @@ class PosteriorViewer:
 
         params = params or list(self._samples.keys())
         n_params = len(params)
+        base_n = len(self._samples[params[0]]) if params else 0
+        weights: Optional[np.ndarray] = None
+        if self._weights is not None:
+            candidate = np.asarray(self._weights, dtype=float).reshape(-1)
+            if candidate.size != base_n:
+                raise ValueError(
+                    "weights length must match sample length when plotting posterior samples"
+                )
+            total_weight = float(np.sum(candidate))
+            if total_weight > 0:
+                weights = candidate / total_weight
 
         if n_params < 1:
             raise ValueError("At least one parameter required.")
@@ -787,17 +839,31 @@ class PosteriorViewer:
             p = params[0]
             samples = self._samples[p]
 
-            fig.add_trace(
-                go.Histogram(
-                    x=samples,
-                    name=self._param_labels.get(p, p),
-                    opacity=0.7,
-                    nbinsx=50,
+            if weights is None:
+                fig.add_trace(
+                    go.Histogram(
+                        x=samples,
+                        name=self._param_labels.get(p, p),
+                        opacity=0.7,
+                        nbinsx=50,
+                    )
                 )
-            )
+            else:
+                counts, edges = np.histogram(samples, bins=50, weights=weights)
+                centers = 0.5 * (edges[:-1] + edges[1:])
+                fig.add_trace(
+                    go.Bar(
+                        x=centers,
+                        y=counts,
+                        name=self._param_labels.get(p, p),
+                        opacity=0.7,
+                    )
+                )
 
             # Add credible interval lines
-            q025, q50, q975 = np.percentile(samples, [2.5, 50, 97.5])
+            q025, q50, q975 = _weighted_percentiles(
+                np.asarray(samples, dtype=float), weights, np.array([2.5, 50.0, 97.5])
+            )
             for q, style in [(q025, "dot"), (q50, "solid"), (q975, "dot")]:
                 fig.add_vline(x=q, line_dash=style, line_color="red")
 
@@ -829,20 +895,37 @@ class PosteriorViewer:
                 if i == j:
                     # Diagonal: 1D histogram
                     samples = self._samples[pi]
-                    fig.add_trace(
-                        go.Histogram(
-                            x=samples,
-                            nbinsx=30,
-                            showlegend=False,
-                            marker_color="#1f77b4",
-                            opacity=0.7,
-                        ),
-                        row=row,
-                        col=col,
-                    )
+                    if weights is None:
+                        fig.add_trace(
+                            go.Histogram(
+                                x=samples,
+                                nbinsx=30,
+                                showlegend=False,
+                                marker_color="#1f77b4",
+                                opacity=0.7,
+                            ),
+                            row=row,
+                            col=col,
+                        )
+                    else:
+                        counts, edges = np.histogram(samples, bins=30, weights=weights)
+                        centers = 0.5 * (edges[:-1] + edges[1:])
+                        fig.add_trace(
+                            go.Bar(
+                                x=centers,
+                                y=counts,
+                                showlegend=False,
+                                marker_color="#1f77b4",
+                                opacity=0.7,
+                            ),
+                            row=row,
+                            col=col,
+                        )
 
                     # Add credible interval lines
-                    q025, q50, q975 = np.percentile(samples, [2.5, 50, 97.5])
+                    q025, q50, q975 = _weighted_percentiles(
+                        np.asarray(samples, dtype=float), weights, np.array([2.5, 50.0, 97.5])
+                    )
                     for q, dash in [(q025, "dot"), (q50, "solid"), (q975, "dot")]:
                         fig.add_vline(
                             x=q,
@@ -1088,13 +1171,14 @@ class QualityDashboard:
         color: str = "#1f77b4",
     ) -> "widgets.VBox":
         """Create a styled metric card widget."""
+        safe_color = _sanitize_css_color(color)
         title_text = _escape_html(title)
         value_text = _escape_html(value)
         title_label = widgets.HTML(
             f"<div style='color: #666; font-size: 12px; margin-bottom: 2px;'>{title_text}</div>"
         )
         value_label = widgets.HTML(
-            f"<div style='color: {color}; font-size: 24px; font-weight: bold;'>{value_text}</div>"
+            f"<div style='color: {safe_color}; font-size: 24px; font-weight: bold;'>{value_text}</div>"
         )
         children = [title_label, value_label]
 
@@ -1247,7 +1331,10 @@ class QualityDashboard:
                 diag_html += f"<tr><td style='padding: 8px;'>{safe_param}</td>"
                 diag_html += f"<td style='padding: 8px; text-align: right;'>{rhat:.3f}</td>"
                 diag_html += f"<td style='padding: 8px; text-align: right;'>{ess_val:.0f}</td>"
-                diag_html += f"<td style='padding: 8px; text-align: center; color: {status_color};'>{status_icon}</td>"
+                diag_html += (
+                    f"<td style='padding: 8px; text-align: center; color: {status_color};'>"
+                    f"{status_icon}</td>"
+                )
                 diag_html += "</tr>"
 
             diag_html += "</table>"
