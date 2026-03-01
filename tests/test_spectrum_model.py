@@ -8,6 +8,8 @@ from cflibs.plasma import SingleZoneLTEPlasma
 from cflibs.instrument import InstrumentModel
 from cflibs.radiation import SpectrumModel
 
+pytestmark = pytest.mark.requires_db
+
 
 def test_spectrum_model_init(atomic_db, sample_plasma):
     """Test initializing spectrum model."""

@@ -81,7 +81,7 @@ TEMPERATURES_K = [5000, 10000, 15000, 20000]
 def verify_element(
     solver: SahaBoltzmannSolver,
     element: str,
-) -> dict[str, dict]:
+) -> dict[int, dict]:
     """Compare partition functions for one element."""
     ref = NIST_PARTITION_FUNCTIONS.get(element, {})
     if not ref:
