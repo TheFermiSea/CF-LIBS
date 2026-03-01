@@ -5,6 +5,7 @@ Includes Gaussian, Lorentzian, and Voigt profiles.
 
 import numpy as np
 import warnings
+from enum import Enum
 from typing import Union, Callable
 
 try:
@@ -32,6 +33,85 @@ from cflibs.core.constants import C_LIGHT, EV_TO_J
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("radiation.profiles")
+
+
+class BroadeningMode(str, Enum):
+    """
+    Broadening mode for spectrum computation.
+
+    LEGACY : Original behavior — single scalar sigma for all lines,
+        plus separate downstream instrument convolution.
+    NIST_PARITY : Per-line Gaussian sigma from resolving power R,
+        sigma = lambda / (R * 2.355). No downstream convolution
+        (broadening is fully captured in the per-line profile).
+    PHYSICAL_DOPPLER : Per-line physical Doppler width via doppler_width(),
+        with downstream instrument convolution still applied.
+    """
+
+    LEGACY = "legacy"
+    NIST_PARITY = "nist_parity"
+    PHYSICAL_DOPPLER = "physical_doppler"
+
+
+def resolving_power_sigma(wavelength_nm: float, resolving_power: float) -> float:
+    """
+    Compute Gaussian sigma from spectrometer resolving power.
+
+    NIST LIBS simulation defines Resolution = R = lambda / FWHM,
+    so FWHM = lambda / R and sigma = FWHM / 2.355.
+
+    Parameters
+    ----------
+    wavelength_nm : float
+        Wavelength in nm
+    resolving_power : float
+        Resolving power R = lambda / FWHM (dimensionless)
+
+    Returns
+    -------
+    float
+        Gaussian standard deviation in nm
+    """
+    fwhm = wavelength_nm / resolving_power
+    return fwhm / 2.355
+
+
+def apply_gaussian_broadening_per_line(
+    wavelength_grid: np.ndarray,
+    line_wavelengths: np.ndarray,
+    line_intensities: np.ndarray,
+    sigmas: np.ndarray,
+) -> np.ndarray:
+    """
+    Apply Gaussian broadening with a per-line sigma array.
+
+    Each line is broadened with its own Gaussian width, allowing
+    wavelength-dependent broadening (e.g., from resolving power or
+    physical Doppler width).
+
+    Parameters
+    ----------
+    wavelength_grid : array
+        Wavelength grid in nm
+    line_wavelengths : array
+        Line center wavelengths in nm
+    line_intensities : array
+        Line intensities (integrated area)
+    sigmas : array
+        Per-line Gaussian standard deviations in nm
+
+    Returns
+    -------
+    array
+        Broadened spectrum
+    """
+    spectrum = np.zeros_like(wavelength_grid)
+
+    for wl, intensity, sig in zip(line_wavelengths, line_intensities, sigmas):
+        profile = gaussian_profile(wavelength_grid, wl, sig, intensity)
+        spectrum += profile
+
+    return spectrum
 
 
 def _raise_jax_missing() -> None:

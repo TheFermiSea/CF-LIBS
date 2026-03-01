@@ -3,7 +3,7 @@ Line emissivity calculations.
 """
 
 import numpy as np
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Union
 
 from cflibs.core.constants import H_PLANCK, C_LIGHT
 from cflibs.atomic.structures import Transition
@@ -56,7 +56,7 @@ def calculate_spectrum_emissivity(
     transitions: List[Transition],
     populations: Dict[Tuple[str, int, float], float],
     wavelength_grid: np.ndarray,
-    sigma_nm: float,
+    sigma_nm: Union[float, np.ndarray],
     use_jax: bool = False,
 ) -> np.ndarray:
     """
@@ -70,8 +70,10 @@ def calculate_spectrum_emissivity(
         Level populations from Saha-Boltzmann solver
     wavelength_grid : array
         Wavelength grid in nm
-    sigma_nm : float
-        Gaussian broadening width (standard deviation) in nm
+    sigma_nm : float or array
+        Gaussian broadening width (standard deviation) in nm.
+        If array, must match the number of transitions with valid
+        populations (per-line broadening).
     use_jax : bool
         Use JAX acceleration for broadening when available
 
@@ -80,7 +82,10 @@ def calculate_spectrum_emissivity(
     array
         Spectral emissivity in W m^-3 nm^-1
     """
-    from cflibs.radiation.profiles import apply_gaussian_broadening
+    from cflibs.radiation.profiles import (
+        apply_gaussian_broadening,
+        apply_gaussian_broadening_per_line,
+    )
 
     line_wavelengths = []
     line_emissivities = []
@@ -102,12 +107,11 @@ def calculate_spectrum_emissivity(
     if not line_wavelengths:
         return np.zeros_like(wavelength_grid)
 
-    # Apply Gaussian broadening
-    line_wavelengths = np.array(line_wavelengths)
-    line_emissivities = np.array(line_emissivities)
+    line_wavelengths_arr = np.array(line_wavelengths)
+    line_emissivities_arr = np.array(line_emissivities)
 
-    # Convert to spectral emissivity (per nm)
-    # The Gaussian profile integrates to 1, so we just need to scale by line intensity
+    is_per_line = isinstance(sigma_nm, np.ndarray) and sigma_nm.ndim >= 1
+
     if use_jax:
         try:
             import jax.numpy as jnp
@@ -117,14 +121,19 @@ def calculate_spectrum_emissivity(
 
         spectrum = apply_gaussian_broadening_jax(
             jnp.asarray(wavelength_grid),
-            jnp.asarray(line_wavelengths),
-            jnp.asarray(line_emissivities),
-            float(sigma_nm),
+            jnp.asarray(line_wavelengths_arr),
+            jnp.asarray(line_emissivities_arr),
+            float(sigma_nm) if not is_per_line else float(np.mean(sigma_nm)),
         )
         return np.array(spectrum)
 
-    spectrum = apply_gaussian_broadening(
-        wavelength_grid, line_wavelengths, line_emissivities, sigma_nm
-    )
+    if is_per_line:
+        spectrum = apply_gaussian_broadening_per_line(
+            wavelength_grid, line_wavelengths_arr, line_emissivities_arr, sigma_nm
+        )
+    else:
+        spectrum = apply_gaussian_broadening(
+            wavelength_grid, line_wavelengths_arr, line_emissivities_arr, float(sigma_nm)
+        )
 
     return spectrum

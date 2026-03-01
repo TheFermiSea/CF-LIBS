@@ -191,5 +191,38 @@ def test_solve_plasma_temperature_dependence(atomic_db):
     assert pop1 != pop2
 
 
+# --- Ionization Fraction Diagnostic Tests ---
+
+
+def test_get_ionization_fractions(atomic_db):
+    """Test get_ionization_fractions returns valid fractions."""
+    solver = SahaBoltzmannSolver(atomic_db)
+
+    fractions = solver.get_ionization_fractions("Fe", T_e_eV=0.8, n_e_cm3=1e17)
+
+    assert isinstance(fractions, dict)
+    assert len(fractions) >= 2  # At least neutral + singly ionized
+
+    # Fractions should sum to 1
+    total = sum(fractions.values())
+    assert total == pytest.approx(1.0, rel=1e-6)
+
+    # All fractions between 0 and 1
+    for stage, frac in fractions.items():
+        assert 0.0 <= frac <= 1.0, f"Stage {stage} fraction {frac} out of range"
+
+
+def test_get_ionization_fractions_temperature_dependence(atomic_db):
+    """Test that ion fractions shift with temperature."""
+    solver = SahaBoltzmannSolver(atomic_db)
+
+    fracs_low = solver.get_ionization_fractions("Fe", T_e_eV=0.5, n_e_cm3=1e17)
+    fracs_high = solver.get_ionization_fractions("Fe", T_e_eV=1.5, n_e_cm3=1e17)
+
+    # Higher T should have more ionization (lower neutral fraction)
+    assert fracs_high[1] < fracs_low[1]  # Less neutral at higher T
+    assert fracs_high[2] > fracs_low[2]  # More singly ionized at higher T
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

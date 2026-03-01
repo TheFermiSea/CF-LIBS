@@ -143,5 +143,53 @@ def test_apply_instrument_function_preserves_integral():
     assert abs(convolved_integral - original_integral) / original_integral < 0.05
 
 
+# --- Resolving Power Mode Tests ---
+
+
+def test_instrument_model_from_resolving_power():
+    """Test creating instrument model from resolving power."""
+    instrument = InstrumentModel.from_resolving_power(1000)
+    assert instrument.resolving_power == 1000
+    assert instrument.is_resolving_power_mode is True
+    assert instrument.resolution_fwhm_nm == 0.0
+
+
+def test_instrument_model_is_resolving_power_mode_false():
+    """Test that default instrument model is not in resolving power mode."""
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+    assert instrument.is_resolving_power_mode is False
+
+
+def test_instrument_model_sigma_at_wavelength_resolving_power():
+    """Test sigma_at_wavelength in resolving power mode."""
+    R = 1000
+    instrument = InstrumentModel.from_resolving_power(R)
+
+    # At 500 nm: FWHM = 500/1000 = 0.5 nm, sigma = 0.5/2.355
+    sigma = instrument.sigma_at_wavelength(500.0)
+    expected = 500.0 / R / 2.355
+    assert sigma == pytest.approx(expected, rel=1e-6)
+
+    # At 250 nm: sigma should be half (proportional to wavelength)
+    sigma_250 = instrument.sigma_at_wavelength(250.0)
+    assert sigma_250 == pytest.approx(sigma / 2.0, rel=1e-6)
+
+
+def test_instrument_model_sigma_at_wavelength_fixed_fwhm():
+    """Test sigma_at_wavelength falls back to fixed FWHM."""
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+    sigma = instrument.sigma_at_wavelength(500.0)
+    assert sigma == pytest.approx(0.05 / 2.355, rel=1e-6)
+
+
+def test_instrument_model_backward_compat():
+    """Test that old-style construction still works."""
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+    assert instrument.resolution_fwhm_nm == 0.05
+    assert instrument.resolution_sigma_nm == pytest.approx(0.05 / 2.355, rel=1e-6)
+    assert instrument.resolving_power is None
+    assert instrument.is_resolving_power_mode is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

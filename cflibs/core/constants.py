@@ -65,7 +65,11 @@ EV_TO_K = 1.0 / K_TO_EV
 
 # Saha equation constant (pre-factor)
 # n_{z+1} * n_e / n_z = (2π m_e k_B T / h^2)^(3/2) * (2 U_{z+1} / U_z) * exp(-χ/kT)
-# The constant (2π m_e k_B / h^2)^(3/2) in cm^-3 units
+# The constant (2π m_e k_B / h^2)^(3/2) in cm^-3 units.
+# NOTE: The factor of 2 for electron spin degeneracy (g_e = 2) is INCLUDED in this
+# value.  The partition function ratio U_{z+1}/U_z used with this constant should NOT
+# contain an additional factor of 2 for the free electron.
+# Derivation: (2π × 9.109e-31 × 1.381e-23 / (6.626e-34)^2)^{3/2} × 2 × 1e-6 ≈ 6.04e21
 SAHA_CONST_CM3 = 6.042e21  # cm^-3 (at T=1 K, but scales as T^1.5)
 
 # McWhirter criterion constant for LTE validity

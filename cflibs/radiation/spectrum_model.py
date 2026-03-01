@@ -3,13 +3,18 @@ Forward spectrum model that ties together all components.
 """
 
 import numpy as np
-from typing import Tuple
+from typing import Optional, Tuple
 
 from cflibs.plasma.state import SingleZoneLTEPlasma
 from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.instrument.model import InstrumentModel
 from cflibs.radiation.emissivity import calculate_spectrum_emissivity
+from cflibs.radiation.profiles import (
+    BroadeningMode,
+    doppler_width,
+    resolving_power_sigma,
+)
 from cflibs.instrument.convolution import apply_instrument_function
 from cflibs.core.logging_config import get_logger
 
@@ -37,6 +42,7 @@ class SpectrumModel:
         delta_lambda: float,
         path_length_m: float = 0.01,  # 1 cm default
         use_jax: bool = False,
+        broadening_mode: BroadeningMode = BroadeningMode.LEGACY,
     ):
         """
         Initialize spectrum model.
@@ -59,7 +65,19 @@ class SpectrumModel:
             Plasma path length in meters (for optically thin approximation)
         use_jax : bool
             Use JAX acceleration for broadening when available
+        broadening_mode : BroadeningMode
+            Broadening mode. LEGACY uses a single scalar sigma plus
+            downstream instrument convolution. NIST_PARITY uses per-line
+            sigma from resolving power (no downstream convolution).
+            PHYSICAL_DOPPLER uses per-line physical Doppler width plus
+            downstream instrument convolution.
         """
+        if broadening_mode == BroadeningMode.NIST_PARITY and not instrument.is_resolving_power_mode:
+            raise ValueError(
+                "NIST_PARITY broadening mode requires InstrumentModel with resolving_power set. "
+                "Use InstrumentModel.from_resolving_power(R) or set resolving_power field."
+            )
+
         self.plasma = plasma
         self.atomic_db = atomic_db
         self.instrument = instrument
@@ -68,6 +86,7 @@ class SpectrumModel:
         self.delta_lambda = delta_lambda
         self.path_length_m = path_length_m
         self.use_jax = use_jax
+        self.broadening_mode = broadening_mode
 
         # Create wavelength grid
         self.wavelength = np.arange(lambda_min, lambda_max + delta_lambda, delta_lambda)
@@ -77,8 +96,74 @@ class SpectrumModel:
 
         logger.info(
             f"Initialized SpectrumModel: λ=[{lambda_min:.1f}, {lambda_max:.1f}] nm, "
-            f"Δλ={delta_lambda:.3f} nm, {len(self.wavelength)} points"
+            f"Δλ={delta_lambda:.3f} nm, {len(self.wavelength)} points, "
+            f"mode={broadening_mode.value}"
         )
+
+    def _get_element_mass(self, element: str) -> float:
+        """Get atomic mass for an element, with fallback."""
+        mass = self.atomic_db.get_atomic_mass(element)
+        if mass is not None:
+            return mass
+        # Fallback to common values
+        _FALLBACK_MASSES = {
+            "H": 1.008,
+            "He": 4.003,
+            "Li": 6.941,
+            "Be": 9.012,
+            "B": 10.81,
+            "C": 12.01,
+            "N": 14.01,
+            "O": 16.00,
+            "Na": 22.99,
+            "Mg": 24.31,
+            "Al": 26.98,
+            "Si": 28.09,
+            "P": 30.97,
+            "S": 32.07,
+            "K": 39.10,
+            "Ca": 40.08,
+            "Ti": 47.87,
+            "V": 50.94,
+            "Cr": 52.00,
+            "Mn": 54.94,
+            "Fe": 55.85,
+            "Co": 58.93,
+            "Ni": 58.69,
+            "Cu": 63.55,
+            "Zn": 65.38,
+            "Sr": 87.62,
+            "Ba": 137.33,
+            "W": 183.84,
+        }
+        return _FALLBACK_MASSES.get(element, 50.0)
+
+    def _compute_sigma_per_line(self, transitions: list, populations: dict) -> Optional[np.ndarray]:
+        """
+        Compute per-line Gaussian sigma array based on broadening mode.
+
+        Returns None for LEGACY mode (use scalar sigma instead).
+        """
+        if self.broadening_mode == BroadeningMode.LEGACY:
+            return None
+
+        # Collect sigmas only for transitions that have populations
+        sigmas = []
+        for trans in transitions:
+            key = (trans.element, trans.ionization_stage, trans.E_k_ev)
+            if key not in populations:
+                continue
+
+            if self.broadening_mode == BroadeningMode.NIST_PARITY:
+                sig = resolving_power_sigma(trans.wavelength_nm, self.instrument.resolving_power)
+            else:  # PHYSICAL_DOPPLER
+                mass = self._get_element_mass(trans.element)
+                fwhm = doppler_width(trans.wavelength_nm, self.plasma.T_e_eV, mass)
+                sig = fwhm / 2.355
+
+            sigmas.append(sig)
+
+        return np.array(sigmas) if sigmas else np.array([])
 
     def compute_spectrum(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -112,16 +197,16 @@ class SpectrumModel:
 
         logger.debug(f"Found {len(all_transitions)} transitions")
 
-        # 3. Calculate line emissivity
-        logger.debug("Calculating line emissivity...")
-        # Use Doppler broadening for now (Gaussian only in Phase 1)
-        # Approximate sigma from temperature
-        T_eV = self.plasma.T_e_eV
-        # Rough estimate: sigma ~ 0.01 nm for typical conditions
-        # Note: Proper Doppler width calculation will be implemented in Phase 2
-        # For now, use a simple temperature-dependent estimate
-        # Typical Doppler width: ~0.01 nm at 10000 K for medium-mass elements
-        sigma_nm = 0.01 * np.sqrt(T_eV / 0.86)  # Scale with sqrt(T) in eV
+        # 3. Calculate line emissivity with mode-dependent broadening
+        logger.debug(f"Calculating line emissivity (mode={self.broadening_mode.value})...")
+
+        if self.broadening_mode == BroadeningMode.LEGACY:
+            # Original behavior: single scalar sigma
+            T_eV = self.plasma.T_e_eV
+            sigma_nm = 0.01 * np.sqrt(T_eV / 0.86)
+        else:
+            # Per-line sigma array
+            sigma_nm = self._compute_sigma_per_line(all_transitions, populations)
 
         emissivity = calculate_spectrum_emissivity(
             all_transitions, populations, self.wavelength, sigma_nm, use_jax=self.use_jax
@@ -136,17 +221,22 @@ class SpectrumModel:
             intensity = self.instrument.apply_response(self.wavelength, intensity)
 
         # 6. Apply instrument function (convolution)
-        logger.debug("Applying instrument function...")
-        if self.use_jax:
-            from cflibs.instrument.convolution import apply_instrument_function_jax
+        # NIST_PARITY: broadening is fully captured in per-line profiles, skip convolution
+        # LEGACY and PHYSICAL_DOPPLER: apply downstream instrument convolution
+        if self.broadening_mode != BroadeningMode.NIST_PARITY:
+            logger.debug("Applying instrument function...")
+            if self.use_jax:
+                from cflibs.instrument.convolution import apply_instrument_function_jax
 
-            intensity = apply_instrument_function_jax(
-                self.wavelength, intensity, self.instrument.resolution_sigma_nm
-            )
+                intensity = apply_instrument_function_jax(
+                    self.wavelength, intensity, self.instrument.resolution_sigma_nm
+                )
+            else:
+                intensity = apply_instrument_function(
+                    self.wavelength, intensity, self.instrument.resolution_sigma_nm
+                )
         else:
-            intensity = apply_instrument_function(
-                self.wavelength, intensity, self.instrument.resolution_sigma_nm
-            )
+            logger.debug("Skipping instrument convolution (NIST_PARITY mode)")
 
         logger.info("Spectrum computation complete")
 
