@@ -127,7 +127,7 @@ def apply_gaussian_broadening_per_line(
     if len(sigmas) > 0 and np.any(np.asarray(sigmas) <= 0):
         raise ValueError("All per-line sigma values must be > 0")
 
-    spectrum = np.zeros_like(wavelength_grid)
+    spectrum = np.zeros_like(wavelength_grid, dtype=float)
 
     for wl, intensity, sig in zip(line_wavelengths, line_intensities, sigmas):
         profile = gaussian_profile(wavelength_grid, wl, sig, intensity)

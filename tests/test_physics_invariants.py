@@ -102,7 +102,7 @@ class TestIonizationBalance:
     def test_higher_T_more_ionization(self, solver):
         f_low = solver.get_ionization_fractions("Fe", 0.5, 1e17)
         f_high = solver.get_ionization_fractions("Fe", 2.0, 1e17)
-        assert f_high.get(1, 0) < f_low.get(1, 1), (
+        assert f_high.get(1, 0) < f_low.get(1, 0), (
             f"Neutral fraction should decrease: "
             f"f@0.5eV={f_low.get(1,0):.4f}, f@2.0eV={f_high.get(1,0):.4f}"
         )
