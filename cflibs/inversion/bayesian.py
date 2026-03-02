@@ -102,6 +102,7 @@ from cflibs.core.constants import (
     C_LIGHT,
     EV_TO_K,
     EV_TO_J,
+    MCWHIRTER_CONST,
 )
 from cflibs.core.logging_config import get_logger
 
@@ -155,6 +156,8 @@ except ImportError:
 # Physical constants
 H_PLANCK = 6.626e-34  # Planck constant [J·s]
 M_PROTON = 1.6726219e-27  # Proton mass [kg]
+E_CHARGE = 1.602e-19  # Elementary charge [C]
+M_ELECTRON = 9.109e-31  # Electron mass [kg]
 
 # Standard atomic masses for fallback [amu]
 STANDARD_MASSES = {
@@ -191,6 +194,240 @@ STANDARD_MASSES = {
 }
 
 
+# ============================================================================
+# Module-level shared utilities
+# ============================================================================
+
+
+def load_atomic_data(
+    db_path: str,
+    elements: List[str],
+    wavelength_range: Tuple[float, float],
+) -> "AtomicDataArrays":
+    """Load atomic data from database into JAX arrays.
+
+    This is a module-level utility shared by both ``BayesianForwardModel`` and
+    ``TwoZoneBayesianForwardModel``.
+
+    Parameters
+    ----------
+    db_path : str
+        Path to the SQLite atomic database.
+    elements : list of str
+        Elements to include (e.g. ``["Fe", "Cu"]``).
+    wavelength_range : tuple of float
+        ``(wl_min, wl_max)`` in nm.
+
+    Returns
+    -------
+    AtomicDataArrays
+        Arrays ready for JAX computation.
+    """
+    if not HAS_JAX:
+        raise ImportError("JAX required. Install with: pip install jax jaxlib")
+
+    import pandas as pd
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+
+    placeholders = ",".join(["?"] * len(elements))
+    query = f"""
+        SELECT
+            l.element, l.sp_num, l.wavelength_nm, l.aki, l.ek_ev, l.gk,
+            sp.ip_ev, l.stark_w, l.stark_alpha
+        FROM lines l
+        JOIN species_physics sp ON l.element = sp.element AND l.sp_num = sp.sp_num
+        WHERE l.wavelength_nm BETWEEN ? AND ?
+        AND l.element IN ({placeholders})
+        ORDER BY l.wavelength_nm
+    """
+    params = [wavelength_range[0], wavelength_range[1]] + list(elements)
+    df = pd.read_sql_query(query, conn, params=params)
+
+    if df.empty:
+        raise ValueError(
+            f"No atomic data for elements {elements} in range {wavelength_range}"
+        )
+
+    el_map = {el: i for i, el in enumerate(elements)}
+    df["el_idx"] = df["element"].map(el_map)
+
+    element_masses = {}
+    for el in elements:
+        if el in STANDARD_MASSES:
+            element_masses[el] = STANDARD_MASSES[el]
+        else:
+            element_masses[el] = 50.0
+            logger.warning(f"No mass for {el}, using fallback 50 amu")
+    df["mass_amu"] = df["element"].map(element_masses)
+
+    max_stages = 3
+    n_elements = len(elements)
+    coeffs = np.zeros((n_elements, max_stages, 5), dtype=np.float32)
+    ips = np.zeros((n_elements, max_stages), dtype=np.float32)
+
+    coeffs[:, 0, 0] = np.log(25.0)
+    coeffs[:, 1, 0] = np.log(15.0)
+    coeffs[:, 2, 0] = np.log(10.0)
+
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"SELECT element, sp_num, ip_ev FROM species_physics "
+            f"WHERE element IN ({placeholders})",
+            elements,
+        )
+        for row in cursor.fetchall():
+            el, sp_num, ip_ev = row
+            if el in el_map and ip_ev is not None:
+                el_idx = el_map[el]
+                stage_idx = sp_num - 1
+                if 0 <= stage_idx < max_stages:
+                    ips[el_idx, stage_idx] = ip_ev
+
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='partition_functions'"
+        )
+        if cursor.fetchone():
+            cursor.execute(
+                f"SELECT element, sp_num, a0, a1, a2, a3, a4 "
+                f"FROM partition_functions WHERE element IN ({placeholders})",
+                elements,
+            )
+            for row in cursor.fetchall():
+                el, sp_num, a0, a1, a2, a3, a4 = row
+                if el in el_map:
+                    el_idx = el_map[el]
+                    stage_idx = sp_num - 1
+                    if 0 <= stage_idx < max_stages:
+                        coeffs[el_idx, stage_idx] = [a0, a1, a2, a3, a4]
+    except Exception as e:
+        logger.warning(f"Failed to load physics data: {e}")
+    finally:
+        conn.close()
+
+    stark_w_raw = df["stark_w"].fillna(float("nan")).values
+    stark_alpha_raw = df["stark_alpha"].fillna(0.5).values
+
+    # Also compute lower-level energy and oscillator strength for absorption
+    # (needed by two-zone model optical depth calculation)
+    # E_i is approximated as E_k - hc/λ (in eV)
+    wavelength_m = df["wavelength_nm"].values * 1e-9
+    ek_ev_vals = df["ek_ev"].values
+    # ΔE = hc/λ in eV
+    delta_e_ev = (H_PLANCK * C_LIGHT / wavelength_m) / EV_TO_J
+    ei_ev_vals = np.maximum(ek_ev_vals - delta_e_ev, 0.0)
+
+    # Oscillator strength from Einstein A: f = (m_e c λ² / 8π² e²) × (g_k/g_i) × A_ki
+    # Simplified: f ≈ 1.499e-16 × λ_nm² × (g_k/g_i) × A_ki
+    gk_vals = df["gk"].values.astype(float)
+    aki_vals = df["aki"].values.astype(float)
+    # Assume g_i ≈ g_k for now (conservative); exact g_i not in DB
+    f_osc = 1.499e-16 * df["wavelength_nm"].values ** 2 * aki_vals
+
+    return AtomicDataArrays(
+        wavelength_nm=jnp.array(df["wavelength_nm"].values, dtype=jnp.float32),
+        aki=jnp.array(aki_vals, dtype=jnp.float32),
+        ek_ev=jnp.array(ek_ev_vals, dtype=jnp.float32),
+        gk=jnp.array(gk_vals, dtype=jnp.float32),
+        ip_ev=jnp.array(df["ip_ev"].values, dtype=jnp.float32),
+        ion_stage=jnp.array(df["sp_num"].values - 1, dtype=jnp.int32),
+        element_idx=jnp.array(df["el_idx"].values, dtype=jnp.int32),
+        stark_w=jnp.array(stark_w_raw, dtype=jnp.float32),
+        stark_alpha=jnp.array(stark_alpha_raw, dtype=jnp.float32),
+        mass_amu=jnp.array(df["mass_amu"].values, dtype=jnp.float32),
+        partition_coeffs=jnp.array(coeffs, dtype=jnp.float32),
+        ionization_potentials=jnp.array(ips, dtype=jnp.float32),
+        elements=list(elements),
+        ei_ev=jnp.array(ei_ev_vals, dtype=jnp.float32),
+        f_osc=jnp.array(f_osc, dtype=jnp.float32),
+    )
+
+
+def partition_function(T_K: float, coeffs) -> Any:
+    """Evaluate polynomial partition function (JAX-compatible).
+
+    ``log(U) = \\sum_i a_i (\\log T)^i``  (Irwin form)
+
+    Parameters
+    ----------
+    T_K : float
+        Temperature in Kelvin.
+    coeffs : array-like
+        Polynomial coefficients, shape ``(..., 5)``.
+
+    Returns
+    -------
+    array
+        Partition function value ``U(T)``.
+    """
+    if HAS_JAX:
+        log_T = jnp.log(T_K)
+        powers = jnp.array([1.0, log_T, log_T**2, log_T**3, log_T**4])
+        log_U = jnp.sum(coeffs * powers, axis=-1)
+        return jnp.exp(log_U)
+    else:
+        log_T = np.log(T_K)
+        powers = np.array([1.0, log_T, log_T**2, log_T**3, log_T**4])
+        log_U = np.sum(np.asarray(coeffs) * powers, axis=-1)
+        return np.exp(log_U)
+
+
+def mcwhirter_log_penalty(
+    T_eV: float,
+    log_ne: float,
+    max_delta_E_eV: float = 3.0,
+    scale: float = 10.0,
+) -> float:
+    """Soft McWhirter criterion penalty for LTE validity.
+
+    Returns a smooth, differentiable log-penalty that is zero when the
+    electron density satisfies the McWhirter criterion and becomes
+    increasingly negative when it is violated.
+
+    The McWhirter criterion requires:
+
+    .. math::
+
+        n_e \\geq 1.6 \\times 10^{12} \\, T^{1/2} \\, (\\Delta E)^3
+
+    where *T* is in Kelvin and *ΔE* is the maximum energy gap in eV.
+
+    Parameters
+    ----------
+    T_eV : float
+        Plasma temperature in eV.
+    log_ne : float
+        ``log_{10}(n_e)`` with *n_e* in cm⁻³.
+    max_delta_E_eV : float
+        Largest energy gap to enforce (default 3.0 eV).
+    scale : float
+        Penalty strength (default 10.0).
+
+    Returns
+    -------
+    float
+        Log-penalty ≤ 0.  Zero means the criterion is satisfied.
+    """
+    if HAS_JAX:
+        T_K = T_eV * EV_TO_K
+        log10_threshold = jnp.log10(MCWHIRTER_CONST) + 0.5 * jnp.log10(T_K) + 3.0 * jnp.log10(
+            max_delta_E_eV
+        )
+        deficit = jnp.maximum(0.0, log10_threshold - log_ne)
+        return -scale * deficit**2
+    else:
+        T_K = T_eV * EV_TO_K
+        log10_threshold = np.log10(MCWHIRTER_CONST) + 0.5 * np.log10(T_K) + 3.0 * np.log10(
+            max_delta_E_eV
+        )
+        deficit = max(0.0, log10_threshold - log_ne)
+        return -scale * deficit**2
+
+
 @dataclass
 class AtomicDataArrays:
     """
@@ -212,6 +449,8 @@ class AtomicDataArrays:
     partition_coeffs: Any  # Partition function coefficients (n_elements, n_stages, 5)
     ionization_potentials: Any  # Ionization potentials (n_elements, n_stages)
     elements: List[str] = field(default_factory=list)
+    ei_ev: Any = None  # Lower level energy [eV] (for absorption / two-zone model)
+    f_osc: Any = None  # Oscillator strength (for absorption cross-section)
 
 
 @dataclass
@@ -726,8 +965,8 @@ class BayesianForwardModel:
         else:
             self.wavelength = jnp.linspace(wavelength_range[0], wavelength_range[1], pixels)
 
-        # Load atomic data
-        self.atomic_data = self._load_atomic_data(db_path)
+        # Load atomic data (using shared utility)
+        self.atomic_data = load_atomic_data(db_path, elements, wavelength_range)
 
         logger.info(
             f"BayesianForwardModel: {len(elements)} elements, "
@@ -736,117 +975,8 @@ class BayesianForwardModel:
         )
 
     def _load_atomic_data(self, db_path: str) -> AtomicDataArrays:
-        """Load atomic data from database into JAX arrays."""
-        import pandas as pd
-        import sqlite3
-
-        # Open direct connection for data loading (avoid AtomicDatabase to skip migrations)
-        conn = sqlite3.connect(db_path)
-
-        # Query spectral lines
-        placeholders = ",".join(["?"] * len(self.elements))
-        query = f"""
-            SELECT
-                l.element, l.sp_num, l.wavelength_nm, l.aki, l.ek_ev, l.gk,
-                sp.ip_ev, l.stark_w, l.stark_alpha
-            FROM lines l
-            JOIN species_physics sp ON l.element = sp.element AND l.sp_num = sp.sp_num
-            WHERE l.wavelength_nm BETWEEN ? AND ?
-            AND l.element IN ({placeholders})
-            ORDER BY l.wavelength_nm
-        """
-        params = [self.wavelength_range[0], self.wavelength_range[1]] + self.elements
-        df = pd.read_sql_query(query, conn, params=params)
-
-        if df.empty:
-            raise ValueError(
-                f"No atomic data for elements {self.elements} in " f"range {self.wavelength_range}"
-            )
-
-        # Map elements to indices
-        el_map = {el: i for i, el in enumerate(self.elements)}
-        df["el_idx"] = df["element"].map(el_map)
-
-        # Get atomic masses from standard table (avoid AtomicDatabase instantiation)
-        element_masses = {}
-        for el in self.elements:
-            if el in STANDARD_MASSES:
-                element_masses[el] = STANDARD_MASSES[el]
-            else:
-                element_masses[el] = 50.0
-                logger.warning(f"No mass for {el}, using fallback 50 amu")
-        df["mass_amu"] = df["element"].map(element_masses)
-
-        # Load partition function coefficients
-        max_stages = 3
-        n_elements = len(self.elements)
-        coeffs = np.zeros((n_elements, max_stages, 5), dtype=np.float32)
-        ips = np.zeros((n_elements, max_stages), dtype=np.float32)
-
-        # Default coefficients
-        coeffs[:, 0, 0] = np.log(25.0)
-        coeffs[:, 1, 0] = np.log(15.0)
-        coeffs[:, 2, 0] = np.log(10.0)
-
-        try:
-            cursor = conn.cursor()
-
-            # Load ionization potentials
-            cursor.execute(
-                f"SELECT element, sp_num, ip_ev FROM species_physics "
-                f"WHERE element IN ({placeholders})",
-                self.elements,
-            )
-            for row in cursor.fetchall():
-                el, sp_num, ip_ev = row
-                if el in el_map and ip_ev is not None:
-                    el_idx = el_map[el]
-                    stage_idx = sp_num - 1
-                    if 0 <= stage_idx < max_stages:
-                        ips[el_idx, stage_idx] = ip_ev
-
-            # Load partition function coefficients
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name='partition_functions'"
-            )
-            if cursor.fetchone():
-                cursor.execute(
-                    f"SELECT element, sp_num, a0, a1, a2, a3, a4 "
-                    f"FROM partition_functions WHERE element IN ({placeholders})",
-                    self.elements,
-                )
-                for row in cursor.fetchall():
-                    el, sp_num, a0, a1, a2, a3, a4 = row
-                    if el in el_map:
-                        el_idx = el_map[el]
-                        stage_idx = sp_num - 1
-                        if 0 <= stage_idx < max_stages:
-                            coeffs[el_idx, stage_idx] = [a0, a1, a2, a3, a4]
-        except Exception as e:
-            logger.warning(f"Failed to load physics data: {e}")
-        finally:
-            conn.close()
-
-        # Handle missing Stark parameters
-        stark_w_raw = df["stark_w"].fillna(float("nan")).values
-        stark_alpha_raw = df["stark_alpha"].fillna(0.5).values
-
-        return AtomicDataArrays(
-            wavelength_nm=jnp.array(df["wavelength_nm"].values, dtype=jnp.float32),
-            aki=jnp.array(df["aki"].values, dtype=jnp.float32),
-            ek_ev=jnp.array(df["ek_ev"].values, dtype=jnp.float32),
-            gk=jnp.array(df["gk"].values, dtype=jnp.float32),
-            ip_ev=jnp.array(df["ip_ev"].values, dtype=jnp.float32),
-            ion_stage=jnp.array(df["sp_num"].values - 1, dtype=jnp.int32),
-            element_idx=jnp.array(df["el_idx"].values, dtype=jnp.int32),
-            stark_w=jnp.array(stark_w_raw, dtype=jnp.float32),
-            stark_alpha=jnp.array(stark_alpha_raw, dtype=jnp.float32),
-            mass_amu=jnp.array(df["mass_amu"].values, dtype=jnp.float32),
-            partition_coeffs=jnp.array(coeffs, dtype=jnp.float32),
-            ionization_potentials=jnp.array(ips, dtype=jnp.float32),
-            elements=self.elements,
-        )
+        """Load atomic data — delegates to module-level :func:`load_atomic_data`."""
+        return load_atomic_data(db_path, self.elements, self.wavelength_range)
 
     def forward(
         self,
@@ -905,15 +1035,11 @@ class BayesianForwardModel:
 
     @staticmethod
     def _partition_function(T_K: float, coeffs: jnp.ndarray) -> jnp.ndarray:
-        """
-        Evaluate polynomial partition function.
+        """Evaluate polynomial partition function.
 
-        log(U) = sum_i a_i * (log(T))^i  (Irwin form)
+        Delegates to module-level :func:`partition_function`.
         """
-        log_T = jnp.log(T_K)
-        powers = jnp.array([1.0, log_T, log_T**2, log_T**3, log_T**4])
-        log_U = jnp.sum(coeffs * powers, axis=-1)
-        return jnp.exp(log_U)
+        return partition_function(T_K, coeffs)
 
     def _compute_spectrum(
         self,
@@ -1970,6 +2096,671 @@ class NestedSampler:
         logger.info(
             f"Nested sampling complete: ln(Z) = {log_evidence:.2f} ± {log_evidence_err:.2f}, "
             f"T = {T_mean:.3f} ± {T_std:.3f} eV"
+        )
+
+        return result
+
+
+# ============================================================================
+# Two-Zone Bayesian Model
+# ============================================================================
+
+
+@dataclass
+class TwoZonePriorConfig:
+    """Prior configuration for the two-zone plasma model.
+
+    The two-zone model describes a hot core surrounded by a cooler shell.
+    The shell partially absorbs the core emission, producing self-reversed
+    line profiles commonly observed in optically thick LIBS plasmas.
+
+    Parameters
+    ----------
+    T_core_eV_range : tuple of float
+        Core temperature range in eV (default: 0.8–3.0).
+    T_shell_eV_range : tuple of float
+        Shell temperature range in eV (default: 0.3–2.0).
+    log_ne_range : tuple of float
+        ``log_{10}(n_e)`` range (default: 15–19).
+    concentration_alpha : float
+        Dirichlet concentration parameter (default: 1.0).
+    shell_fraction_range : tuple of float
+        Shell fraction of total plasma length (default: 0.1–0.9).
+    optical_depth_scale_range : tuple of float
+        Optical depth multiplier range (default: 0.01–10.0).
+    enforce_T_ordering : bool
+        If True, penalise ``T_core < T_shell`` (default: True).
+    baseline_degree : int
+        Polynomial baseline degree (default: 3).
+    mcwhirter_penalty_scale : float
+        McWhirter penalty strength (default: 10.0, 0 to disable).
+    max_delta_E_eV : float
+        Maximum energy gap for McWhirter criterion (default: 3.0).
+    """
+
+    T_core_eV_range: Tuple[float, float] = (0.8, 3.0)
+    T_shell_eV_range: Tuple[float, float] = (0.3, 2.0)
+    log_ne_range: Tuple[float, float] = (15.0, 19.0)
+    concentration_alpha: float = 1.0
+    shell_fraction_range: Tuple[float, float] = (0.1, 0.9)
+    optical_depth_scale_range: Tuple[float, float] = (0.01, 10.0)
+    enforce_T_ordering: bool = True
+    baseline_degree: int = 3
+    mcwhirter_penalty_scale: float = 10.0
+    max_delta_E_eV: float = 3.0
+
+
+class TwoZoneBayesianForwardModel:
+    """Two-zone plasma forward model for self-reversed LIBS spectra.
+
+    Models a hot core (temperature ``T_core``) surrounded by a cooler shell
+    (temperature ``T_shell``).  The observed intensity is:
+
+    .. math::
+
+        I_{\\mathrm{obs}} = I_{\\mathrm{core}} \\, e^{-\\tau_{\\mathrm{shell}}}
+        + I_{\\mathrm{shell}} \\,
+          \\frac{1 - e^{-\\tau_{\\mathrm{shell}}}}{\\tau_{\\mathrm{shell}}}
+
+    where the optical depth profile is computed from the absorption
+    coefficient ``κ₀ = (π e² / m_e c) × f × n_lower``.
+
+    Parameters
+    ----------
+    db_path : str
+        Path to the atomic database.
+    elements : list of str
+        Elements to include.
+    wavelength_range : tuple of float
+        Wavelength range ``(wl_min, wl_max)`` in nm.
+    wavelength_grid : np.ndarray, optional
+        Custom wavelength grid.
+    pixels : int
+        Number of pixels if auto-generating grid (default: 2048).
+    instrument_fwhm_nm : float
+        Instrument FWHM in nm (default: 0.05).
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        elements: List[str],
+        wavelength_range: Tuple[float, float],
+        wavelength_grid: Optional[np.ndarray] = None,
+        pixels: int = 2048,
+        instrument_fwhm_nm: float = 0.05,
+    ):
+        if not HAS_JAX:
+            raise ImportError("JAX required. Install with: pip install jax jaxlib")
+
+        self.elements = elements
+        self.wavelength_range = wavelength_range
+        self.instrument_fwhm_nm = instrument_fwhm_nm
+
+        if wavelength_grid is not None:
+            self.wavelength = jnp.array(wavelength_grid)
+        else:
+            self.wavelength = jnp.linspace(wavelength_range[0], wavelength_range[1], pixels)
+
+        self.atomic_data = load_atomic_data(db_path, elements, wavelength_range)
+
+        logger.info(
+            f"TwoZoneBayesianForwardModel: {len(elements)} elements, "
+            f"{len(self.wavelength)} wavelengths, "
+            f"{len(self.atomic_data.wavelength_nm)} lines"
+        )
+
+    def _compute_zone_spectrum(
+        self,
+        T_eV: float,
+        n_e: float,
+        concentrations,
+    ):
+        """Compute emission spectrum and absorption profile for one zone.
+
+        Returns
+        -------
+        intensity : array
+            Emission spectrum (same shape as ``self.wavelength``).
+        absorption_profile : array
+            Frequency-dependent absorption coefficient κ(λ) in cm⁻¹.
+        """
+        data = self.atomic_data
+        T_K = T_eV * EV_TO_K
+
+        U0 = partition_function(T_K, data.partition_coeffs[:, 0])
+        U1 = partition_function(T_K, data.partition_coeffs[:, 1])
+        IP_I = data.ionization_potentials[:, 0]
+
+        saha_factor = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5)
+        ratio_ion_neutral = 2.0 * saha_factor * (U1 / U0) * jnp.exp(-IP_I / T_eV)
+        frac_neutral = 1.0 / (1.0 + ratio_ion_neutral)
+        frac_ion = ratio_ion_neutral / (1.0 + ratio_ion_neutral)
+
+        el_idx = data.element_idx
+        ion_stage = data.ion_stage
+
+        pop_fraction = jnp.where(ion_stage == 0, frac_neutral[el_idx], frac_ion[el_idx])
+        U_val = jnp.where(ion_stage == 0, U0[el_idx], U1[el_idx])
+
+        element_conc = concentrations[el_idx]
+        N_species = element_conc * n_e * pop_fraction
+
+        # Upper level population for emission
+        n_upper = N_species * (data.gk / U_val) * jnp.exp(-data.ek_ev / T_eV)
+
+        # Emissivity
+        epsilon = (
+            (H_PLANCK * C_LIGHT / (4 * jnp.pi * data.wavelength_nm * 1e-9))
+            * data.aki
+            * n_upper
+        )
+
+        # Line broadening
+        mass_kg = data.mass_amu * M_PROTON
+        sigma_doppler = data.wavelength_nm * jnp.sqrt(
+            2.0 * T_eV * EV_TO_J / (mass_kg * C_LIGHT**2)
+        )
+        sigma_inst = self.instrument_fwhm_nm / 2.355
+        sigma_total = jnp.sqrt(sigma_doppler**2 + sigma_inst**2)
+
+        # Stark broadening
+        REF_NE = 1.0e16
+        REF_T_EV = 0.86173
+        binding_energy = jnp.maximum(data.ip_ev - data.ek_ev, 0.1)
+        n_eff = (ion_stage + 1) * jnp.sqrt(13.605 / binding_energy)
+        w_est = 2.0e-5 * (data.wavelength_nm / 500.0) ** 2 * (n_eff**4)
+        w_est = jnp.clip(w_est, 0.0001, 0.5)
+        w_ref = jnp.where(jnp.isnan(data.stark_w), w_est, data.stark_w)
+        factor_ne = n_e / REF_NE
+        factor_T = jnp.power(jnp.maximum(T_eV, 0.1) / REF_T_EV, -data.stark_alpha)
+        gamma_stark = w_ref * factor_ne * factor_T
+
+        # Voigt profile
+        diff = self.wavelength[:, None] - data.wavelength_nm[None, :]
+        z = (diff + 1j * gamma_stark) / (sigma_total * jnp.sqrt(2.0))
+        w_z = _faddeeva_weideman_jax(z)
+        profile = jnp.real(w_z) / (sigma_total * jnp.sqrt(2.0 * jnp.pi))
+
+        # Emission spectrum
+        intensity = jnp.sum(epsilon * profile, axis=1)
+        intensity = jnp.clip(intensity, 0.0, 1e12)
+
+        # Absorption coefficient κ(λ) for each line
+        # Lower-level population: n_lower ≈ N_species × (g_i / U) × exp(-E_i / kT)
+        # Using g_i ≈ 1 (conservative lower bound) and stored E_i
+        ei_ev = data.ei_ev if data.ei_ev is not None else jnp.zeros_like(data.ek_ev)
+        n_lower = N_species * (1.0 / U_val) * jnp.exp(-ei_ev / T_eV)
+
+        # κ₀ = (π e² / m_e c) × f × n_lower  [cm⁻¹ at line center]
+        # With f stored in data.f_osc
+        f_osc = data.f_osc if data.f_osc is not None else jnp.ones_like(data.aki) * 1e-2
+        kappa_0 = (jnp.pi * E_CHARGE**2 / (M_ELECTRON * C_LIGHT)) * f_osc * n_lower
+
+        # Distribute over Voigt profile: κ(λ) = Σ κ₀ × φ(λ)
+        absorption = jnp.sum(kappa_0 * profile, axis=1)
+        absorption = jnp.clip(absorption, 0.0, 1e12)
+
+        return intensity, absorption
+
+    def forward(
+        self,
+        T_core_eV: float,
+        T_shell_eV: float,
+        log_ne: float,
+        concentrations,
+        shell_fraction: float,
+        optical_depth_scale: float,
+    ):
+        """Compute observed spectrum from two-zone model.
+
+        Parameters
+        ----------
+        T_core_eV : float
+            Core temperature in eV.
+        T_shell_eV : float
+            Shell temperature in eV.
+        log_ne : float
+            ``log_{10}(n_e)`` in cm⁻³ (same for both zones).
+        concentrations : array
+            Element concentrations (must sum to 1).
+        shell_fraction : float
+            Fraction of total plasma length occupied by the shell.
+        optical_depth_scale : float
+            Scale factor for optical depth (effective path length in cm).
+
+        Returns
+        -------
+        array
+            Synthetic observed spectrum.
+        """
+        n_e = 10.0**log_ne
+
+        I_core, _ = self._compute_zone_spectrum(T_core_eV, n_e, concentrations)
+        I_shell, kappa_shell = self._compute_zone_spectrum(T_shell_eV, n_e, concentrations)
+
+        # Optical depth of shell
+        tau_shell = kappa_shell * optical_depth_scale * shell_fraction
+
+        # Avoid division by zero in source function term
+        tau_safe = jnp.maximum(tau_shell, 1e-30)
+
+        # Two-zone radiative transfer:
+        # I_obs = I_core × exp(-τ) + I_shell × (1 - exp(-τ)) / τ
+        exp_neg_tau = jnp.exp(-tau_safe)
+        source_term = (1.0 - exp_neg_tau) / tau_safe
+
+        I_obs = I_core * exp_neg_tau + I_shell * source_term
+
+        return jnp.clip(I_obs, 0.0, 1e12)
+
+    def forward_numpy(
+        self,
+        T_core_eV: float,
+        T_shell_eV: float,
+        log_ne: float,
+        concentrations: np.ndarray,
+        shell_fraction: float,
+        optical_depth_scale: float,
+    ) -> np.ndarray:
+        """NumPy wrapper for forward model (dynesty compatibility)."""
+        conc_jax = jnp.array(concentrations)
+        result = self.forward(
+            T_core_eV, T_shell_eV, log_ne, conc_jax, shell_fraction, optical_depth_scale
+        )
+        return np.array(result)
+
+
+@dataclass
+class TwoZoneMCMCResult:
+    """Result container for two-zone MCMC sampling.
+
+    Extends the single-zone result pattern with additional parameters
+    for the two-zone model (core/shell temperatures, shell fraction,
+    optical depth scale).
+    """
+
+    samples: Dict[str, np.ndarray]
+
+    T_core_eV_mean: float
+    T_core_eV_std: float
+    T_core_eV_q025: float
+    T_core_eV_q975: float
+
+    T_shell_eV_mean: float
+    T_shell_eV_std: float
+    T_shell_eV_q025: float
+    T_shell_eV_q975: float
+
+    log_ne_mean: float
+    log_ne_std: float
+    log_ne_q025: float
+    log_ne_q975: float
+
+    shell_fraction_mean: float
+    shell_fraction_std: float
+    optical_depth_scale_mean: float
+    optical_depth_scale_std: float
+
+    concentrations_mean: Dict[str, float]
+    concentrations_std: Dict[str, float]
+    concentrations_q025: Dict[str, float] = field(default_factory=dict)
+    concentrations_q975: Dict[str, float] = field(default_factory=dict)
+
+    r_hat: Dict[str, float] = field(default_factory=dict)
+    ess: Dict[str, float] = field(default_factory=dict)
+    convergence_status: ConvergenceStatus = ConvergenceStatus.UNKNOWN
+
+    n_samples: int = 0
+    n_chains: int = 1
+    n_warmup: int = 0
+    inference_data: Any = None
+
+    @property
+    def n_e_mean(self) -> float:
+        """Mean electron density [cm⁻³]."""
+        return 10.0**self.log_ne_mean
+
+    @property
+    def T_core_K_mean(self) -> float:
+        """Mean core temperature [K]."""
+        return self.T_core_eV_mean * EV_TO_K
+
+    @property
+    def T_shell_K_mean(self) -> float:
+        """Mean shell temperature [K]."""
+        return self.T_shell_eV_mean * EV_TO_K
+
+    @property
+    def is_converged(self) -> bool:
+        """Check MCMC convergence (R-hat < 1.01 for all parameters)."""
+        return self.convergence_status == ConvergenceStatus.CONVERGED
+
+    def summary_table(self) -> str:
+        """Generate a publication-ready summary table."""
+        lines = [
+            "=" * 70,
+            "Two-Zone CF-LIBS Bayesian Inference Results",
+            "=" * 70,
+            f"Samples: {self.n_samples} | Chains: {self.n_chains} | Warmup: {self.n_warmup}",
+            f"Convergence: {self.convergence_status.value}",
+            "-" * 70,
+            f"{'Parameter':<25} {'Mean':>10} {'Std':>10} {'95% CI':>20}",
+            "-" * 70,
+            f"{'T_core [eV]':<25} {self.T_core_eV_mean:>10.4f} {self.T_core_eV_std:>10.4f} "
+            f"[{self.T_core_eV_q025:.4f}, {self.T_core_eV_q975:.4f}]",
+            f"{'T_shell [eV]':<25} {self.T_shell_eV_mean:>10.4f} {self.T_shell_eV_std:>10.4f} "
+            f"[{self.T_shell_eV_q025:.4f}, {self.T_shell_eV_q975:.4f}]",
+            f"{'log10(n_e)':<25} {self.log_ne_mean:>10.4f} {self.log_ne_std:>10.4f} "
+            f"[{self.log_ne_q025:.4f}, {self.log_ne_q975:.4f}]",
+            f"{'shell_fraction':<25} {self.shell_fraction_mean:>10.4f} "
+            f"{self.shell_fraction_std:>10.4f}",
+            f"{'optical_depth_scale':<25} {self.optical_depth_scale_mean:>10.4f} "
+            f"{self.optical_depth_scale_std:>10.4f}",
+        ]
+        lines.append("-" * 70)
+        for el in self.concentrations_mean:
+            mean = self.concentrations_mean[el]
+            std = self.concentrations_std[el]
+            lines.append(f"{el:<25} {mean:>10.4f} {std:>10.4f}")
+        lines.append("=" * 70)
+        return "\n".join(lines)
+
+
+def two_zone_bayesian_model(
+    forward_model: TwoZoneBayesianForwardModel,
+    observed,
+    prior_config: TwoZonePriorConfig = TwoZonePriorConfig(),
+    noise_params: NoiseParameters = NoiseParameters(),
+):
+    """NumPyro probabilistic model for two-zone CF-LIBS Bayesian inference.
+
+    Includes:
+    - Separate core/shell temperature priors with optional ordering constraint
+    - Shell fraction and optical depth scale priors
+    - Polynomial baseline model (latent)
+    - McWhirter criterion soft penalty
+
+    Parameters
+    ----------
+    forward_model : TwoZoneBayesianForwardModel
+        Two-zone forward model instance.
+    observed : array
+        Observed spectrum.
+    prior_config : TwoZonePriorConfig
+        Prior configuration.
+    noise_params : NoiseParameters
+        Noise model parameters.
+    """
+    if not HAS_NUMPYRO:
+        raise ImportError("NumPyro required. Install with: pip install numpyro")
+
+    n_elements = len(forward_model.elements)
+
+    # --- Temperature priors ---
+    T_core_eV = numpyro.sample(
+        "T_core_eV",
+        dist.Uniform(prior_config.T_core_eV_range[0], prior_config.T_core_eV_range[1]),
+    )
+    T_shell_eV = numpyro.sample(
+        "T_shell_eV",
+        dist.Uniform(prior_config.T_shell_eV_range[0], prior_config.T_shell_eV_range[1]),
+    )
+
+    # Temperature ordering constraint: T_core > T_shell
+    if prior_config.enforce_T_ordering:
+        numpyro.factor(
+            "T_ordering",
+            jnp.where(T_core_eV > T_shell_eV, 0.0, -1e6),
+        )
+
+    # --- Electron density ---
+    log_ne = numpyro.sample(
+        "log_ne",
+        dist.Uniform(prior_config.log_ne_range[0], prior_config.log_ne_range[1]),
+    )
+
+    # --- McWhirter LTE penalty ---
+    if prior_config.mcwhirter_penalty_scale > 0:
+        penalty = mcwhirter_log_penalty(
+            T_core_eV,
+            log_ne,
+            max_delta_E_eV=prior_config.max_delta_E_eV,
+            scale=prior_config.mcwhirter_penalty_scale,
+        )
+        numpyro.factor("mcwhirter_lte", penalty)
+
+    # --- Concentrations ---
+    alpha = jnp.ones(n_elements) * prior_config.concentration_alpha
+    concentrations = numpyro.sample("concentrations", dist.Dirichlet(alpha))
+
+    # --- Shell geometry ---
+    shell_fraction = numpyro.sample(
+        "shell_fraction",
+        dist.Uniform(
+            prior_config.shell_fraction_range[0],
+            prior_config.shell_fraction_range[1],
+        ),
+    )
+    optical_depth_scale = numpyro.sample(
+        "optical_depth_scale",
+        dist.Uniform(
+            prior_config.optical_depth_scale_range[0],
+            prior_config.optical_depth_scale_range[1],
+        ),
+    )
+
+    # --- Forward model ---
+    predicted = forward_model.forward(
+        T_core_eV, T_shell_eV, log_ne, concentrations, shell_fraction, optical_depth_scale
+    )
+
+    # --- Latent polynomial baseline ---
+    if prior_config.baseline_degree > 0:
+        baseline_coeffs = numpyro.sample(
+            "baseline_coeffs",
+            dist.Normal(jnp.zeros(prior_config.baseline_degree + 1), 100.0),
+        )
+        # Normalised wavelength to [0, 1]
+        wl = forward_model.wavelength
+        wl_norm = (wl - wl[0]) / jnp.maximum(wl[-1] - wl[0], 1e-6)
+        baseline = jnp.polyval(baseline_coeffs, wl_norm)
+        predicted = predicted + baseline
+
+    # --- Likelihood ---
+    pred_safe = jnp.maximum(predicted, 1e-6)
+    pred_safe = jnp.where(jnp.isnan(pred_safe), 1e-6, pred_safe)
+    pred_safe = jnp.where(jnp.isinf(pred_safe), 1e6, pred_safe)
+
+    variance = (
+        pred_safe / noise_params.gain + noise_params.readout_noise**2 + noise_params.dark_current
+    )
+    sigma = jnp.sqrt(jnp.maximum(variance, 1e-6))
+
+    numpyro.sample("obs", dist.Normal(pred_safe, sigma), obs=observed)
+
+
+class TwoZoneMCMCSampler:
+    """MCMC sampler for two-zone Bayesian CF-LIBS inference.
+
+    Mirrors the :class:`MCMCSampler` API but uses the two-zone model.
+
+    Parameters
+    ----------
+    forward_model : TwoZoneBayesianForwardModel
+        Two-zone forward model instance.
+    prior_config : TwoZonePriorConfig
+        Prior configuration.
+    noise_params : NoiseParameters
+        Noise model parameters.
+    """
+
+    def __init__(
+        self,
+        forward_model: TwoZoneBayesianForwardModel,
+        prior_config: TwoZonePriorConfig = TwoZonePriorConfig(),
+        noise_params: NoiseParameters = NoiseParameters(),
+    ):
+        if not HAS_NUMPYRO:
+            raise ImportError("NumPyro required. Install with: pip install numpyro")
+
+        self.forward_model = forward_model
+        self.prior_config = prior_config
+        self.noise_params = noise_params
+        self.elements = forward_model.elements
+
+    def run(
+        self,
+        observed: np.ndarray,
+        num_warmup: int = 500,
+        num_samples: int = 1000,
+        num_chains: int = 1,
+        seed: int = 0,
+        target_accept_prob: float = 0.8,
+        max_tree_depth: int = 10,
+        progress_bar: bool = True,
+    ) -> TwoZoneMCMCResult:
+        """Run MCMC sampling with the two-zone model.
+
+        Parameters
+        ----------
+        observed : np.ndarray
+            Observed spectrum.
+        num_warmup : int
+            Warmup samples (default: 500).
+        num_samples : int
+            Posterior samples (default: 1000).
+        num_chains : int
+            Number of MCMC chains (default: 1).
+        seed : int
+            Random seed.
+        target_accept_prob : float
+            NUTS target acceptance probability (default: 0.8).
+        max_tree_depth : int
+            Maximum NUTS tree depth (default: 10).
+        progress_bar : bool
+            Show progress (default: True).
+
+        Returns
+        -------
+        TwoZoneMCMCResult
+        """
+        import jax.random as random
+
+        observed_jax = jnp.array(observed)
+
+        def model(obs):
+            two_zone_bayesian_model(
+                self.forward_model, obs, self.prior_config, self.noise_params
+            )
+
+        kernel = NUTS(
+            model,
+            init_strategy=init_to_uniform(radius=0.5),
+            target_accept_prob=target_accept_prob,
+            max_tree_depth=max_tree_depth,
+        )
+
+        mcmc = MCMC(
+            kernel,
+            num_warmup=num_warmup,
+            num_samples=num_samples,
+            num_chains=num_chains,
+            progress_bar=progress_bar,
+        )
+
+        rng_key = random.PRNGKey(seed)
+        logger.info(
+            f"Starting two-zone MCMC: {num_chains} chains, "
+            f"{num_warmup} warmup, {num_samples} samples"
+        )
+        mcmc.run(rng_key, observed_jax)
+
+        samples = mcmc.get_samples(group_by_chain=(num_chains > 1))
+        n_el = len(self.elements)
+
+        # Extract and flatten
+        T_core_flat = np.array(samples["T_core_eV"]).flatten()
+        T_shell_flat = np.array(samples["T_shell_eV"]).flatten()
+        log_ne_flat = np.array(samples["log_ne"]).flatten()
+        conc_flat = np.array(samples["concentrations"]).reshape(-1, n_el)
+        sf_flat = np.array(samples["shell_fraction"]).flatten()
+        ods_flat = np.array(samples["optical_depth_scale"]).flatten()
+
+        # Convergence diagnostics
+        r_hat: Dict[str, float] = {}
+        ess: Dict[str, float] = {}
+        if HAS_ARVIZ and num_chains > 1:
+            try:
+                idata = az.from_numpyro(mcmc)
+                for var in ["T_core_eV", "T_shell_eV", "log_ne"]:
+                    rhat_data = az.rhat(idata)
+                    if var in rhat_data:
+                        r_hat[var] = float(rhat_data[var].values)
+                    ess_data = az.ess(idata)
+                    if var in ess_data:
+                        ess[var] = float(ess_data[var].values)
+            except Exception as e:
+                logger.warning(f"ArviZ diagnostics failed: {e}")
+
+        # Convergence status
+        if r_hat:
+            max_rhat = max(r_hat.values())
+            min_ess = min(ess.values()) if ess else num_samples
+            if max_rhat < 1.01 and min_ess > 100:
+                status = ConvergenceStatus.CONVERGED
+            elif max_rhat < 1.1 and min_ess > 50:
+                status = ConvergenceStatus.WARNING
+            else:
+                status = ConvergenceStatus.NOT_CONVERGED
+        else:
+            status = ConvergenceStatus.UNKNOWN
+
+        result = TwoZoneMCMCResult(
+            samples={k: np.array(v) for k, v in samples.items()},
+            T_core_eV_mean=float(np.mean(T_core_flat)),
+            T_core_eV_std=float(np.std(T_core_flat)),
+            T_core_eV_q025=float(np.percentile(T_core_flat, 2.5)),
+            T_core_eV_q975=float(np.percentile(T_core_flat, 97.5)),
+            T_shell_eV_mean=float(np.mean(T_shell_flat)),
+            T_shell_eV_std=float(np.std(T_shell_flat)),
+            T_shell_eV_q025=float(np.percentile(T_shell_flat, 2.5)),
+            T_shell_eV_q975=float(np.percentile(T_shell_flat, 97.5)),
+            log_ne_mean=float(np.mean(log_ne_flat)),
+            log_ne_std=float(np.std(log_ne_flat)),
+            log_ne_q025=float(np.percentile(log_ne_flat, 2.5)),
+            log_ne_q975=float(np.percentile(log_ne_flat, 97.5)),
+            shell_fraction_mean=float(np.mean(sf_flat)),
+            shell_fraction_std=float(np.std(sf_flat)),
+            optical_depth_scale_mean=float(np.mean(ods_flat)),
+            optical_depth_scale_std=float(np.std(ods_flat)),
+            concentrations_mean={
+                el: float(np.mean(conc_flat[:, i])) for i, el in enumerate(self.elements)
+            },
+            concentrations_std={
+                el: float(np.std(conc_flat[:, i])) for i, el in enumerate(self.elements)
+            },
+            concentrations_q025={
+                el: float(np.percentile(conc_flat[:, i], 2.5))
+                for i, el in enumerate(self.elements)
+            },
+            concentrations_q975={
+                el: float(np.percentile(conc_flat[:, i], 97.5))
+                for i, el in enumerate(self.elements)
+            },
+            r_hat=r_hat,
+            ess=ess,
+            convergence_status=status,
+            n_samples=num_samples,
+            n_chains=num_chains,
+            n_warmup=num_warmup,
+            inference_data=az.from_numpyro(mcmc) if HAS_ARVIZ else None,
+        )
+
+        logger.info(
+            f"Two-zone MCMC complete: T_core={result.T_core_eV_mean:.3f} eV, "
+            f"T_shell={result.T_shell_eV_mean:.3f} eV, "
+            f"n_e={result.n_e_mean:.2e} cm^-3"
         )
 
         return result

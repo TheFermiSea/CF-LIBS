@@ -59,6 +59,8 @@ pinn = [
     "equinox>=0.11.0",
     "optax>=0.2.0",
 ]
+# Rust computational core (comb matching, partition functions)
+rust = ["cflibs-core"]
 # Development dependencies
 dev = [
     "pytest>=7.4.0",

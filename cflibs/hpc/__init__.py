@@ -1,8 +1,8 @@
 """
-HPC utilities for CF-LIBS model spectrum generation.
+HPC utilities for CF-LIBS computation.
 
-Provides SLURM job management for generating large model spectrum libraries
-on computing clusters.
+Provides SLURM job management, GPU configuration, and distributed MCMC
+sampling for HPC cluster deployment.
 """
 
 from cflibs.hpc.slurm import (
@@ -11,7 +11,9 @@ from cflibs.hpc.slurm import (
     SlurmJobManager,
     SlurmJobState,
     SlurmJobStatus,
+    create_distributed_mcmc_job,
 )
+from cflibs.hpc.gpu_config import GPUInfo, configure_gpu, pin_to_device
 
 __all__ = [
     "SlurmJobConfig",
@@ -19,4 +21,8 @@ __all__ = [
     "SlurmJobStatus",
     "SlurmJobState",
     "SlurmJobManager",
+    "create_distributed_mcmc_job",
+    "GPUInfo",
+    "configure_gpu",
+    "pin_to_device",
 ]

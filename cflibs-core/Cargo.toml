@@ -1,0 +1,16 @@
+[package]
+name = "cflibs-core"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance computational core for CF-LIBS (comb matching, partition functions)"
+license = "MIT"
+
+[lib]
+name = "cflibs_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["auto-initialize", "extension-module"] }
+numpy = "0.24"
+rayon = "1.10"
+ndarray = "0.16"
