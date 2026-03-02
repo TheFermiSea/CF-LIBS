@@ -4,7 +4,14 @@ Tests for radiation calculations.
 
 import pytest
 import numpy as np
-from cflibs.radiation.profiles import gaussian_profile, doppler_width, apply_gaussian_broadening
+from cflibs.radiation.profiles import (
+    BroadeningMode,
+    gaussian_profile,
+    doppler_width,
+    apply_gaussian_broadening,
+    apply_gaussian_broadening_per_line,
+    resolving_power_sigma,
+)
 from cflibs.radiation.emissivity import calculate_line_emissivity, calculate_spectrum_emissivity
 
 
@@ -171,6 +178,120 @@ def test_calculate_spectrum_emissivity_no_populations(atomic_db):
 
     # Should return zeros
     assert np.all(emissivity == 0)
+
+
+# --- BroadeningMode Enum Tests ---
+
+
+def test_broadening_mode_enum_values():
+    """Test BroadeningMode enum has expected values."""
+    assert BroadeningMode.LEGACY == "legacy"
+    assert BroadeningMode.NIST_PARITY == "nist_parity"
+    assert BroadeningMode.PHYSICAL_DOPPLER == "physical_doppler"
+
+
+# --- resolving_power_sigma Tests ---
+
+
+def test_resolving_power_sigma_basic():
+    """Test resolving_power_sigma at known values."""
+    # R=1000, lambda=500 nm => FWHM=0.5 nm, sigma=0.5/2.355
+    sigma = resolving_power_sigma(500.0, 1000.0)
+    expected = 500.0 / 1000.0 / 2.355
+    assert sigma == pytest.approx(expected, rel=1e-6)
+
+
+def test_resolving_power_sigma_wavelength_proportional():
+    """Test that sigma scales linearly with wavelength at fixed R."""
+    s1 = resolving_power_sigma(200.0, 1000.0)
+    s2 = resolving_power_sigma(400.0, 1000.0)
+    assert s2 == pytest.approx(2.0 * s1, rel=1e-6)
+
+
+def test_resolving_power_sigma_inversely_proportional_to_R():
+    """Test that sigma scales inversely with resolving power."""
+    s1 = resolving_power_sigma(500.0, 500.0)
+    s2 = resolving_power_sigma(500.0, 1000.0)
+    assert s1 == pytest.approx(2.0 * s2, rel=1e-6)
+
+
+# --- apply_gaussian_broadening_per_line Tests ---
+
+
+def test_apply_gaussian_broadening_per_line_basic():
+    """Test per-line broadening produces spectrum."""
+    wavelength = np.linspace(370, 375, 500)
+    line_wavelengths = np.array([371.99, 373.49])
+    line_intensities = np.array([1000.0, 500.0])
+    sigmas = np.array([0.05, 0.10])
+
+    spectrum = apply_gaussian_broadening_per_line(
+        wavelength, line_wavelengths, line_intensities, sigmas
+    )
+
+    assert len(spectrum) == len(wavelength)
+    assert np.all(spectrum >= 0)
+    assert np.any(spectrum > 0)
+
+
+def test_apply_gaussian_broadening_per_line_wider_sigma_gives_lower_peak():
+    """Test that wider sigma gives lower peak height (area preserved)."""
+    wavelength = np.linspace(370, 376, 1000)
+    line_wl = np.array([373.0])
+    line_int = np.array([1000.0])
+
+    spec_narrow = apply_gaussian_broadening_per_line(
+        wavelength, line_wl, line_int, np.array([0.02])
+    )
+    spec_wide = apply_gaussian_broadening_per_line(wavelength, line_wl, line_int, np.array([0.10]))
+
+    assert spec_narrow.max() > spec_wide.max()
+
+
+def test_apply_gaussian_broadening_per_line_matches_scalar():
+    """Test per-line with uniform sigmas matches scalar broadening."""
+    wavelength = np.linspace(370, 375, 500)
+    line_wavelengths = np.array([371.99, 373.49])
+    line_intensities = np.array([1000.0, 500.0])
+    sigma = 0.05
+
+    spec_scalar = apply_gaussian_broadening(wavelength, line_wavelengths, line_intensities, sigma)
+    spec_per_line = apply_gaussian_broadening_per_line(
+        wavelength, line_wavelengths, line_intensities, np.full(2, sigma)
+    )
+
+    np.testing.assert_allclose(spec_scalar, spec_per_line, rtol=1e-10)
+
+
+# --- Per-line sigma emissivity Tests ---
+
+
+def test_calculate_spectrum_emissivity_per_line_sigma(atomic_db, sample_plasma):
+    """Test spectrum emissivity with per-line sigma array."""
+    from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
+
+    solver = SahaBoltzmannSolver(atomic_db)
+    populations = solver.solve_plasma(sample_plasma)
+    transitions = atomic_db.get_transitions("Fe", wavelength_min=370.0, wavelength_max=375.0)
+
+    if len(transitions) == 0:
+        pytest.skip("No transitions in test database")
+
+    wavelength = np.linspace(370, 375, 100)
+
+    # Count how many transitions will have matching populations
+    n_with_pop = sum(
+        1 for t in transitions if (t.element, t.ionization_stage, t.E_k_ev) in populations
+    )
+
+    if n_with_pop == 0:
+        pytest.skip("No transitions with populations")
+
+    sigmas = np.full(n_with_pop, 0.05)
+    emissivity = calculate_spectrum_emissivity(transitions, populations, wavelength, sigmas)
+
+    assert len(emissivity) == len(wavelength)
+    assert np.all(emissivity >= 0)
 
 
 if __name__ == "__main__":

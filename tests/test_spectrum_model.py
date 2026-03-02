@@ -8,6 +8,8 @@ from cflibs.plasma import SingleZoneLTEPlasma
 from cflibs.instrument import InstrumentModel
 from cflibs.radiation import SpectrumModel
 
+pytestmark = pytest.mark.requires_db
+
 
 def test_spectrum_model_init(atomic_db, sample_plasma):
     """Test initializing spectrum model."""
@@ -119,6 +121,141 @@ def test_spectrum_model_temperature_dependence(atomic_db):
 
     # Spectra should be different
     assert not np.allclose(I1, I2, rtol=0.1)
+
+
+# --- Broadening Mode Tests ---
+
+
+def test_spectrum_model_nist_parity_mode(atomic_db, sample_plasma):
+    """Test NIST_PARITY broadening mode produces spectrum without convolution."""
+    from cflibs.radiation.profiles import BroadeningMode
+
+    instrument = InstrumentModel.from_resolving_power(1000)
+
+    model = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.01,
+        broadening_mode=BroadeningMode.NIST_PARITY,
+    )
+
+    wavelength, intensity = model.compute_spectrum()
+
+    assert len(wavelength) == len(intensity)
+    assert np.all(intensity >= 0)
+
+
+def test_spectrum_model_nist_parity_requires_resolving_power(atomic_db, sample_plasma):
+    """Test NIST_PARITY raises error without resolving_power."""
+    from cflibs.radiation.profiles import BroadeningMode
+
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+
+    with pytest.raises(ValueError, match="resolving_power"):
+        SpectrumModel(
+            plasma=sample_plasma,
+            atomic_db=atomic_db,
+            instrument=instrument,
+            lambda_min=370.0,
+            lambda_max=375.0,
+            delta_lambda=0.01,
+            broadening_mode=BroadeningMode.NIST_PARITY,
+        )
+
+
+def test_spectrum_model_physical_doppler_mode(atomic_db, sample_plasma):
+    """Test PHYSICAL_DOPPLER broadening mode produces spectrum."""
+    from cflibs.radiation.profiles import BroadeningMode
+
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+
+    model = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.01,
+        broadening_mode=BroadeningMode.PHYSICAL_DOPPLER,
+    )
+
+    wavelength, intensity = model.compute_spectrum()
+
+    assert len(wavelength) == len(intensity)
+    assert np.all(intensity >= 0)
+
+
+def test_spectrum_model_legacy_mode_unchanged(atomic_db, sample_plasma):
+    """Test LEGACY mode produces identical results to old behavior."""
+    from cflibs.radiation.profiles import BroadeningMode
+
+    instrument = InstrumentModel(resolution_fwhm_nm=0.05)
+
+    model_default = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.1,
+    )
+
+    model_legacy = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.1,
+        broadening_mode=BroadeningMode.LEGACY,
+    )
+
+    wl1, I1 = model_default.compute_spectrum()
+    wl2, I2 = model_legacy.compute_spectrum()
+
+    np.testing.assert_array_equal(wl1, wl2)
+    np.testing.assert_allclose(I1, I2, rtol=1e-10)
+
+
+def test_spectrum_model_nist_parity_vs_legacy_differ(atomic_db, sample_plasma):
+    """Test NIST_PARITY and LEGACY produce different spectra.
+
+    Uses the same resolving-power instrument for both modes so the
+    difference is purely from the broadening mode, not the instrument.
+    """
+    from cflibs.radiation.profiles import BroadeningMode
+
+    instrument = InstrumentModel.from_resolving_power(1000)
+
+    model_legacy = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.01,
+        broadening_mode=BroadeningMode.LEGACY,
+    )
+
+    model_nist = SpectrumModel(
+        plasma=sample_plasma,
+        atomic_db=atomic_db,
+        instrument=instrument,
+        lambda_min=370.0,
+        lambda_max=375.0,
+        delta_lambda=0.01,
+        broadening_mode=BroadeningMode.NIST_PARITY,
+    )
+
+    _, I_legacy = model_legacy.compute_spectrum()
+    _, I_nist = model_nist.compute_spectrum()
+
+    # They should produce different spectra (LEGACY uses scalar sigma +
+    # convolution; NIST_PARITY uses per-line sigma, no convolution)
+    assert not np.allclose(I_legacy, I_nist, rtol=0.1)
 
 
 if __name__ == "__main__":

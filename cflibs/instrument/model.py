@@ -27,14 +27,84 @@ class InstrumentModel:
         Function to convert pixel to wavelength
     """
 
-    resolution_fwhm_nm: float
+    resolution_fwhm_nm: float = 0.0
     response_curve: Optional[np.ndarray] = None
     wavelength_calibration: Optional[Callable[..., float]] = None
+    resolving_power: Optional[float] = None
 
     @property
     def resolution_sigma_nm(self) -> float:
         """Gaussian standard deviation for instrument function."""
         return self.resolution_fwhm_nm / 2.355
+
+    @property
+    def is_resolving_power_mode(self) -> bool:
+        """True if instrument is configured with a valid resolving power R > 0."""
+        return self.resolving_power is not None and self.resolving_power > 0
+
+    def sigma_at_wavelength(self, wavelength_nm: float) -> float:
+        """
+        Compute Gaussian sigma at a given wavelength.
+
+        In resolving-power mode, FWHM = lambda / R varies with wavelength.
+        In fixed-FWHM mode, returns the constant resolution_sigma_nm.
+
+        Parameters
+        ----------
+        wavelength_nm : float
+            Wavelength in nm
+
+        Returns
+        -------
+        float
+            Gaussian standard deviation in nm
+
+        Raises
+        ------
+        ValueError
+            If wavelength_nm <= 0 or resolving_power <= 0.
+        """
+        if wavelength_nm <= 0:
+            raise ValueError(f"wavelength_nm must be positive; got {wavelength_nm!r}")
+        if self.resolving_power is not None:
+            if self.resolving_power <= 0:
+                raise ValueError(
+                    f"resolving_power must be positive; got {self.resolving_power!r}"
+                )
+            fwhm = wavelength_nm / self.resolving_power
+            return fwhm / 2.355
+        return self.resolution_sigma_nm
+
+    @classmethod
+    def from_resolving_power(
+        cls, resolving_power: float, response_curve: Optional[np.ndarray] = None
+    ) -> "InstrumentModel":
+        """
+        Create InstrumentModel from resolving power R = lambda / FWHM.
+
+        Parameters
+        ----------
+        resolving_power : float
+            Resolving power (dimensionless)
+        response_curve : array, optional
+            Spectral response curve
+
+        Returns
+        -------
+        InstrumentModel
+
+        Raises
+        ------
+        ValueError
+            If resolving_power <= 0.
+        """
+        if resolving_power <= 0:
+            raise ValueError(f"resolving_power must be positive; got {resolving_power!r}")
+        return cls(
+            resolution_fwhm_nm=0.0,
+            response_curve=response_curve,
+            resolving_power=resolving_power,
+        )
 
     @classmethod
     def from_file(cls, config_path: Path) -> "InstrumentModel":

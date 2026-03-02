@@ -163,6 +163,52 @@ class SahaBoltzmannSolver(SolverStrategy):
 
         return U
 
+    def get_ionization_fractions(
+        self, element: str, T_e_eV: float, n_e_cm3: float
+    ) -> Dict[int, float]:
+        """
+        Compute ionization stage fractions for an element.
+
+        Returns fractional populations (summing to 1.0) for each ionization
+        stage, useful for comparison with NIST LIBS simulation values.
+
+        Parameters
+        ----------
+        element : str
+            Element symbol (e.g. "Fe")
+        T_e_eV : float
+            Electron temperature in eV
+        n_e_cm3 : float
+            Electron density in cm^-3
+
+        Returns
+        -------
+        Dict[int, float]
+            Mapping from ionization stage (1=neutral, 2=singly ionized, ...)
+            to fractional population (0-1).
+        Raises
+        ------
+        ValueError
+            If T_e_eV <= 0, n_e_cm3 <= 0, or solver returns non-positive total.
+        """
+        if T_e_eV <= 0.0:
+            raise ValueError(f"T_e_eV must be positive; got {T_e_eV!r}")
+        if n_e_cm3 <= 0.0:
+            raise ValueError(f"n_e_cm3 must be positive; got {n_e_cm3!r}")
+
+        # Use arbitrary total density; fractions are independent of it
+        total_density = 1.0
+        stage_densities = self.solve_ionization_balance(
+            element, T_e_eV, n_e_cm3, total_density
+        )
+        total = sum(stage_densities.values())
+        if total <= 0.0:
+            raise ValueError(
+                f"Ionization balance returned non-positive total density "
+                f"({total!r}) for element {element!r}"
+            )
+        return {stage: n / total for stage, n in stage_densities.items()}
+
     def solve_level_population(
         self, element: str, ionization_stage: int, stage_density_cm3: float, T_e_eV: float
     ) -> Dict[Tuple[str, int, float], float]:
