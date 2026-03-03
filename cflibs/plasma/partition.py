@@ -106,3 +106,52 @@ class PartitionFunctionEvaluator:
     def evaluate_jax(T_K: float, coefficients: Any) -> Any:
         """Evaluate using JAX implementation."""
         return polynomial_partition_function_jax(T_K, coefficients)
+
+    @staticmethod
+    def evaluate_batch(
+        coefficients: np.ndarray,
+        temperatures: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate partition functions for all species at all temperatures.
+
+        Uses Rust acceleration when available, falls back to NumPy.
+
+        Parameters
+        ----------
+        coefficients : np.ndarray
+            Shape (N_species, N_coeffs) partition function coefficients.
+        temperatures : np.ndarray
+            Shape (N_temps,) temperatures in Kelvin.
+
+        Returns
+        -------
+        np.ndarray
+            Shape (N_species, N_temps) partition function values.
+        """
+        try:
+            from cflibs._core import batch_partition_functions
+        except ImportError:
+            try:
+                from _core import batch_partition_functions
+            except ImportError:
+                batch_partition_functions = None  # type: ignore[assignment]
+
+        if batch_partition_functions is not None:
+            return np.asarray(
+                batch_partition_functions(
+                    np.ascontiguousarray(coefficients, dtype=np.float64),
+                    np.ascontiguousarray(temperatures, dtype=np.float64),
+                )
+            )
+
+        # NumPy fallback
+        n_species = coefficients.shape[0]
+        n_temps = temperatures.shape[0]
+        result = np.zeros((n_species, n_temps))
+        for s in range(n_species):
+            coeffs_s = list(coefficients[s])
+            for t in range(n_temps):
+                result[s, t] = polynomial_partition_function(
+                    float(temperatures[t]), coeffs_s
+                )
+        return result

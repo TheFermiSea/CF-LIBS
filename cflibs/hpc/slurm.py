@@ -513,3 +513,147 @@ class SlurmJobManager:
             return SlurmJobState.TIMEOUT
         else:
             return SlurmJobState.UNKNOWN
+
+
+def create_distributed_mcmc_job(
+    script_path: str,
+    db_path: str,
+    elements: List[str],
+    wavelength_range: Tuple[float, float],
+    observed_path: str,
+    output_dir: str = ".",
+    ntasks: int = 4,
+    gpus_per_task: int = 0,
+    chains_per_rank: int = 1,
+    num_warmup: int = 500,
+    num_samples: int = 1000,
+    partition: str = "default",
+    time_limit: str = "04:00:00",
+    mem_gb: int = 16,
+    account: Optional[str] = None,
+    modules: Optional[List[str]] = None,
+    conda_env: Optional[str] = None,
+) -> str:
+    """Generate a SLURM SBATCH script for distributed MCMC.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to write the generated SBATCH script.
+    db_path : str
+        Path to the atomic database.
+    elements : list of str
+        Elements to include in the analysis.
+    wavelength_range : tuple of float
+        ``(wl_min, wl_max)`` in nm.
+    observed_path : str
+        Path to the observed spectrum file (NumPy ``.npy``).
+    output_dir : str
+        Directory for results (default: ``"."``).
+    ntasks : int
+        Number of MPI tasks (ranks) (default: 4).
+    gpus_per_task : int
+        GPUs per task (0 = CPU only) (default: 0).
+    chains_per_rank : int
+        NUTS chains per MPI rank (default: 1).
+    num_warmup : int
+        Warmup samples per chain (default: 500).
+    num_samples : int
+        Posterior samples per chain (default: 1000).
+    partition : str
+        SLURM partition (default: ``"default"``).
+    time_limit : str
+        Time limit in ``HH:MM:SS`` (default: ``"04:00:00"``).
+    mem_gb : int
+        Memory per node in GB (default: 16).
+    account : str, optional
+        SLURM account.
+    modules : list of str, optional
+        Environment modules to load.
+    conda_env : str, optional
+        Conda environment to activate.
+
+    Returns
+    -------
+    str
+        The SBATCH script content (also written to *script_path*).
+    """
+    wl_min, wl_max = wavelength_range
+
+    lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=cflibs-mcmc",
+        f"#SBATCH --partition={partition}",
+        f"#SBATCH --ntasks={ntasks}",
+        "#SBATCH --cpus-per-task=2",
+        f"#SBATCH --mem={mem_gb}G",
+        f"#SBATCH --time={time_limit}",
+        f"#SBATCH --output={output_dir}/cflibs-mcmc-%j.out",
+        f"#SBATCH --error={output_dir}/cflibs-mcmc-%j.err",
+    ]
+
+    if account:
+        lines.append(f"#SBATCH --account={account}")
+    if gpus_per_task > 0:
+        lines.append(f"#SBATCH --gpus-per-task={gpus_per_task}")
+
+    lines.append("")
+
+    # Module loading
+    if modules:
+        for mod in modules:
+            lines.append(f"module load {shlex.quote(mod)}")
+        lines.append("")
+
+    # Conda env
+    if conda_env:
+        lines.append(f"conda activate {shlex.quote(conda_env)}")
+        lines.append("")
+
+    # JAX environment variables
+    lines.extend([
+        "# JAX configuration",
+        "export JAX_ENABLE_X64=True",
+        "export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9",
+    ])
+    if gpus_per_task > 0:
+        lines.append("export JAX_PLATFORMS=gpu")
+    else:
+        lines.append("export JAX_PLATFORMS=cpu")
+    lines.append("")
+
+    # Python inline script — use repr() for safe string escaping in Python literals
+    use_gpu = "True" if gpus_per_task > 0 else "False"
+    db_path_repr = repr(db_path)
+    observed_path_repr = repr(observed_path)
+    output_dir_repr = repr(output_dir)
+    lines.extend([
+        "# Run distributed MCMC",
+        f"mpirun -n {ntasks} python -c \"",
+        "import numpy as np",
+        "from cflibs.inversion.bayesian import BayesianForwardModel, bayesian_model",
+        "from cflibs.hpc.distributed_mcmc import DistributedMCMCSampler, DistributedMCMCConfig",
+        "",
+        f"model = BayesianForwardModel({db_path_repr}, {elements!r}, ({wl_min}, {wl_max}))",
+        f"observed = np.load({observed_path_repr})",
+        "config = DistributedMCMCConfig(",
+        f"    chains_per_rank={chains_per_rank},",
+        f"    num_warmup={num_warmup},",
+        f"    num_samples={num_samples},",
+        f"    use_gpu={use_gpu},",
+        ")",
+        "sampler = DistributedMCMCSampler(model, bayesian_model, config=config)",
+        "result = sampler.run(observed)",
+        "if result is not None:",
+        f"    np.savez({output_dir_repr} + '/mcmc_result.npz', **result.samples)",
+        "    print(f'R-hat: {{result.r_hat}}')",
+        "    print(f'ESS: {{result.ess}}')",
+        "\"",
+    ])
+
+    script_content = "\n".join(lines) + "\n"
+
+    with open(script_path, "w") as f:
+        f.write(script_content)
+
+    return script_content

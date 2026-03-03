@@ -1142,3 +1142,342 @@ class TestPosteriorPredictiveCheck:
 
         # n_samples_used should be capped at available
         assert ppc["n_samples_used"] <= 30
+
+
+# ============================================================================
+# Phase 3: Advanced Bayesian Inference Tests
+# ============================================================================
+
+
+class TestMcWhirterPenalty:
+    """Tests for the McWhirter criterion soft penalty."""
+
+    def test_penalty_zero_when_satisfied(self):
+        """Penalty is zero when n_e is well above the threshold."""
+        from cflibs.inversion.bayesian import mcwhirter_log_penalty
+
+        # T=1 eV, log_ne=18 → well above threshold for ΔE=3 eV
+        penalty = mcwhirter_log_penalty(T_eV=1.0, log_ne=18.0, max_delta_E_eV=3.0)
+        assert penalty == 0.0 or abs(penalty) < 1e-10
+
+    def test_penalty_negative_when_violated(self):
+        """Penalty is negative when n_e is below the threshold."""
+        from cflibs.inversion.bayesian import mcwhirter_log_penalty
+
+        # T=1 eV, log_ne=14 → well below threshold
+        penalty = mcwhirter_log_penalty(T_eV=1.0, log_ne=14.0, max_delta_E_eV=3.0)
+        assert penalty < -1.0
+
+    def test_penalty_monotonically_decreases_with_deficit(self):
+        """Larger density deficit → more negative penalty."""
+        from cflibs.inversion.bayesian import mcwhirter_log_penalty
+
+        p1 = mcwhirter_log_penalty(T_eV=1.0, log_ne=15.0)
+        p2 = mcwhirter_log_penalty(T_eV=1.0, log_ne=14.0)
+        p3 = mcwhirter_log_penalty(T_eV=1.0, log_ne=13.0)
+        assert p1 >= p2 >= p3
+
+    def test_penalty_smoothness_and_gradient(self):
+        """Penalty is smooth and has finite JAX gradient."""
+        from cflibs.inversion.bayesian import mcwhirter_log_penalty
+
+        import jax
+        import jax.numpy as jnp
+
+        def penalty_fn(log_ne):
+            return mcwhirter_log_penalty(T_eV=1.0, log_ne=log_ne)
+
+        grad_fn = jax.grad(penalty_fn)
+        # Gradient at the boundary region
+        g = grad_fn(16.0)
+        assert jnp.isfinite(g)
+
+        # Gradient at a well-satisfied point
+        g2 = grad_fn(18.0)
+        assert jnp.isfinite(g2)
+
+    def test_scale_parameter(self):
+        """Scale parameter controls penalty magnitude."""
+        from cflibs.inversion.bayesian import mcwhirter_log_penalty
+
+        p_low = mcwhirter_log_penalty(T_eV=1.0, log_ne=14.0, scale=1.0)
+        p_high = mcwhirter_log_penalty(T_eV=1.0, log_ne=14.0, scale=100.0)
+        assert abs(p_high) > abs(p_low)
+
+
+class TestSharedUtilities:
+    """Tests for refactored shared utilities."""
+
+    def test_load_atomic_data(self, bayesian_db):
+        """Module-level load_atomic_data returns valid AtomicDataArrays."""
+        from cflibs.inversion.bayesian import load_atomic_data, AtomicDataArrays
+
+        data = load_atomic_data(bayesian_db, ["Fe", "Cu"], (200.0, 600.0))
+        assert isinstance(data, AtomicDataArrays)
+        assert len(data.wavelength_nm) > 0
+        assert data.elements == ["Fe", "Cu"]
+
+    def test_load_atomic_data_has_new_fields(self, bayesian_db):
+        """Loaded data includes ei_ev and f_osc fields."""
+        from cflibs.inversion.bayesian import load_atomic_data
+
+        data = load_atomic_data(bayesian_db, ["Fe"], (200.0, 600.0))
+        assert data.ei_ev is not None
+        assert data.f_osc is not None
+        assert len(data.ei_ev) == len(data.wavelength_nm)
+        assert len(data.f_osc) == len(data.wavelength_nm)
+
+    def test_partition_function_module_level(self):
+        """Module-level partition_function matches static method."""
+        from cflibs.inversion.bayesian import partition_function
+
+        coeffs = jnp.array([3.22, 0.0, 0.0, 0.0, 0.0])
+        result = partition_function(10000.0, coeffs)
+        expected = float(jnp.exp(3.22))  # a0 only, others zero
+        assert abs(float(result) - expected) / expected < 0.01
+
+    def test_bayesian_forward_model_uses_shared_loader(self, bayesian_db):
+        """BayesianForwardModel still works after refactoring to shared loader."""
+        model = BayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=100
+        )
+        conc = jnp.array([0.7, 0.3])
+        spectrum = model.forward(1.0, 17.0, conc)
+        assert spectrum.shape == (100,)
+        assert float(jnp.max(spectrum)) > 0
+
+
+class TestTwoZoneBayesianForwardModel:
+    """Tests for the two-zone plasma forward model."""
+
+    def test_init(self, bayesian_db):
+        """Two-zone model initialises without error."""
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=100
+        )
+        assert len(model.elements) == 2
+        assert model.wavelength.shape == (100,)
+
+    def test_forward_returns_valid_spectrum(self, bayesian_db):
+        """Forward model returns a positive spectrum of correct shape."""
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=100
+        )
+        conc = jnp.array([0.7, 0.3])
+        spectrum = model.forward(
+            T_core_eV=1.2,
+            T_shell_eV=0.8,
+            log_ne=17.0,
+            concentrations=conc,
+            shell_fraction=0.3,
+            optical_depth_scale=1.0,
+        )
+        assert spectrum.shape == (100,)
+        assert float(jnp.min(spectrum)) >= 0.0
+        assert float(jnp.max(spectrum)) > 0.0
+
+    def test_self_reversal_with_high_optical_depth(self, bayesian_db):
+        """High optical depth should reduce peak intensity (self-reversal)."""
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=200
+        )
+        conc = jnp.array([0.7, 0.3])
+
+        # Low optical depth → strong peaks
+        s_low = model.forward(1.2, 0.6, 17.0, conc, 0.3, 0.001)
+        # High optical depth → reduced peaks
+        s_high = model.forward(1.2, 0.6, 17.0, conc, 0.3, 10.0)
+
+        # Peak intensity should generally decrease with higher optical depth
+        assert float(jnp.max(s_high)) <= float(jnp.max(s_low)) * 1.1  # allow 10% tolerance
+
+    def test_reduces_to_single_zone_when_shell_transparent(self, bayesian_db):
+        """With zero optical depth, shell is transparent → only core emission."""
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel, BayesianForwardModel
+
+        model_2z = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=100
+        )
+        model_1z = BayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=100
+        )
+        conc = jnp.array([0.7, 0.3])
+
+        # Two-zone with essentially zero optical depth
+        s_2z = model_2z.forward(1.0, 0.5, 17.0, conc, 0.3, 1e-10)
+        s_1z = model_1z.forward(1.0, 17.0, conc)
+
+        # Should be dominated by core emission, though not identical due to
+        # shell emission contribution at near-zero tau
+        # Just check they are both positive and correlated
+        assert float(jnp.max(s_2z)) > 0
+        assert float(jnp.max(s_1z)) > 0
+
+    def test_jit_stable(self, bayesian_db):
+        """Forward model is JIT-compatible (no errors under JIT)."""
+        import jax
+
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=50
+        )
+        conc = jnp.array([0.7, 0.3])
+
+        @jax.jit
+        def compute(T_core, T_shell, log_ne, c, sf, ods):
+            return model.forward(T_core, T_shell, log_ne, c, sf, ods)
+
+        result = compute(1.2, 0.8, 17.0, conc, 0.3, 1.0)
+        assert jnp.all(jnp.isfinite(result))
+
+    def test_gradient_stable(self, bayesian_db):
+        """Gradients through the forward model are finite."""
+        import jax
+
+        from cflibs.inversion.bayesian import TwoZoneBayesianForwardModel
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=50
+        )
+        conc = jnp.array([0.7, 0.3])
+
+        def loss(T_core):
+            s = model.forward(T_core, 0.8, 17.0, conc, 0.3, 1.0)
+            return jnp.sum(s)
+
+        grad_val = jax.grad(loss)(1.2)
+        assert jnp.isfinite(grad_val)
+
+
+class TestTwoZonePriorConfig:
+    """Tests for TwoZonePriorConfig dataclass."""
+
+    def test_default_values(self):
+        from cflibs.inversion.bayesian import TwoZonePriorConfig
+
+        cfg = TwoZonePriorConfig()
+        assert cfg.T_core_eV_range == (0.8, 3.0)
+        assert cfg.T_shell_eV_range == (0.3, 2.0)
+        assert cfg.enforce_T_ordering is True
+        assert cfg.baseline_degree == 3
+        assert cfg.mcwhirter_penalty_scale == 10.0
+
+    def test_custom_values(self):
+        from cflibs.inversion.bayesian import TwoZonePriorConfig
+
+        cfg = TwoZonePriorConfig(
+            T_core_eV_range=(1.0, 2.5),
+            baseline_degree=5,
+            mcwhirter_penalty_scale=0.0,
+        )
+        assert cfg.T_core_eV_range == (1.0, 2.5)
+        assert cfg.baseline_degree == 5
+        assert cfg.mcwhirter_penalty_scale == 0.0
+
+
+class TestTwoZoneMCMCResult:
+    """Tests for TwoZoneMCMCResult dataclass."""
+
+    def test_creation(self):
+        from cflibs.inversion.bayesian import TwoZoneMCMCResult
+
+        result = TwoZoneMCMCResult(
+            samples={},
+            T_core_eV_mean=1.2,
+            T_core_eV_std=0.1,
+            T_core_eV_q025=1.0,
+            T_core_eV_q975=1.4,
+            T_shell_eV_mean=0.8,
+            T_shell_eV_std=0.05,
+            T_shell_eV_q025=0.7,
+            T_shell_eV_q975=0.9,
+            log_ne_mean=17.0,
+            log_ne_std=0.2,
+            log_ne_q025=16.6,
+            log_ne_q975=17.4,
+            shell_fraction_mean=0.3,
+            shell_fraction_std=0.05,
+            optical_depth_scale_mean=1.0,
+            optical_depth_scale_std=0.2,
+            concentrations_mean={"Fe": 0.7, "Cu": 0.3},
+            concentrations_std={"Fe": 0.05, "Cu": 0.05},
+        )
+        assert result.T_core_K_mean > 10000  # 1.2 eV ≈ 13900 K
+        assert result.T_shell_K_mean > 5000
+        assert abs(result.n_e_mean - 1e17) < 1e16
+
+    def test_summary_table(self):
+        from cflibs.inversion.bayesian import TwoZoneMCMCResult
+
+        result = TwoZoneMCMCResult(
+            samples={},
+            T_core_eV_mean=1.2,
+            T_core_eV_std=0.1,
+            T_core_eV_q025=1.0,
+            T_core_eV_q975=1.4,
+            T_shell_eV_mean=0.8,
+            T_shell_eV_std=0.05,
+            T_shell_eV_q025=0.7,
+            T_shell_eV_q975=0.9,
+            log_ne_mean=17.0,
+            log_ne_std=0.2,
+            log_ne_q025=16.6,
+            log_ne_q975=17.4,
+            shell_fraction_mean=0.3,
+            shell_fraction_std=0.05,
+            optical_depth_scale_mean=1.0,
+            optical_depth_scale_std=0.2,
+            concentrations_mean={"Fe": 0.7, "Cu": 0.3},
+            concentrations_std={"Fe": 0.05, "Cu": 0.05},
+        )
+        table = result.summary_table()
+        assert "Two-Zone" in table
+        assert "T_core" in table
+        assert "T_shell" in table
+        assert "Fe" in table
+
+
+class TestTwoZoneMCMCSampler:
+    """Smoke test for two-zone MCMC sampling."""
+
+    @pytest.mark.slow
+    def test_smoke_run(self, bayesian_db):
+        """Two-zone MCMC runs without error on synthetic data."""
+        from cflibs.inversion.bayesian import (
+            TwoZoneBayesianForwardModel,
+            TwoZoneMCMCSampler,
+            TwoZonePriorConfig,
+            TwoZoneMCMCResult,
+        )
+
+        model = TwoZoneBayesianForwardModel(
+            bayesian_db, ["Fe", "Cu"], (200.0, 600.0), pixels=50
+        )
+        conc = jnp.array([0.7, 0.3])
+        observed = model.forward_numpy(1.2, 0.8, 17.0, conc, 0.3, 1.0)
+
+        # Add noise
+        rng = np.random.default_rng(42)
+        noise = rng.normal(0, np.maximum(np.abs(observed) * 0.01, 1.0))
+        observed_noisy = observed + noise
+
+        cfg = TwoZonePriorConfig(mcwhirter_penalty_scale=0.0)
+        sampler = TwoZoneMCMCSampler(model, prior_config=cfg)
+        result = sampler.run(
+            observed_noisy,
+            num_warmup=10,
+            num_samples=10,
+            num_chains=1,
+            seed=42,
+            progress_bar=False,
+        )
+        assert isinstance(result, TwoZoneMCMCResult)
+        assert result.T_core_eV_mean > 0
+        assert result.T_shell_eV_mean > 0

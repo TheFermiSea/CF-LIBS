@@ -38,10 +38,19 @@ from cflibs.inversion.alias_identifier import ALIASIdentifier
 from cflibs.inversion.comb_identifier import CombIdentifier
 from cflibs.inversion.preprocessing import (
     estimate_baseline,
+    estimate_baseline_snip,
+    estimate_baseline_als,
     estimate_noise,
     detect_peaks,
     detect_peaks_auto,
     robust_normalize,
+    BaselineMethod,
+)
+from cflibs.inversion.deconvolution import (
+    VoigtFitResult,
+    DeconvolutionResult,
+    deconvolve_peaks,
+    group_peaks,
 )
 from cflibs.inversion.self_absorption import (
     AbsorptionCorrectionResult,
@@ -321,10 +330,18 @@ __all__ = [
     "CombIdentifier",
     # Preprocessing
     "estimate_baseline",
+    "estimate_baseline_snip",
+    "estimate_baseline_als",
     "estimate_noise",
     "detect_peaks",
     "detect_peaks_auto",
     "robust_normalize",
+    "BaselineMethod",
+    # Deconvolution
+    "VoigtFitResult",
+    "DeconvolutionResult",
+    "deconvolve_peaks",
+    "group_peaks",
     # Self-absorption
     "AbsorptionCorrectionResult",
     "SelfAbsorptionResult",

@@ -5,7 +5,7 @@ All identification algorithms should use ``detect_peaks`` (or the convenience
 wrapper ``detect_peaks_auto``) rather than implementing custom peak detection.
 
 Pipeline:
-    1. Baseline estimation via median filter
+    1. Baseline estimation via median filter, SNIP, or ALS
     2. Sigma-clipped MAD noise estimation
     3. Peak detection with baseline subtraction, height/prominence thresholds
     4. Optional cosmic ray rejection (minimum FWHM filter)
@@ -13,6 +13,7 @@ Pipeline:
 """
 
 import numpy as np
+from enum import Enum
 from scipy.signal import find_peaks, peak_widths
 from scipy.ndimage import median_filter
 from typing import List, Optional, Tuple
@@ -53,6 +54,213 @@ def estimate_baseline(
     if window_pts % 2 == 0:
         window_pts += 1  # ensure odd
     return median_filter(intensity, size=window_pts)
+
+
+class BaselineMethod(Enum):
+    """Baseline estimation method for peak detection.
+
+    Attributes
+    ----------
+    MEDIAN : str
+        Median filter baseline (fast, robust default).
+    SNIP : str
+        Statistics-sensitive Non-linear Iterative Peak-clipping with LLS
+        transform.  Best for spectra with sharp peaks on slowly varying
+        continuum.
+    ALS : str
+        Asymmetric Least Squares smoothing.  Best for spectra with broad
+        continuum features.
+    """
+
+    MEDIAN = "median"
+    SNIP = "snip"
+    ALS = "als"
+
+
+def estimate_baseline_snip(
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    num_iterations: int = 40,
+    order: int = 2,
+    smoothing_window: int = 0,
+) -> np.ndarray:
+    """Baseline estimation via SNIP (Statistics-sensitive Non-linear
+    Iterative Peak-clipping) with LLS transform.
+
+    Implements the algorithm of Ryan et al. (1988) with the Log-Log-Square
+    root (LLS) transform to equalise peak widths before clipping.
+
+    Algorithm
+    ---------
+    1. Apply LLS transform:
+       :math:`v_i = \\log(\\log(\\sqrt{y_i + 1} + 1) + 1)`
+    2. For *p* from ``num_iterations`` down to 1:
+       :math:`v_i = \\min(v_i, (v_{i-p} + v_{i+p}) / 2)`
+    3. Invert the LLS transform to recover the baseline in intensity
+       space.
+
+    Parameters
+    ----------
+    wavelength : np.ndarray
+        Wavelength array in nm (used only for consistency with other
+        baseline estimators; spacing is not used).
+    intensity : np.ndarray
+        Intensity array (non-negative values expected).
+    num_iterations : int
+        Number of clipping iterations (default 40).  Larger values remove
+        broader features.
+    order : int
+        Transform order.  ``2`` selects the LLS (Log-Log-Sqrt) transform;
+        ``1`` applies a single-log transform; ``0`` disables the transform.
+    smoothing_window : int
+        If > 0, apply a moving-average smoothing of this width (in pixels)
+        to the result.  ``0`` disables smoothing (default).
+
+    Returns
+    -------
+    np.ndarray
+        Estimated baseline array (same length as *intensity*).
+
+    References
+    ----------
+    Ryan, C.G., Clayton, E., Griffin, W.L., Sie, S.H. & Cousens, D.R.
+    (1988). SNIP, a statistics-sensitive background treatment for the
+    quantitative analysis of PIXE spectra in geoscience applications.
+    *Nucl. Instrum. Methods B*, 34, 396--402.
+    """
+    if intensity.size < 2:
+        return intensity.copy()
+
+    if num_iterations < 1:
+        raise ValueError(f"num_iterations must be >= 1, got {num_iterations}")
+    if order not in (0, 1, 2):
+        raise ValueError(f"order must be 0, 1, or 2, got {order}")
+
+    y = np.maximum(intensity.astype(float), 0.0)
+
+    # --- LLS forward transform ---
+    if order >= 1:
+        y = np.log(np.sqrt(y + 1.0) + 1.0)
+    if order >= 2:
+        y = np.log(y + 1.0)
+
+    # Pad edges to handle boundary effects; cap pad_width for short arrays
+    pad_width = min(num_iterations, len(y) - 1) if len(y) > 1 else 0
+    v = np.pad(y, pad_width=pad_width, mode="reflect")
+
+    # --- Iterative peak clipping (p from pad_width down to 1) ---
+    for p in range(pad_width, 0, -1):
+        avg = (v[: len(v) - 2 * p] + v[2 * p :]) / 2.0
+        mid = v[p : len(v) - p]
+        v[p : len(v) - p] = np.minimum(mid, avg)
+
+    # Remove padding
+    v = v[pad_width : pad_width + len(y)]
+
+    # --- LLS inverse transform ---
+    if order >= 2:
+        v = np.exp(v) - 1.0
+    if order >= 1:
+        v = (np.exp(v) - 1.0) ** 2 - 1.0
+        v = np.maximum(v, 0.0)
+
+    # Optional smoothing
+    if smoothing_window > 1:
+        kernel = np.ones(smoothing_window) / smoothing_window
+        v = np.convolve(v, kernel, mode="same")
+
+    return v
+
+
+def estimate_baseline_als(
+    wavelength: np.ndarray,
+    intensity: np.ndarray,
+    lam: float = 1e6,
+    p: float = 0.01,
+    max_iterations: int = 20,
+    tol: float = 1e-4,
+) -> np.ndarray:
+    """Baseline estimation via Asymmetric Least Squares (ALS) smoothing.
+
+    Implements the algorithm of Eilers & Boelens (2005).  A smoothing
+    penalty (second-difference matrix) is combined with asymmetric
+    weights that penalise positive residuals less than negative ones,
+    causing the baseline to track below the peaks.
+
+    The system solved at each iteration is:
+
+    .. math::
+
+        (W + \\lambda D^\\top D) z = W y
+
+    where *W* = diag(w), *D* is the second-difference matrix, and the
+    asymmetric weights are updated as
+    :math:`w_i = p` if :math:`y_i > z_i`, else :math:`w_i = 1 - p`.
+
+    Parameters
+    ----------
+    wavelength : np.ndarray
+        Wavelength array in nm (unused; kept for API consistency).
+    intensity : np.ndarray
+        Intensity array.
+    lam : float
+        Smoothness penalty parameter :math:`\\lambda` (default 1e6).
+        Larger values produce smoother baselines.
+    p : float
+        Asymmetry parameter (default 0.01).  Smaller values push the
+        baseline further below the peaks.
+    max_iterations : int
+        Maximum IRLS iterations (default 20).
+    tol : float
+        Convergence tolerance on the weight vector (default 1e-4).
+
+    Returns
+    -------
+    np.ndarray
+        Estimated baseline array (same length as *intensity*).
+
+    References
+    ----------
+    Eilers, P.H.C. & Boelens, H.F.M. (2005). Baseline Correction with
+    Asymmetric Least Squares Smoothing.  Leiden University Medical Centre
+    Report.
+    """
+    if lam <= 0:
+        raise ValueError(f"lam must be > 0, got {lam}")
+    if not (0 < p < 1):
+        raise ValueError(f"p must be in (0, 1), got {p}")
+    if max_iterations < 1:
+        raise ValueError(f"max_iterations must be >= 1, got {max_iterations}")
+
+    from scipy import sparse
+    from scipy.sparse.linalg import spsolve
+
+    n = intensity.size
+    if n < 3:
+        return intensity.copy()
+
+    y = intensity.astype(float)
+
+    # Second-difference matrix D (shape (n-2) x n)
+    e = sparse.eye(n, format="csc")
+    D = e[2:] - 2 * e[1:-1] + e[:-2]
+    DTD = lam * D.T.dot(D)
+
+    w = np.ones(n)
+    z = y.copy()
+
+    for _ in range(max_iterations):
+        W = sparse.diags(w, 0, shape=(n, n), format="csc")
+        z_new = spsolve(W + DTD, w * y)
+        # Update asymmetric weights
+        w_new = np.where(y > z_new, p, 1 - p)
+        if np.linalg.norm(w_new - w) / max(np.linalg.norm(w), 1e-10) < tol:
+            z = z_new
+            break
+        w = w_new
+        z = z_new
+
+    return z
 
 
 def estimate_noise(intensity: np.ndarray, baseline: np.ndarray) -> float:
@@ -218,6 +426,7 @@ def detect_peaks_auto(
     baseline_window_nm: float = 10.0,
     min_fwhm_pixels: float = 1.5,
     use_second_derivative: bool = False,
+    baseline_method: BaselineMethod = BaselineMethod.MEDIAN,
 ) -> Tuple[List[Tuple[int, float]], np.ndarray, float]:
     """Convenience wrapper: estimate baseline/noise, then detect peaks.
 
@@ -245,6 +454,10 @@ def detect_peaks_auto(
         Minimum FWHM in pixels for cosmic ray rejection (default 1.5)
     use_second_derivative : bool
         Apply second-derivative confirmation (default False)
+    baseline_method : BaselineMethod
+        Baseline estimation method (default ``BaselineMethod.MEDIAN``).
+        ``SNIP`` uses Statistics-sensitive Non-linear Iterative Peak-clipping;
+        ``ALS`` uses Asymmetric Least Squares smoothing.
 
     Returns
     -------
@@ -258,7 +471,14 @@ def detect_peaks_auto(
     if wavelength.size < 2:
         return [], intensity.copy(), 0.0
 
-    baseline = estimate_baseline(wavelength, intensity, window_nm=baseline_window_nm)
+    if baseline_method == BaselineMethod.SNIP:
+        baseline = estimate_baseline_snip(wavelength, intensity)
+    elif baseline_method == BaselineMethod.ALS:
+        baseline = estimate_baseline_als(wavelength, intensity)
+    elif baseline_method == BaselineMethod.MEDIAN:
+        baseline = estimate_baseline(wavelength, intensity, window_nm=baseline_window_nm)
+    else:
+        raise ValueError(f"Unknown baseline_method: {baseline_method!r}")
     noise = estimate_noise(intensity, baseline)
 
     peaks = detect_peaks(

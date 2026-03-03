@@ -1,12 +1,21 @@
 """Tests for shared preprocessing module."""
 
+import pytest
 import numpy as np
 from cflibs.inversion.preprocessing import (
     estimate_baseline,
+    estimate_baseline_snip,
+    estimate_baseline_als,
     estimate_noise,
     detect_peaks,
+    detect_peaks_auto,
     robust_normalize,
+    BaselineMethod,
 )
+
+# ---------------------------------------------------------------------------
+# Existing baseline / noise / peak / normalize tests
+# ---------------------------------------------------------------------------
 
 
 class TestEstimateBaseline:
@@ -117,3 +126,190 @@ class TestRobustNormalize:
         intensity = np.zeros(100)
         result = robust_normalize(intensity)
         np.testing.assert_array_equal(result, np.zeros(100))
+
+
+# ---------------------------------------------------------------------------
+# SNIP baseline tests
+# ---------------------------------------------------------------------------
+
+
+def _make_gaussian_peaks(wavelength, centers, amplitudes, sigma=0.5):
+    """Helper: build Gaussian peaks on a wavelength grid."""
+    y = np.zeros_like(wavelength)
+    for c, a in zip(centers, amplitudes):
+        y += a * np.exp(-0.5 * ((wavelength - c) / sigma) ** 2)
+    return y
+
+
+@pytest.mark.unit
+class TestSNIPBaseline:
+    def test_recovers_flat_baseline_under_peaks(self):
+        wavelength = np.linspace(200, 400, 2000)
+        flat_baseline = 100.0
+        peaks = _make_gaussian_peaks(
+            wavelength, centers=[250, 300, 350], amplitudes=[500, 800, 600]
+        )
+        intensity = flat_baseline + peaks
+
+        result = estimate_baseline_snip(wavelength, intensity, num_iterations=40)
+
+        # The SNIP baseline should be close to the true flat baseline
+        # where there are no peaks (avoid peak regions)
+        non_peak_mask = peaks < 10.0
+        np.testing.assert_allclose(
+            result[non_peak_mask],
+            flat_baseline,
+            atol=20.0,
+            err_msg="SNIP baseline deviates from true flat baseline in non-peak regions",
+        )
+
+    def test_recovers_sloped_baseline(self):
+        wavelength = np.linspace(200, 400, 2000)
+        true_baseline = 50 + 0.3 * wavelength
+        peaks = _make_gaussian_peaks(wavelength, [250, 310, 370], [400, 600, 300])
+        intensity = true_baseline + peaks
+
+        result = estimate_baseline_snip(wavelength, intensity, num_iterations=60)
+
+        # Correlation with true baseline should be high
+        non_peak_mask = peaks < 10.0
+        corr = np.corrcoef(result[non_peak_mask], true_baseline[non_peak_mask])[0, 1]
+        assert corr > 0.90, f"SNIP baseline correlation too low: {corr:.3f}"
+
+    def test_short_array(self):
+        wavelength = np.array([300.0])
+        intensity = np.array([100.0])
+        result = estimate_baseline_snip(wavelength, intensity)
+        np.testing.assert_array_equal(result, intensity)
+
+    def test_constant_array(self):
+        wavelength = np.linspace(200, 400, 500)
+        intensity = np.full_like(wavelength, 42.0)
+        result = estimate_baseline_snip(wavelength, intensity)
+        np.testing.assert_allclose(result, 42.0, atol=1.0)
+
+    def test_order_zero_disables_transform(self):
+        wavelength = np.linspace(200, 400, 1000)
+        intensity = np.full_like(wavelength, 100.0)
+        result = estimate_baseline_snip(wavelength, intensity, order=0)
+        np.testing.assert_allclose(result, 100.0, atol=1.0)
+
+    def test_smoothing_window(self):
+        wavelength = np.linspace(200, 400, 1000)
+        # Create spectrum with peaks on a noisy baseline so SNIP produces
+        # a non-trivial baseline that benefits from smoothing.
+        rng = np.random.default_rng(99)
+        baseline = 100.0 + rng.normal(0, 10, 1000)
+        peaks = _make_gaussian_peaks(wavelength, [250, 300, 350], [400, 600, 300])
+        intensity = np.maximum(baseline + peaks, 0)
+
+        result_smooth = estimate_baseline_snip(
+            wavelength, intensity, num_iterations=20, smoothing_window=21
+        )
+        result_raw = estimate_baseline_snip(
+            wavelength, intensity, num_iterations=20, smoothing_window=0
+        )
+
+        # Both should return valid arrays of the right shape
+        assert result_smooth.shape == wavelength.shape
+        assert result_raw.shape == wavelength.shape
+        # Smoothed baseline should differ from unsmoothed
+        assert not np.array_equal(result_smooth, result_raw)
+
+
+# ---------------------------------------------------------------------------
+# ALS baseline tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestALSBaseline:
+    def test_converges_and_tracks_slow_continuum(self):
+        wavelength = np.linspace(200, 400, 1000)
+        true_baseline = 80 + 20 * np.sin(2 * np.pi * wavelength / 200)
+        peaks = _make_gaussian_peaks(wavelength, [250, 300, 350], [300, 500, 200])
+        intensity = true_baseline + peaks
+
+        result = estimate_baseline_als(wavelength, intensity, lam=1e6, p=0.01)
+
+        # ALS should track the slow continuum, staying below or near the peaks
+        non_peak_mask = peaks < 5.0
+        residual = np.abs(result[non_peak_mask] - true_baseline[non_peak_mask])
+        assert (
+            np.mean(residual) < 30.0
+        ), f"ALS baseline deviates too much from true continuum: mean={np.mean(residual):.1f}"
+
+    def test_flat_baseline(self):
+        wavelength = np.linspace(200, 400, 500)
+        intensity = np.full_like(wavelength, 200.0)
+        result = estimate_baseline_als(wavelength, intensity)
+        np.testing.assert_allclose(result, 200.0, atol=5.0)
+
+    def test_short_array(self):
+        wavelength = np.array([300.0, 301.0])
+        intensity = np.array([100.0, 110.0])
+        result = estimate_baseline_als(wavelength, intensity)
+        np.testing.assert_array_equal(result, intensity)
+
+    def test_constant_array(self):
+        wavelength = np.linspace(200, 400, 300)
+        intensity = np.full_like(wavelength, 55.0)
+        result = estimate_baseline_als(wavelength, intensity)
+        np.testing.assert_allclose(result, 55.0, atol=2.0)
+
+
+# ---------------------------------------------------------------------------
+# BaselineMethod dispatch tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestBaselineMethodDispatch:
+    def test_enum_values(self):
+        assert BaselineMethod.MEDIAN.value == "median"
+        assert BaselineMethod.SNIP.value == "snip"
+        assert BaselineMethod.ALS.value == "als"
+
+    def test_median_default(self):
+        wavelength = np.linspace(200, 400, 500)
+        intensity = np.full_like(wavelength, 100.0)
+        peaks_default, bl_default, _ = detect_peaks_auto(wavelength, intensity)
+        peaks_median, bl_median, _ = detect_peaks_auto(
+            wavelength, intensity, baseline_method=BaselineMethod.MEDIAN
+        )
+        np.testing.assert_array_equal(bl_default, bl_median)
+
+    def test_snip_dispatch(self):
+        wavelength = np.linspace(200, 400, 1000)
+        rng = np.random.default_rng(42)
+        baseline_true = 100.0
+        peaks = _make_gaussian_peaks(wavelength, [300], [500])
+        intensity = baseline_true + peaks + rng.normal(0, 5, 1000)
+
+        result_peaks, bl_snip, noise = detect_peaks_auto(
+            wavelength, intensity, baseline_method=BaselineMethod.SNIP
+        )
+        # SNIP should produce a different baseline than median
+        _, bl_median, _ = detect_peaks_auto(
+            wavelength, intensity, baseline_method=BaselineMethod.MEDIAN
+        )
+        # They should not be identical (different algorithms)
+        assert not np.allclose(bl_snip, bl_median, atol=1e-6)
+
+    def test_als_dispatch(self):
+        wavelength = np.linspace(200, 400, 500)
+        rng = np.random.default_rng(42)
+        intensity = 100.0 + rng.normal(0, 5, 500)
+
+        result_peaks, bl_als, noise = detect_peaks_auto(
+            wavelength, intensity, baseline_method=BaselineMethod.ALS
+        )
+        # ALS should return a valid baseline array
+        assert bl_als.shape == wavelength.shape
+        assert np.all(np.isfinite(bl_als))
+
+    def test_unknown_baseline_method_raises(self):
+        wavelength = np.linspace(200, 400, 500)
+        intensity = np.full_like(wavelength, 100.0)
+        with pytest.raises(ValueError, match="Unknown baseline_method"):
+            detect_peaks_auto(wavelength, intensity, baseline_method="invalid")
