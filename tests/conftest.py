@@ -2,7 +2,7 @@
 Pytest configuration and shared fixtures for CF-LIBS tests.
 
 This module provides:
-- Automatic JAX CPU backend configuration (Metal is experimental)
+- Automatic JAX CPU backend configuration (Metal is abandoned, incompatible with JAX >= 0.6)
 - Shared fixtures for database, plasma, and atomic data
 - Factory fixtures for generating synthetic test data
 """

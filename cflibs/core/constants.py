@@ -35,7 +35,7 @@ E_CHARGE = 1.602176634e-19  # C (elementary charge)
 # ============================================================================
 
 # Proton mass
-M_PROTON = 1.6726219e-27  # kg
+M_PROTON = 1.67262192369e-27  # kg
 
 # Rydberg constant
 RYDBERG = 10973731.568160  # m^-1

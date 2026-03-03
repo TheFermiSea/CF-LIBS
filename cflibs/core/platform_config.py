@@ -16,6 +16,7 @@ Key design decisions
 """
 
 import os
+import sys
 import platform
 from enum import Enum
 from cflibs.core.logging_config import get_logger
@@ -24,7 +25,15 @@ logger = get_logger("core.platform_config")
 
 
 class AcceleratorBackend(Enum):
-    """JAX accelerator backend in use."""
+    """JAX accelerator backend in use.
+
+    Attributes
+    ----------
+    CPU : str
+        CPU-only backend (always available).
+    CUDA : str
+        NVIDIA CUDA GPU backend (Linux only).
+    """
 
     CPU = "cpu"
     CUDA = "cuda"
@@ -36,8 +45,10 @@ def configure_jax(
 ) -> AcceleratorBackend:
     """Configure JAX for CF-LIBS computation.
 
-    Must be called **before** any JAX computation or module that creates
+    Must be called **before** any JAX import or computation that creates
     JAX arrays at import time (e.g. ``cflibs.radiation.profiles``).
+    If JAX has already been imported, the environment-variable based
+    platform selection will not take effect and a warning is logged.
 
     Parameters
     ----------
@@ -52,9 +63,18 @@ def configure_jax(
     AcceleratorBackend
         The backend that was configured.
     """
-    # On macOS, Metal cannot support float64 -- force CPU before JAX init
+    # Warn if JAX was already imported — env var changes won't affect backend
+    if "jax" in sys.modules:
+        logger.warning(
+            "configure_jax() called after JAX was already imported. "
+            "JAX_PLATFORMS changes will not take effect. "
+            "Call configure_jax() before importing JAX for reliable configuration."
+        )
+
+    # On macOS, Metal cannot support float64 — force CPU before JAX init.
+    # Unconditional assignment: the Metal backend must never be used.
     if platform.system() == "Darwin":
-        os.environ.setdefault("JAX_PLATFORMS", "cpu")
+        os.environ["JAX_PLATFORMS"] = "cpu"
 
     try:
         import jax
@@ -77,7 +97,7 @@ def configure_jax(
                     dev = devices[0]
                     logger.info(f"CUDA GPU detected: {dev}, x64={enable_x64}")
                     return AcceleratorBackend.CUDA
-            except RuntimeError:
+            except Exception:
                 pass
 
         logger.info("Using JAX CPU backend")

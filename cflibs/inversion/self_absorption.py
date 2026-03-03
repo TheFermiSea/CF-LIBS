@@ -66,7 +66,7 @@ from enum import Enum
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 
-from cflibs.core.constants import EV_TO_K, KB_EV
+from cflibs.core.constants import EV_TO_K, KB_EV, M_PROTON
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
 
@@ -76,7 +76,6 @@ logger = get_logger("inversion.self_absorption")
 H_PLANCK = 6.62607015e-34  # J·s
 C_LIGHT = 2.99792458e8  # m/s
 K_BOLTZMANN = 1.380649e-23  # J/K
-M_PROTON = 1.6726219e-27  # kg
 
 
 def _escape_factor(tau: float) -> float:
