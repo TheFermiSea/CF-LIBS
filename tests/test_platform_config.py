@@ -1,10 +1,9 @@
 """Tests for cflibs.core.platform_config."""
 
+import logging
 import os
 import sys
 from unittest.mock import patch
-
-import pytest
 
 from cflibs.core.platform_config import AcceleratorBackend, configure_jax
 
@@ -20,7 +19,7 @@ class TestConfigureJax:
         result = configure_jax()
         assert isinstance(result, AcceleratorBackend)
 
-    @patch("cflibs.core.platform_config.platform")
+    @patch("cflibs.core.platform_config._platform")
     def test_darwin_forces_cpu_env(self, mock_platform):
         """On macOS, JAX_PLATFORMS must be unconditionally set to 'cpu'."""
         mock_platform.system.return_value = "Darwin"
@@ -30,18 +29,18 @@ class TestConfigureJax:
             assert result == AcceleratorBackend.CPU
             assert os.environ["JAX_PLATFORMS"] == "cpu"
 
-    @patch("cflibs.core.platform_config.platform")
+    @patch("cflibs.core.platform_config._platform")
     def test_darwin_returns_cpu(self, mock_platform):
         mock_platform.system.return_value = "Darwin"
         assert configure_jax() == AcceleratorBackend.CPU
 
-    @patch("cflibs.core.platform_config.platform")
+    @patch("cflibs.core.platform_config._platform")
     def test_linux_no_gpu_returns_cpu(self, mock_platform):
         mock_platform.system.return_value = "Linux"
         result = configure_jax(prefer_gpu=False)
         assert result == AcceleratorBackend.CPU
 
-    @patch("cflibs.core.platform_config.platform")
+    @patch("cflibs.core.platform_config._platform")
     def test_linux_gpu_exception_falls_back_to_cpu(self, mock_platform):
         """When jax.devices('gpu') raises, gracefully fall back."""
         mock_platform.system.return_value = "Linux"
@@ -60,16 +59,20 @@ class TestConfigureJax:
 
     def test_warns_if_jax_already_imported(self, caplog):
         """Should warn when JAX is already in sys.modules."""
-        # JAX is already imported by conftest, so this should always warn
         assert "jax" in sys.modules
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(logging.WARNING, logger="cflibs.core.platform_config"):
             configure_jax()
-        # The warning may or may not appear depending on logger propagation;
-        # what matters is no crash
+        assert any("already imported" in r.message for r in caplog.records)
 
     @patch.dict(sys.modules, {"jax": None})
-    @patch("builtins.__import__", side_effect=ImportError("no jax"))
-    def test_jax_not_installed_returns_cpu(self, mock_import):
-        """When JAX is not installed, returns CPU without error."""
+    def test_jax_not_installed_returns_cpu(self):
+        """When JAX is not installed (None in sys.modules), returns CPU."""
         result = configure_jax()
         assert result == AcceleratorBackend.CPU
+
+    def test_no_spurious_warning_when_jax_is_none_in_modules(self, caplog):
+        """sys.modules['jax'] = None should NOT trigger the 'already imported' warning."""
+        with patch.dict(sys.modules, {"jax": None}):
+            with caplog.at_level(logging.WARNING, logger="cflibs.core.platform_config"):
+                configure_jax()
+            assert not any("already imported" in r.message for r in caplog.records)

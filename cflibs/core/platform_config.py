@@ -17,7 +17,7 @@ Key design decisions
 
 import os
 import sys
-import platform
+import platform as _platform
 from enum import Enum
 from cflibs.core.logging_config import get_logger
 
@@ -63,8 +63,11 @@ def configure_jax(
     AcceleratorBackend
         The backend that was configured.
     """
-    # Warn if JAX was already imported — env var changes won't affect backend
-    if "jax" in sys.modules:
+    system = _platform.system()
+
+    # Warn if JAX was already imported — env var changes won't affect backend.
+    # Use .get() to avoid false positives from negative cache entries (None).
+    if sys.modules.get("jax") is not None:
         logger.warning(
             "configure_jax() called after JAX was already imported. "
             "JAX_PLATFORMS changes will not take effect. "
@@ -73,7 +76,7 @@ def configure_jax(
 
     # On macOS, Metal cannot support float64 — force CPU before JAX init.
     # Unconditional assignment: the Metal backend must never be used.
-    if platform.system() == "Darwin":
+    if system == "Darwin":
         os.environ["JAX_PLATFORMS"] = "cpu"
 
     try:
@@ -82,21 +85,21 @@ def configure_jax(
         if enable_x64:
             jax.config.update("jax_enable_x64", True)
 
-        if platform.system() == "Darwin":
+        if system == "Darwin":
             logger.info(
                 "macOS detected: using JAX CPU backend "
                 "(Metal lacks float64 support required for CF-LIBS physics)"
             )
             return AcceleratorBackend.CPU
 
-        # On Linux, try CUDA if requested
-        if prefer_gpu and platform.system() == "Linux":
+        # On Linux, try CUDA if requested.
+        # jax.devices("gpu") raises on failure (never returns []),
+        # so the call succeeding means a GPU is available.
+        if prefer_gpu and system == "Linux":
             try:
-                devices = jax.devices("gpu")
-                if devices:
-                    dev = devices[0]
-                    logger.info(f"CUDA GPU detected: {dev}, x64={enable_x64}")
-                    return AcceleratorBackend.CUDA
+                dev = jax.devices("gpu")[0]
+                logger.info(f"CUDA GPU detected: {dev}, x64={enable_x64}")
+                return AcceleratorBackend.CUDA
             except Exception:
                 pass
 
