@@ -149,8 +149,9 @@ class PartitionFunctionEvaluator:
         n_temps = temperatures.shape[0]
         result = np.zeros((n_species, n_temps))
         for s in range(n_species):
+            coeffs_s = list(coefficients[s])
             for t in range(n_temps):
                 result[s, t] = polynomial_partition_function(
-                    float(temperatures[t]), list(coefficients[s])
+                    float(temperatures[t]), coeffs_s
                 )
         return result

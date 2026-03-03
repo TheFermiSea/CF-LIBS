@@ -463,9 +463,14 @@ pub fn kdet_filter_elements<'py>(
 
         let kdet_fraction = best_candidates as f64 / total_peaks as f64;
         let density = densities[i];
+        let (clip_lo, clip_hi) = if weight_clip.0 <= weight_clip.1 {
+            weight_clip
+        } else {
+            (weight_clip.1, weight_clip.0)
+        };
         let rarity_weight = (median_density / density.max(1e-6))
             .powf(rarity_power)
-            .clamp(weight_clip.0, weight_clip.1);
+            .clamp(clip_lo, clip_hi);
         let kdet_score = kdet_fraction * rarity_weight;
 
         if best_candidates >= min_candidates && kdet_score >= min_score {

@@ -139,14 +139,17 @@ def pin_to_device(local_rank: int) -> Optional[GPUInfo]:
         Device info for the pinned GPU, or ``None`` on failure.
     """
     try:
-        import jax
+        # Derive device_id from SLURM env or local_rank without importing JAX,
+        # so CUDA_VISIBLE_DEVICES is set before JAX initialises.
+        import os
 
-        gpus = jax.devices("gpu")
-        if not gpus:
-            logger.info("No GPUs available; using CPU")
-            return configure_gpu(device_id=0, enable_x64=True)
+        gpus_on_node = os.environ.get("SLURM_GPUS_ON_NODE")
+        if gpus_on_node is not None:
+            device_id = local_rank % int(gpus_on_node)
+        else:
+            # Best-effort: assume one GPU per rank
+            device_id = local_rank
 
-        device_id = local_rank % len(gpus)
         return configure_gpu(device_id=device_id, enable_x64=True)
     except Exception as e:
         logger.warning(f"Device pinning failed for rank {local_rank}: {e}")

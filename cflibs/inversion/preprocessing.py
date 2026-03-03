@@ -131,6 +131,11 @@ def estimate_baseline_snip(
     if intensity.size < 2:
         return intensity.copy()
 
+    if num_iterations < 1:
+        raise ValueError(f"num_iterations must be >= 1, got {num_iterations}")
+    if order not in (0, 1, 2):
+        raise ValueError(f"order must be 0, 1, or 2, got {order}")
+
     y = np.maximum(intensity.astype(float), 0.0)
 
     # --- LLS forward transform ---
@@ -139,17 +144,18 @@ def estimate_baseline_snip(
     if order >= 2:
         y = np.log(y + 1.0)
 
-    # Pad edges to handle boundary effects
-    v = np.pad(y, pad_width=num_iterations, mode="reflect")
+    # Pad edges to handle boundary effects; cap pad_width for short arrays
+    pad_width = min(num_iterations, len(y) - 1) if len(y) > 1 else 0
+    v = np.pad(y, pad_width=pad_width, mode="reflect")
 
-    # --- Iterative peak clipping (p from num_iterations down to 1) ---
-    for p in range(num_iterations, 0, -1):
+    # --- Iterative peak clipping (p from pad_width down to 1) ---
+    for p in range(pad_width, 0, -1):
         avg = (v[: len(v) - 2 * p] + v[2 * p :]) / 2.0
         mid = v[p : len(v) - p]
         v[p : len(v) - p] = np.minimum(mid, avg)
 
     # Remove padding
-    v = v[num_iterations : num_iterations + len(y)]
+    v = v[pad_width : pad_width + len(y)]
 
     # --- LLS inverse transform ---
     if order >= 2:
@@ -219,6 +225,13 @@ def estimate_baseline_als(
     Asymmetric Least Squares Smoothing.  Leiden University Medical Centre
     Report.
     """
+    if lam <= 0:
+        raise ValueError(f"lam must be > 0, got {lam}")
+    if not (0 < p < 1):
+        raise ValueError(f"p must be in (0, 1), got {p}")
+    if max_iterations < 1:
+        raise ValueError(f"max_iterations must be >= 1, got {max_iterations}")
+
     from scipy import sparse
     from scipy.sparse.linalg import spsolve
 

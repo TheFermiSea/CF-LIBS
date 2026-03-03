@@ -414,6 +414,12 @@ def deconvolve_peaks(
     else:
         backend_jax = use_jax and HAS_JAX
 
+    if not backend_jax and not HAS_SCIPY:
+        raise ImportError(
+            "Voigt deconvolution requires JAX or SciPy. "
+            "Install one with: pip install jax  or  pip install scipy"
+        )
+
     fit_func = _fit_group_jax if backend_jax else _fit_group_scipy
 
     all_results: List[VoigtFitResult] = []

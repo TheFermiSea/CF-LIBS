@@ -344,7 +344,7 @@ def load_atomic_data(
     )
 
 
-def partition_function(T_K: float, coeffs) -> Any:
+def partition_function(T_K: float, coeffs: Any) -> Any:
     """Evaluate polynomial partition function (JAX-compatible).
 
     ``log(U) = \\sum_i a_i (\\log T)^i``  (Irwin form)

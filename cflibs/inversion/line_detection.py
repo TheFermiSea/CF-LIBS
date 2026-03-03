@@ -260,6 +260,9 @@ def detect_line_observations(
         Exponent for rarity (line-density) weighting
     kdet_weight_clip : Tuple[float, float]
         Clamp for rarity weighting factor (min, max)
+    use_deconvolution : bool
+        If True, apply Voigt deconvolution to resolve overlapping peaks
+        before building line observations (default: False).
 
     Returns
     -------

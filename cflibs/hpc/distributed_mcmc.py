@@ -172,19 +172,18 @@ class DistributedMCMCSampler:
         DistributedMCMCResult or None
             Merged result on rank 0; ``None`` on other ranks.
         """
-        import jax
+        cfg = self.config
+
+        # GPU pinning must happen BEFORE JAX import to set CUDA_VISIBLE_DEVICES
+        if cfg.use_gpu:
+            from cflibs.hpc.gpu_config import configure_gpu
+
+            local_rank = int(self.comm.Get_rank())
+            configure_gpu(device_id=local_rank, enable_x64=True)
+
         import jax.numpy as jnp
         import jax.random as random
         from numpyro.infer import MCMC, NUTS, init_to_uniform
-
-        cfg = self.config
-
-        # Optional GPU pinning
-        if cfg.use_gpu:
-            from cflibs.hpc.gpu_config import pin_to_device
-
-            local_rank = int(self.comm.Get_rank())
-            pin_to_device(local_rank)
 
         # Broadcast observed spectrum from rank 0
         observed = self.comm.bcast(observed, root=0)
