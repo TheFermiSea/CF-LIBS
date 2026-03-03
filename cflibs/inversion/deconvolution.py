@@ -25,11 +25,13 @@ logger = get_logger("inversion.deconvolution")
 try:
     import jax  # noqa: F401
     import jax.numpy as jnp
+    from cflibs.radiation.profiles import voigt_profile_jax
 
     HAS_JAX = True
 except ImportError:
     HAS_JAX = False
     jnp = None
+    voigt_profile_jax = None
 
 try:
     from scipy.optimize import curve_fit
@@ -187,11 +189,9 @@ if HAS_JAX:
     ) -> jnp.ndarray:
         """Single Voigt profile using the Weideman Faddeeva approximation.
 
-        This imports the ``voigt_profile_jax`` from
+        Uses the ``voigt_profile_jax`` imported at module level from
         :mod:`cflibs.radiation.profiles` which is already @jit compiled.
         """
-        from cflibs.radiation.profiles import voigt_profile_jax
-
         return voigt_profile_jax(wavelength, center, sigma, gamma, amplitude)
 
     def _multi_voigt_jax(wavelength: jnp.ndarray, params: jnp.ndarray, n_peaks: int) -> jnp.ndarray:

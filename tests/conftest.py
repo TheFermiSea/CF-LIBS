@@ -14,9 +14,17 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-# Force JAX to use CPU backend before any JAX imports
-# Metal backend is experimental and causes test failures
+# Force JAX to use CPU backend before any JAX imports.
+# Metal backend is abandoned (jax-metal incompatible with JAX >= 0.6)
+# and does not support float64, which CF-LIBS requires.
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
+
+try:
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+except ImportError:
+    pass
 
 from cflibs.atomic.structures import Transition, EnergyLevel
 from cflibs.atomic.database import AtomicDatabase
