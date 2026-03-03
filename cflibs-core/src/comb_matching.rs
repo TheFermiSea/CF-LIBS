@@ -165,6 +165,13 @@ pub fn scan_comb_shifts<'py>(
 
     // Extract per-element transition wavelengths into sorted Vec<Vec<f64>>
     let n_elements = element_names.len();
+    if transition_wavelengths.len() != n_elements {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "element_names ({}) and transition_wavelengths ({}) must have the same length",
+            n_elements,
+            transition_wavelengths.len(),
+        )));
+    }
     let mut all_transitions: Vec<Vec<f64>> = Vec::with_capacity(n_elements);
     for i in 0..n_elements {
         let item = transition_wavelengths.get_item(i)?;
@@ -388,6 +395,13 @@ pub fn kdet_filter_elements<'py>(
 
     // Extract per-element transition wavelengths
     let n_elements = element_names.len();
+    if transition_wavelengths.len() != n_elements {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "element_names ({}) and transition_wavelengths ({}) must have the same length",
+            n_elements,
+            transition_wavelengths.len(),
+        )));
+    }
     let mut all_transitions: Vec<Vec<f64>> = Vec::with_capacity(n_elements);
     for i in 0..n_elements {
         let item = transition_wavelengths.get_item(i)?;

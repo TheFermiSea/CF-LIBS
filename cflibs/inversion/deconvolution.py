@@ -392,6 +392,15 @@ def deconvolve_peaks(
     DeconvolutionResult
         Aggregated fitting results across all peak groups.
     """
+    if wavelength.ndim != 1 or intensity.ndim != 1 or wavelength.shape != intensity.shape:
+        raise ValueError("wavelength and intensity must be 1-D arrays of equal length")
+    if fwhm_estimate <= 0:
+        raise ValueError(f"fwhm_estimate must be > 0, got {fwhm_estimate}")
+    if grouping_factor <= 0:
+        raise ValueError(f"grouping_factor must be > 0, got {grouping_factor}")
+    if margin_factor <= 0:
+        raise ValueError(f"margin_factor must be > 0, got {margin_factor}")
+
     if len(wavelength) == 0 or len(peak_wavelengths) == 0:
         return DeconvolutionResult(
             fit_results=[],

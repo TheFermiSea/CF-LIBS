@@ -1,5 +1,6 @@
 """Tests for Voigt deconvolution module."""
 
+import pytest
 import numpy as np
 
 from cflibs.inversion.deconvolution import (
@@ -72,6 +73,7 @@ class TestGroupPeaks:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestDeconvolveSciPy:
     """Tests using the SciPy (curve_fit) backend."""
 

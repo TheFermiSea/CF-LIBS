@@ -1,5 +1,6 @@
 """Tests for shared preprocessing module."""
 
+import pytest
 import numpy as np
 from cflibs.inversion.preprocessing import (
     estimate_baseline,
@@ -140,6 +141,7 @@ def _make_gaussian_peaks(wavelength, centers, amplitudes, sigma=0.5):
     return y
 
 
+@pytest.mark.unit
 class TestSNIPBaseline:
     def test_recovers_flat_baseline_under_peaks(self):
         wavelength = np.linspace(200, 400, 2000)
@@ -220,6 +222,7 @@ class TestSNIPBaseline:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestALSBaseline:
     def test_converges_and_tracks_slow_continuum(self):
         wavelength = np.linspace(200, 400, 1000)
@@ -260,6 +263,7 @@ class TestALSBaseline:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestBaselineMethodDispatch:
     def test_enum_values(self):
         assert BaselineMethod.MEDIAN.value == "median"
@@ -303,3 +307,9 @@ class TestBaselineMethodDispatch:
         # ALS should return a valid baseline array
         assert bl_als.shape == wavelength.shape
         assert np.all(np.isfinite(bl_als))
+
+    def test_unknown_baseline_method_raises(self):
+        wavelength = np.linspace(200, 400, 500)
+        intensity = np.full_like(wavelength, 100.0)
+        with pytest.raises(ValueError, match="Unknown baseline_method"):
+            detect_peaks_auto(wavelength, intensity, baseline_method="invalid")
