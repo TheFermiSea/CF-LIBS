@@ -1386,7 +1386,7 @@ class TestTwoZoneMCMCResult:
     """Tests for TwoZoneMCMCResult dataclass."""
 
     def test_creation(self):
-        from cflibs.inversion.bayesian import TwoZoneMCMCResult, ConvergenceStatus
+        from cflibs.inversion.bayesian import TwoZoneMCMCResult
 
         result = TwoZoneMCMCResult(
             samples={},

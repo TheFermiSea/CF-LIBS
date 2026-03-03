@@ -13,15 +13,39 @@ use crate::types::CombScoreResult;
 /// for O(N log M) complexity where N=peaks, M=transitions.
 fn count_matches(peaks: &[f64], transitions: &[f64], tolerance: f64, shift: f64) -> usize {
     let mut count = 0;
+    let mut used = vec![false; transitions.len()];
     for &peak in peaks {
         let shifted = peak + shift;
         // Binary search for the insertion point
         let idx = transitions.partition_point(|&t| t < shifted);
-        // Check right neighbor
-        if idx < transitions.len() && (transitions[idx] - shifted).abs() <= tolerance {
-            count += 1;
-        } else if idx > 0 && (transitions[idx - 1] - shifted).abs() <= tolerance {
-            // Check left neighbor
+
+        // Determine the best (closest) candidate among right and left neighbors,
+        // but only if the transition has not already been consumed.
+        let right_ok = idx < transitions.len()
+            && !used[idx]
+            && (transitions[idx] - shifted).abs() <= tolerance;
+        let left_ok = idx > 0
+            && !used[idx - 1]
+            && (transitions[idx - 1] - shifted).abs() <= tolerance;
+
+        let chosen = match (right_ok, left_ok) {
+            (true, true) => {
+                // Both candidates available; pick the closer one
+                let d_right = (transitions[idx] - shifted).abs();
+                let d_left = (transitions[idx - 1] - shifted).abs();
+                if d_left <= d_right {
+                    Some(idx - 1)
+                } else {
+                    Some(idx)
+                }
+            }
+            (true, false) => Some(idx),
+            (false, true) => Some(idx - 1),
+            (false, false) => None,
+        };
+
+        if let Some(ti) = chosen {
+            used[ti] = true;
             count += 1;
         }
     }
@@ -558,5 +582,33 @@ mod tests {
         // Clearly beyond tolerance (0.15 > 0.1)
         let peaks2 = vec![400.15];
         assert_eq!(count_matches(&peaks2, &transitions, 0.1, 0.0), 0);
+    }
+
+    #[test]
+    fn test_count_matches_one_to_one_no_double_counting() {
+        // Two peaks close to the same transition: only one should match (one-to-one).
+        let peaks = vec![400.02, 400.05];
+        let transitions = vec![400.0];
+        // Both peaks are within tolerance=0.1 of transition 400.0,
+        // but only the first peak processed should consume that transition.
+        assert_eq!(count_matches(&peaks, &transitions, 0.1, 0.0), 1);
+    }
+
+    #[test]
+    fn test_count_matches_one_to_one_distinct_transitions() {
+        // Two peaks each near a distinct transition: both should match.
+        let peaks = vec![400.02, 500.03];
+        let transitions = vec![400.0, 500.0];
+        assert_eq!(count_matches(&peaks, &transitions, 0.1, 0.0), 2);
+    }
+
+    #[test]
+    fn test_count_matches_one_to_one_three_peaks_two_transitions() {
+        // Three peaks near two transitions: at most 2 matches.
+        let peaks = vec![400.01, 400.05, 500.03];
+        let transitions = vec![400.0, 500.0];
+        // First peak consumes transition 400.0, second peak has no available
+        // transition (400.0 already used), third peak matches 500.0.
+        assert_eq!(count_matches(&peaks, &transitions, 0.1, 0.0), 2);
     }
 }

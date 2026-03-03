@@ -1,7 +1,6 @@
 """Tests for Voigt deconvolution module."""
 
 import numpy as np
-import pytest
 
 from cflibs.inversion.deconvolution import (
     VoigtFitResult,

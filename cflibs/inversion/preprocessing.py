@@ -462,8 +462,10 @@ def detect_peaks_auto(
         baseline = estimate_baseline_snip(wavelength, intensity)
     elif baseline_method == BaselineMethod.ALS:
         baseline = estimate_baseline_als(wavelength, intensity)
-    else:
+    elif baseline_method == BaselineMethod.MEDIAN:
         baseline = estimate_baseline(wavelength, intensity, window_nm=baseline_window_nm)
+    else:
+        raise ValueError(f"Unknown baseline_method: {baseline_method!r}")
     noise = estimate_noise(intensity, baseline)
 
     peaks = detect_peaks(

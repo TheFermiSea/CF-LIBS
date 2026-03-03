@@ -229,85 +229,82 @@ def load_atomic_data(
     import pandas as pd
     import sqlite3
 
-    conn = sqlite3.connect(db_path)
+    with sqlite3.connect(db_path) as conn:
+        placeholders = ",".join(["?"] * len(elements))
+        query = f"""
+            SELECT
+                l.element, l.sp_num, l.wavelength_nm, l.aki, l.ek_ev, l.gk,
+                sp.ip_ev, l.stark_w, l.stark_alpha
+            FROM lines l
+            JOIN species_physics sp ON l.element = sp.element AND l.sp_num = sp.sp_num
+            WHERE l.wavelength_nm BETWEEN ? AND ?
+            AND l.element IN ({placeholders})
+            ORDER BY l.wavelength_nm
+        """
+        params = [wavelength_range[0], wavelength_range[1]] + list(elements)
+        df = pd.read_sql_query(query, conn, params=params)
 
-    placeholders = ",".join(["?"] * len(elements))
-    query = f"""
-        SELECT
-            l.element, l.sp_num, l.wavelength_nm, l.aki, l.ek_ev, l.gk,
-            sp.ip_ev, l.stark_w, l.stark_alpha
-        FROM lines l
-        JOIN species_physics sp ON l.element = sp.element AND l.sp_num = sp.sp_num
-        WHERE l.wavelength_nm BETWEEN ? AND ?
-        AND l.element IN ({placeholders})
-        ORDER BY l.wavelength_nm
-    """
-    params = [wavelength_range[0], wavelength_range[1]] + list(elements)
-    df = pd.read_sql_query(query, conn, params=params)
+        if df.empty:
+            raise ValueError(
+                f"No atomic data for elements {elements} in range {wavelength_range}"
+            )
 
-    if df.empty:
-        raise ValueError(
-            f"No atomic data for elements {elements} in range {wavelength_range}"
-        )
+        el_map = {el: i for i, el in enumerate(elements)}
+        df["el_idx"] = df["element"].map(el_map)
 
-    el_map = {el: i for i, el in enumerate(elements)}
-    df["el_idx"] = df["element"].map(el_map)
+        element_masses = {}
+        for el in elements:
+            if el in STANDARD_MASSES:
+                element_masses[el] = STANDARD_MASSES[el]
+            else:
+                element_masses[el] = 50.0
+                logger.warning(f"No mass for {el}, using fallback 50 amu")
+        df["mass_amu"] = df["element"].map(element_masses)
 
-    element_masses = {}
-    for el in elements:
-        if el in STANDARD_MASSES:
-            element_masses[el] = STANDARD_MASSES[el]
-        else:
-            element_masses[el] = 50.0
-            logger.warning(f"No mass for {el}, using fallback 50 amu")
-    df["mass_amu"] = df["element"].map(element_masses)
+        max_stages = 3
+        n_elements = len(elements)
+        coeffs = np.zeros((n_elements, max_stages, 5), dtype=np.float32)
+        ips = np.zeros((n_elements, max_stages), dtype=np.float32)
 
-    max_stages = 3
-    n_elements = len(elements)
-    coeffs = np.zeros((n_elements, max_stages, 5), dtype=np.float32)
-    ips = np.zeros((n_elements, max_stages), dtype=np.float32)
+        coeffs[:, 0, 0] = np.log(25.0)
+        coeffs[:, 1, 0] = np.log(15.0)
+        coeffs[:, 2, 0] = np.log(10.0)
 
-    coeffs[:, 0, 0] = np.log(25.0)
-    coeffs[:, 1, 0] = np.log(15.0)
-    coeffs[:, 2, 0] = np.log(10.0)
+        try:
+            cursor = conn.cursor()
 
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            f"SELECT element, sp_num, ip_ev FROM species_physics "
-            f"WHERE element IN ({placeholders})",
-            elements,
-        )
-        for row in cursor.fetchall():
-            el, sp_num, ip_ev = row
-            if el in el_map and ip_ev is not None:
-                el_idx = el_map[el]
-                stage_idx = sp_num - 1
-                if 0 <= stage_idx < max_stages:
-                    ips[el_idx, stage_idx] = ip_ev
-
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name='partition_functions'"
-        )
-        if cursor.fetchone():
             cursor.execute(
-                f"SELECT element, sp_num, a0, a1, a2, a3, a4 "
-                f"FROM partition_functions WHERE element IN ({placeholders})",
+                f"SELECT element, sp_num, ip_ev FROM species_physics "
+                f"WHERE element IN ({placeholders})",
                 elements,
             )
             for row in cursor.fetchall():
-                el, sp_num, a0, a1, a2, a3, a4 = row
-                if el in el_map:
+                el, sp_num, ip_ev = row
+                if el in el_map and ip_ev is not None:
                     el_idx = el_map[el]
                     stage_idx = sp_num - 1
                     if 0 <= stage_idx < max_stages:
-                        coeffs[el_idx, stage_idx] = [a0, a1, a2, a3, a4]
-    except Exception as e:
-        logger.warning(f"Failed to load physics data: {e}")
-    finally:
-        conn.close()
+                        ips[el_idx, stage_idx] = ip_ev
+
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='partition_functions'"
+            )
+            if cursor.fetchone():
+                cursor.execute(
+                    f"SELECT element, sp_num, a0, a1, a2, a3, a4 "
+                    f"FROM partition_functions WHERE element IN ({placeholders})",
+                    elements,
+                )
+                for row in cursor.fetchall():
+                    el, sp_num, a0, a1, a2, a3, a4 = row
+                    if el in el_map:
+                        el_idx = el_map[el]
+                        stage_idx = sp_num - 1
+                        if 0 <= stage_idx < max_stages:
+                            coeffs[el_idx, stage_idx] = [a0, a1, a2, a3, a4]
+        except Exception as e:
+            logger.warning(f"Failed to load physics data: {e}")
 
     stark_w_raw = df["stark_w"].fillna(float("nan")).values
     stark_alpha_raw = df["stark_alpha"].fillna(0.5).values
@@ -2754,7 +2751,7 @@ class TwoZoneMCMCSampler:
             n_samples=num_samples,
             n_chains=num_chains,
             n_warmup=num_warmup,
-            inference_data=az.from_numpyro(mcmc) if HAS_ARVIZ else None,
+            inference_data=self._to_arviz(mcmc),
         )
 
         logger.info(
@@ -2764,6 +2761,16 @@ class TwoZoneMCMCSampler:
         )
 
         return result
+
+    def _to_arviz(self, mcmc: Any) -> Any:
+        """Convert MCMC results to ArviZ InferenceData."""
+        if not HAS_ARVIZ:
+            return None
+        try:
+            return az.from_numpyro(mcmc)
+        except Exception as e:
+            logger.warning(f"ArviZ conversion failed: {e}")
+            return None
 
 
 def run_mcmc(

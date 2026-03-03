@@ -418,7 +418,7 @@ def detect_line_observations(
             # Collect all peak wavelengths for deconvolution
             peak_wl_arr = np.array([pw for _, pw in peaks], dtype=float)
             if len(peak_wl_arr) > 0:
-                from cflibs.inversion.preprocessing import estimate_baseline, estimate_noise
+                from cflibs.inversion.preprocessing import estimate_baseline
 
                 baseline = estimate_baseline(wavelength, intensity)
                 baseline_subtracted = intensity - baseline
@@ -761,17 +761,20 @@ def _scan_comb_shifts(
     comb_max_missing_fraction: float,
 ) -> Tuple[Optional[CombShiftSummary], Optional[CombShiftSummary]]:
     if HAS_RUST_CORE:
-        return _scan_comb_shifts_dispatch_rust(
-            peaks=peaks,
-            transitions_by_element=transitions_by_element,
-            shift_grid=shift_grid,
-            total_peaks=total_peaks,
-            wavelength_tolerance_nm=wavelength_tolerance_nm,
-            comb_min_matches=comb_min_matches,
-            comb_min_precision=comb_min_precision,
-            comb_min_recall=comb_min_recall,
-            comb_max_missing_fraction=comb_max_missing_fraction,
-        )
+        try:
+            return _scan_comb_shifts_dispatch_rust(
+                peaks=peaks,
+                transitions_by_element=transitions_by_element,
+                shift_grid=shift_grid,
+                total_peaks=total_peaks,
+                wavelength_tolerance_nm=wavelength_tolerance_nm,
+                comb_min_matches=comb_min_matches,
+                comb_min_precision=comb_min_precision,
+                comb_min_recall=comb_min_recall,
+                comb_max_missing_fraction=comb_max_missing_fraction,
+            )
+        except Exception as e:
+            logger.warning(f"Rust comb shift scan failed, falling back to Python: {e}")
 
     best_summary: Optional[CombShiftSummary] = None
     fallback_summary: Optional[CombShiftSummary] = None
@@ -923,28 +926,31 @@ def _kdet_filter_elements(
     shift_grid = _build_shift_grid(shift_scan_nm, shift_step_nm, wl_step, wavelength_tolerance_nm)
 
     if HAS_RUST_CORE:
-        element_names = list(transitions_by_element.keys())
-        transition_wls = [
-            sorted([t.wavelength_nm for t in transitions_by_element[el]])
-            for el in element_names
-        ]
-        passed_names = list(
-            _kdet_filter_elements_rust(
-                np.asarray(peak_wavelengths, dtype=np.float64),
-                transition_wls,
-                element_names,
-                np.asarray(shift_grid, dtype=np.float64),
-                wavelength_tolerance_nm,
-                kdet_min_score,
-                kdet_min_candidates,
-                kdet_rarity_power,
-                kdet_weight_clip,
+        try:
+            element_names = list(transitions_by_element.keys())
+            transition_wls = [
+                sorted([t.wavelength_nm for t in transitions_by_element[el]])
+                for el in element_names
+            ]
+            passed_names = list(
+                _kdet_filter_elements_rust(
+                    np.asarray(peak_wavelengths, dtype=np.float64),
+                    transition_wls,
+                    element_names,
+                    np.asarray(shift_grid, dtype=np.float64),
+                    wavelength_tolerance_nm,
+                    kdet_min_score,
+                    kdet_min_candidates,
+                    kdet_rarity_power,
+                    kdet_weight_clip,
+                )
             )
-        )
-        filtered = {el: transitions_by_element[el] for el in passed_names}
-        if filtered and len(filtered) < len(transitions_by_element):
-            warnings.append("kdet_filtered_elements")
-        return filtered, warnings
+            filtered = {el: transitions_by_element[el] for el in passed_names}
+            if filtered and len(filtered) < len(transitions_by_element):
+                warnings.append("kdet_filtered_elements")
+            return filtered, warnings
+        except Exception as e:
+            logger.warning(f"Rust kdet filter failed, falling back to Python: {e}")
 
     densities = []
     element_density: Dict[str, float] = {}

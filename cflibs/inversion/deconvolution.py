@@ -13,8 +13,8 @@ Two backends are provided:
 The public entry points are :func:`group_peaks` and :func:`deconvolve_peaks`.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional
 
 import numpy as np
 
@@ -23,9 +23,8 @@ from cflibs.core.logging_config import get_logger
 logger = get_logger("inversion.deconvolution")
 
 try:
-    import jax
+    import jax  # noqa: F401
     import jax.numpy as jnp
-    from jax import jit
 
     HAS_JAX = True
 except ImportError:

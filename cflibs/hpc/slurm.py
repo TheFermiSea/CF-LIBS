@@ -582,10 +582,10 @@ def create_distributed_mcmc_job(
 
     lines = [
         "#!/bin/bash",
-        f"#SBATCH --job-name=cflibs-mcmc",
+        "#SBATCH --job-name=cflibs-mcmc",
         f"#SBATCH --partition={partition}",
         f"#SBATCH --ntasks={ntasks}",
-        f"#SBATCH --cpus-per-task=2",
+        "#SBATCH --cpus-per-task=2",
         f"#SBATCH --mem={mem_gb}G",
         f"#SBATCH --time={time_limit}",
         f"#SBATCH --output={output_dir}/cflibs-mcmc-%j.out",
@@ -602,12 +602,12 @@ def create_distributed_mcmc_job(
     # Module loading
     if modules:
         for mod in modules:
-            lines.append(f"module load {mod}")
+            lines.append(f"module load {shlex.quote(mod)}")
         lines.append("")
 
     # Conda env
     if conda_env:
-        lines.append(f"conda activate {conda_env}")
+        lines.append(f"conda activate {shlex.quote(conda_env)}")
         lines.append("")
 
     # JAX environment variables
@@ -622,8 +622,11 @@ def create_distributed_mcmc_job(
         lines.append("export JAX_PLATFORMS=cpu")
     lines.append("")
 
-    # Python inline script
+    # Python inline script — use repr() for safe string escaping in Python literals
     use_gpu = "True" if gpus_per_task > 0 else "False"
+    db_path_repr = repr(db_path)
+    observed_path_repr = repr(observed_path)
+    output_dir_repr = repr(output_dir)
     lines.extend([
         "# Run distributed MCMC",
         f"mpirun -n {ntasks} python -c \"",
@@ -631,18 +634,18 @@ def create_distributed_mcmc_job(
         "from cflibs.inversion.bayesian import BayesianForwardModel, bayesian_model",
         "from cflibs.hpc.distributed_mcmc import DistributedMCMCSampler, DistributedMCMCConfig",
         "",
-        f"model = BayesianForwardModel('{db_path}', {elements!r}, ({wl_min}, {wl_max}))",
-        f"observed = np.load('{observed_path}')",
-        f"config = DistributedMCMCConfig(",
+        f"model = BayesianForwardModel({db_path_repr}, {elements!r}, ({wl_min}, {wl_max}))",
+        f"observed = np.load({observed_path_repr})",
+        "config = DistributedMCMCConfig(",
         f"    chains_per_rank={chains_per_rank},",
         f"    num_warmup={num_warmup},",
         f"    num_samples={num_samples},",
         f"    use_gpu={use_gpu},",
-        f")",
+        ")",
         "sampler = DistributedMCMCSampler(model, bayesian_model, config=config)",
         "result = sampler.run(observed)",
         "if result is not None:",
-        f"    np.savez('{output_dir}/mcmc_result.npz', **result.samples)",
+        f"    np.savez({output_dir_repr} + '/mcmc_result.npz', **result.samples)",
         "    print(f'R-hat: {{result.r_hat}}')",
         "    print(f'ESS: {{result.ess}}')",
         "\"",

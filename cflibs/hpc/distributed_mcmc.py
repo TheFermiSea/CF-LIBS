@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -38,29 +38,20 @@ except ImportError:
     HAS_MPI = False
     MPI = None
 
-try:
-    import jax
-    import jax.numpy as jnp
-
-    HAS_JAX = True
-except ImportError:
-    HAS_JAX = False
+# JAX, NumPyro, and ArviZ are imported lazily in run() so that
+# CUDA_VISIBLE_DEVICES can be set before JAX initialisation.
+HAS_JAX = False
+HAS_ARVIZ = False
+HAS_NUMPYRO = False
 
 try:
-    import arviz as az
+    import importlib.util
 
-    HAS_ARVIZ = True
-except ImportError:
-    HAS_ARVIZ = False
-    az = None
-
-try:
-    import numpyro
-    from numpyro.infer import MCMC, NUTS, init_to_uniform
-
-    HAS_NUMPYRO = True
-except ImportError:
-    HAS_NUMPYRO = False
+    HAS_JAX = importlib.util.find_spec("jax") is not None
+    HAS_ARVIZ = importlib.util.find_spec("arviz") is not None
+    HAS_NUMPYRO = importlib.util.find_spec("numpyro") is not None
+except Exception:
+    pass
 
 
 @dataclass
@@ -148,6 +139,7 @@ class DistributedMCMCSampler:
         model_fn: Any,
         config: DistributedMCMCConfig = DistributedMCMCConfig(),
         comm: Any = None,
+        **model_kwargs: Any,
     ):
         if not HAS_MPI:
             raise ImportError("mpi4py required. Install with: pip install mpi4py")
@@ -159,6 +151,7 @@ class DistributedMCMCSampler:
         self.forward_model = forward_model
         self.model_fn = model_fn
         self.config = config
+        self.model_kwargs = model_kwargs
         self.comm = comm if comm is not None else MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
         self.size = self.comm.Get_size()
@@ -179,7 +172,10 @@ class DistributedMCMCSampler:
         DistributedMCMCResult or None
             Merged result on rank 0; ``None`` on other ranks.
         """
+        import jax
+        import jax.numpy as jnp
         import jax.random as random
+        from numpyro.infer import MCMC, NUTS, init_to_uniform
 
         cfg = self.config
 
@@ -197,9 +193,11 @@ class DistributedMCMCSampler:
         # Per-rank seed for reproducibility
         rank_seed = cfg.seed_offset + self.rank
 
-        # Build model closure
+        # Build model closure (forward extra kwargs like prior_config, noise_params)
+        model_kwargs = self.model_kwargs
+
         def model(obs):
-            self.model_fn(self.forward_model, obs)
+            self.model_fn(self.forward_model, obs, **model_kwargs)
 
         # Create and run local MCMC
         kernel = NUTS(
@@ -274,6 +272,8 @@ class DistributedMCMCSampler:
 
         if HAS_ARVIZ and total_chains > 1:
             try:
+                import arviz as az
+
                 # Build InferenceData manually from combined chains
                 posterior_dict = {}
                 for key, arr in combined.items():

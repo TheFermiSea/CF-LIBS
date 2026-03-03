@@ -24,7 +24,7 @@ class TestGPUConfig:
             from cflibs.hpc.gpu_config import configure_gpu
 
             # Should not crash even without GPU
-            result = configure_gpu(device_id=2, memory_fraction=0.75)
+            configure_gpu(device_id=2, memory_fraction=0.75)
             assert os.environ["CUDA_VISIBLE_DEVICES"] == "2"
             assert os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] == "0.75"
 
