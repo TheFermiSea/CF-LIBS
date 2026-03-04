@@ -157,9 +157,6 @@ except ImportError:
     dynesty = None
 
 
-# Backward-compat alias used throughout this module
-M_ELECTRON = M_E
-
 # Standard atomic masses for fallback [amu]
 STANDARD_MASSES = {
     "H": 1.008,
@@ -2293,7 +2290,7 @@ class TwoZoneBayesianForwardModel:
         # κ₀ = (π e² / m_e c) × f × n_lower  [cm⁻¹ at line center]
         # With f stored in data.f_osc
         f_osc = data.f_osc if data.f_osc is not None else jnp.ones_like(data.aki) * 1e-2
-        kappa_0 = (jnp.pi * E_CHARGE**2 / (M_ELECTRON * C_LIGHT)) * f_osc * n_lower
+        kappa_0 = (jnp.pi * E_CHARGE**2 / (M_E * C_LIGHT)) * f_osc * n_lower
 
         # Distribute over Voigt profile: κ(λ) = Σ κ₀ × φ(λ)
         absorption = jnp.sum(kappa_0 * profile, axis=1)

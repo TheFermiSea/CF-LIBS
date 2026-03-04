@@ -72,9 +72,6 @@ from cflibs.inversion.boltzmann import LineObservation
 
 logger = get_logger("inversion.self_absorption")
 
-# Alias for backward compatibility with internal references
-K_BOLTZMANN = KB
-
 
 def _escape_factor(tau: float) -> float:
     """Photon escape factor f(tau) = (1 - exp(-tau)) / tau."""
@@ -917,7 +914,7 @@ class CurveOfGrowthAnalyzer:
         # Pre-calculate Doppler velocity
         # v_D = sqrt(2 * k * T / m)
         mass_kg = mass_amu * M_PROTON
-        self._v_thermal = np.sqrt(2 * K_BOLTZMANN * temperature_K / mass_kg)
+        self._v_thermal = np.sqrt(2 * KB * temperature_K / mass_kg)
 
     def _compute_doppler_width(self, wavelength_nm: float) -> float:
         """
