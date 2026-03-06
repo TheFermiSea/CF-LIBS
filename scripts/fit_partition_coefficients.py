@@ -87,13 +87,12 @@ def fit_irwin_polynomial(temperatures_K: np.ndarray, U_values: np.ndarray, degre
     return list(coeffs), max_rel_error, max_key_error
 
 
-def insert_coefficients(db_path: str, element: str, stage: int, coeffs: list, dry_run: bool):
+def insert_coefficients(conn: sqlite3.Connection | None, element: str, stage: int, coeffs: list, dry_run: bool):
     """Insert fitted coefficients into the partition_functions table."""
-    if dry_run:
+    if dry_run or conn is None:
         print(f"  [DRY RUN] Would insert {element} stage {stage}: {coeffs}")
         return
 
-    conn = sqlite3.connect(db_path)
     conn.execute(
         """
         INSERT OR REPLACE INTO partition_functions
@@ -102,8 +101,6 @@ def insert_coefficients(db_path: str, element: str, stage: int, coeffs: list, dr
         """,
         (element, stage, *coeffs, 2000.0, 20000.0, "NIST ASD fit"),
     )
-    conn.commit()
-    conn.close()
 
 
 def main():
@@ -120,6 +117,8 @@ def main():
     nist_data = load_nist_reference()
     results = {}
     all_ok = True
+
+    conn = sqlite3.connect(args.db) if not args.dry_run else None
 
     for element, stages in sorted(nist_data.items()):
         print(f"\n{'='*50}")
@@ -155,7 +154,11 @@ def main():
                 "n_points": len(temps),
             }
 
-            insert_coefficients(args.db, element, stage, coeffs, args.dry_run)
+            insert_coefficients(conn, element, stage, coeffs, args.dry_run)
+
+    if conn is not None:
+        conn.commit()
+        conn.close()
 
     # Summary
     print(f"\n{'='*50}")
