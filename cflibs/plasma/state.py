@@ -98,7 +98,7 @@ def mass_fractions_to_number_fractions(
     for element, mass_fraction in mass_fractions.items():
         if mass_fraction < 0.0:
             raise ValueError(f"mass_fractions cannot contain negative components: {element}")
-        if mass_fraction <= 0.0:
+        if mass_fraction == 0.0:
             continue
         if element not in atomic_masses_amu:
             raise KeyError(f"Missing atomic mass for element {element!r}")

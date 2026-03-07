@@ -7,6 +7,8 @@ backends such as Metal that do not support ``float64`` or complex dtypes.
 
 from __future__ import annotations
 
+from typing import Any
+
 try:
     import jax
     import jax.numpy as jnp
@@ -30,15 +32,21 @@ def jax_active_backend() -> str | None:
 
 def jax_backend_supports_x64() -> bool:
     """Whether the active backend supports ``float64`` execution."""
-    return jax_active_backend() != "metal"
+    backend = jax_active_backend()
+    if backend is None:
+        return False
+    return backend != "metal"
 
 
 def jax_backend_supports_complex() -> bool:
     """Whether the active backend supports complex-valued arrays."""
-    return jax_active_backend() != "metal"
+    backend = jax_active_backend()
+    if backend is None:
+        return False
+    return backend != "metal"
 
 
-def jax_default_real_dtype():
+def jax_default_real_dtype() -> Any:
     """Return the preferred real dtype for the active backend."""
     if not HAS_JAX:
         raise ImportError("JAX is not installed")
@@ -49,7 +57,7 @@ def jax_default_real_dtype():
     return jnp.float32
 
 
-def jax_default_complex_dtype():
+def jax_default_complex_dtype() -> Any:
     """Return the preferred complex dtype for the active backend."""
     if not HAS_JAX:
         raise ImportError("JAX is not installed")

@@ -552,9 +552,11 @@ if HAS_JAX:
         SIAM J. Numer. Anal. 31, 1497-1518.
         """
         if _weideman_uses_real_fallback:
-            z = jnp.asarray(z, dtype=_weideman_complex_dtype)
-            real, imag = _faddeeva_weideman_real_parts_jax(jnp.real(z), jnp.imag(z))
-            return real + 1j * imag
+            raise NotImplementedError(
+                "Direct complex Faddeeva evaluation is not supported on backends "
+                "without complex dtype support (e.g. Metal). Use "
+                "_faddeeva_weideman_real_parts_jax(x, y) instead."
+            )
         return _faddeeva_weideman_complex_jax(z)
 
     @jit
