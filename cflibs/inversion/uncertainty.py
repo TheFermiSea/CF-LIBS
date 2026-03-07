@@ -184,7 +184,7 @@ def saha_factor_with_uncertainty(
     """
     Calculate Saha factor with uncertainty propagation.
 
-    S = 2 * (SAHA_CONST / n_e) * T^1.5 * exp(-IP/T) * (U_II/U_I)
+    S = (SAHA_CONST / n_e) * T^1.5 * exp(-IP/T) * (U_II/U_I)
 
     Note: Currently n_e is treated as exact (no uncertainty).
     For full uncertainty propagation, n_e would need to be a ufloat.
@@ -212,9 +212,7 @@ def saha_factor_with_uncertainty(
     check_uncertainties_available()
 
     S_raw = (saha_const / n_e) * (T_eV_u**1.5) * umath.exp(-ionization_potential_eV / T_eV_u)
-    # Factor of 2 is the electron spin degeneracy g_e; SAHA_CONST_CM3 does not
-    # include it (consistent with solver.py:114).
-    S = S_raw * 2.0 * (U_II / U_I)
+    S = S_raw * (U_II / U_I)
 
     return S
 
