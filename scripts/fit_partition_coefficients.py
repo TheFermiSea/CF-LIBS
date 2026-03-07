@@ -120,45 +120,48 @@ def main():
 
     conn = sqlite3.connect(args.db) if not args.dry_run else None
 
-    for element, stages in sorted(nist_data.items()):
-        print(f"\n{'='*50}")
-        print(f"Element: {element}")
-        print(f"{'='*50}")
+    try:
+        for element, stages in sorted(nist_data.items()):
+            print(f"\n{'='*50}")
+            print(f"Element: {element}")
+            print(f"{'='*50}")
 
-        results[element] = {}
-        for stage_str, temp_values in sorted(stages.items()):
-            stage = int(stage_str)
-            stage_label = "I" * stage
+            results[element] = {}
+            for stage_str, temp_values in sorted(stages.items()):
+                stage = int(stage_str)
+                stage_label = "I" * stage
 
-            temps = np.array([float(t) for t in sorted(temp_values.keys())])
-            U_vals = np.array([temp_values[str(int(t))] for t in temps])
+                temps = np.array([float(t) for t in sorted(temp_values.keys())])
+                U_vals = np.array([temp_values[str(int(t))] for t in temps])
 
-            coeffs, max_err, max_key_err = fit_irwin_polynomial(temps, U_vals)
+                coeffs, max_err, max_key_err = fit_irwin_polynomial(temps, U_vals)
 
-            status = "OK" if max_key_err < 0.05 else ("WARN" if max_key_err < 0.10 else "FAIL")
-            if max_key_err >= 0.05:
-                all_ok = False
+                status = "OK" if max_key_err < 0.05 else ("WARN" if max_key_err < 0.10 else "FAIL")
+                if max_key_err >= 0.05:
+                    all_ok = False
 
-            print(f"\n  {element} {stage_label}:")
-            print(f"    Coefficients: {[f'{c:.8e}' for c in coeffs]}")
-            print(f"    Max relative error (all):  {max_err:.4%}")
-            print(f"    Max relative error (key):  {max_key_err:.4%}  [{status}]")
+                print(f"\n  {element} {stage_label}:")
+                print(f"    Coefficients: {[f'{c:.8e}' for c in coeffs]}")
+                print(f"    Max relative error (all):  {max_err:.4%}")
+                print(f"    Max relative error (key):  {max_key_err:.4%}  [{status}]")
 
-            results[element][stage_str] = {
-                "coefficients": coeffs,
-                "max_rel_error": max_err,
-                "max_key_error": max_key_err,
-                "status": status,
-                "t_min": float(temps[0]),
-                "t_max": float(temps[-1]),
-                "n_points": len(temps),
-            }
+                results[element][stage_str] = {
+                    "coefficients": coeffs,
+                    "max_rel_error": max_err,
+                    "max_key_error": max_key_err,
+                    "status": status,
+                    "t_min": float(temps[0]),
+                    "t_max": float(temps[-1]),
+                    "n_points": len(temps),
+                }
 
-            insert_coefficients(conn, element, stage, coeffs, args.dry_run)
+                insert_coefficients(conn, element, stage, coeffs, args.dry_run)
 
-    if conn is not None:
-        conn.commit()
-        conn.close()
+        if conn is not None:
+            conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
 
     # Summary
     print(f"\n{'='*50}")

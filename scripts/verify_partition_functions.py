@@ -31,6 +31,8 @@ TEMPERATURES_K = [5000, 10000, 15000, 20000]
 
 def _load_nist_reference() -> dict:
     """Load NIST partition function reference from the canonical JSON fixture."""
+    if not REFERENCE_FILE.is_file():
+        raise SystemExit(f"NIST reference file not found: {REFERENCE_FILE}")
     with open(REFERENCE_FILE) as f:
         data = json.load(f)
     # Convert to {element: {stage_int: {T_int: U}}} format

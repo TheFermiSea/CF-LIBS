@@ -19,7 +19,13 @@ NIST_REF_DIR = ROOT / "tests" / "data" / "nist_reference"
 
 def _load_nist_json(filename: str) -> dict:
     """Load a NIST reference JSON file, filtering out metadata keys."""
-    with open(NIST_REF_DIR / filename) as f:
+    ref_path = NIST_REF_DIR / filename
+    if not ref_path.is_file():
+        raise SystemExit(
+            f"NIST reference file not found: {ref_path}\n"
+            "Ensure the NIST reference fixtures are present."
+        )
+    with open(ref_path) as f:
         data = json.load(f)
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
