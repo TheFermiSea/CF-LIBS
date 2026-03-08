@@ -75,36 +75,35 @@ class SahaBoltzmannSolver(SolverStrategy):
         U_I = self.calculate_partition_function(element, 1, T_e_eV)
         U_II = self.calculate_partition_function(element, 2, T_e_eV)
 
-        saha_ratio_I = (
-            (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_e_eV)
-        )
+        S1 = (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_e_eV)
 
-        # n_I + n_II = n_total
-        # n_II = saha_ratio_I * n_I
-        # n_I + saha_ratio_I * n_I = n_total
-        # n_I = n_total / (1 + saha_ratio_I)
+        # Solve the coupled system:
+        #   n_II / n_I = S1
+        #   n_III / n_II = S2  (if available)
+        #   n_total = n_I + n_II + n_III
+        #
+        # => n_I = n_total / (1 + S1 + S1*S2)
+        # => n_II = S1 * n_I
+        # => n_III = S2 * n_II
 
-        n_I = total_density_cm3 / (1.0 + saha_ratio_I)
-        n_II = total_density_cm3 - n_I
-
-        result = {1: n_I}
-
-        # If we have IP for stage II and n_II is significant, calculate stage III
-        if ip_II is not None and n_II > total_density_cm3 * 1e-6:
+        S2 = 0.0
+        if ip_II is not None:
             U_III = self.calculate_partition_function(element, 3, T_e_eV)
-            saha_ratio_II = (
+            S2 = (
                 (SAHA_CONST_CM3 / n_e_cm3)
                 * (T_e_eV**1.5)
                 * (U_III / U_II)
                 * np.exp(-ip_II / T_e_eV)
             )
-            n_III = n_II * saha_ratio_II / (1.0 + saha_ratio_II)
-            n_II = n_II - n_III
-            result[2] = n_II
-            if n_III > total_density_cm3 * 1e-6:
-                result[3] = n_III
-        else:
-            result[2] = n_II
+
+        denom = 1.0 + S1 + S1 * S2
+        n_I = total_density_cm3 / denom
+        n_II = S1 * n_I
+        n_III = S2 * n_II
+
+        result = {1: n_I, 2: n_II}
+        if n_III > total_density_cm3 * 1e-6:
+            result[3] = n_III
 
         return result
 
@@ -210,9 +209,7 @@ class SahaBoltzmannSolver(SolverStrategy):
 
         # Use arbitrary total density; fractions are independent of it
         total_density = 1.0
-        stage_densities = self.solve_ionization_balance(
-            element, T_e_eV, n_e_cm3, total_density
-        )
+        stage_densities = self.solve_ionization_balance(element, T_e_eV, n_e_cm3, total_density)
         total = sum(stage_densities.values())
         if total <= 0.0:
             raise ValueError(

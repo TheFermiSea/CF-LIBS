@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
-from cflibs.core.constants import KB_EV, EV_TO_K
+from cflibs.core.constants import KB_EV, EV_TO_K, SAHA_CONST_CM3
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
 
@@ -164,7 +164,7 @@ class GoldenSpectrumGenerator:
         n_lines_per_element: int = 10,
         seed: int = 42,
         include_ionic: bool = True,
-        min_intensity: float = 10.0,
+        min_intensity: float = 0.1,
     ) -> GoldenSpectrum:
         """
         Generate a golden spectrum with known parameters.
@@ -192,7 +192,6 @@ class GoldenSpectrumGenerator:
             Synthetic spectrum with ground truth parameters
         """
         rng = np.random.default_rng(seed)
-        temperature_K / EV_TO_K
 
         # Normalize concentrations to sum to 1.0
         total_c = sum(concentrations.values())
@@ -202,37 +201,54 @@ class GoldenSpectrumGenerator:
 
         all_observations = []
 
+        T_eV = temperature_K / EV_TO_K
         for element, concentration in concentrations.items():
-            # Get transitions for this element
+            # Pre-compute Saha ratios and 3-stage coupled fractions
+            ip_I = self._get_ionization_potential(element, 1) or 7.0
+            U_I = self._get_partition_function(element, 1, temperature_K)
+            U_II = self._get_partition_function(element, 2, temperature_K)
+            S1 = (
+                (SAHA_CONST_CM3 / electron_density_cm3)
+                * (T_eV**1.5)
+                * (U_II / U_I)
+                * np.exp(-ip_I / T_eV)
+            )
+
+            ip_II = self._get_ionization_potential(element, 2)
+            S2 = 0.0
+            if ip_II is not None:
+                U_III = self._get_partition_function(element, 3, temperature_K)
+                S2 = (
+                    (SAHA_CONST_CM3 / electron_density_cm3)
+                    * (T_eV**1.5)
+                    * (U_III / U_II)
+                    * np.exp(-ip_II / T_eV)
+                )
+            denom = 1.0 + S1 + S1 * S2
+            f_I = 1.0 / denom
+            f_II = S1 / denom
+
             for ion_stage in [1, 2] if include_ionic else [1]:
                 transitions = self._get_element_transitions(element, ion_stage, n_lines_per_element)
 
                 # Get partition function (approximate if not in database)
                 U = self._get_partition_function(element, ion_stage, temperature_K)
 
-                # Get ionization potential for Saha correction
-                if ion_stage == 2:
-                    ip = self._get_ionization_potential(element)
-                else:
-                    ip = None
+                # Stage fraction: what fraction of this element is in this stage
+                stage_fraction = f_I if ion_stage == 1 else f_II
 
                 for trans in transitions:
                     # Calculate intensity using Boltzmann distribution
-                    # I ∝ C × n × (g_k × A_ki / U) × exp(-E_k / kT)
+                    # I ∝ C × f_stage × (g_k × A_ki / U) × exp(-E_k / kT)
                     E_k = trans["E_k_ev"]
                     g_k = trans["g_k"]
                     A_ki = trans["A_ki"]
                     wavelength = trans["wavelength_nm"]
 
                     boltzmann_factor = np.exp(-E_k / (KB_EV * temperature_K))
-                    base_intensity = concentration * g_k * A_ki * boltzmann_factor / U
-
-                    # Apply Saha correction for ionic lines
-                    if ion_stage == 2 and ip is not None:
-                        saha_factor = self._calculate_saha_factor(
-                            temperature_K, electron_density_cm3, ip
-                        )
-                        base_intensity *= saha_factor
+                    base_intensity = (
+                        concentration * stage_fraction * g_k * A_ki * boltzmann_factor / U
+                    )
 
                     # Scale to reasonable intensity values
                     intensity = base_intensity * 1e-4  # Arbitrary scaling
@@ -362,27 +378,116 @@ class GoldenSpectrumGenerator:
         }
         return fallback.get((element, ion_stage), 10.0)
 
-    def _get_ionization_potential(self, element: str) -> float:
-        """Get ionization potential from database or estimate."""
+    def _get_ionization_potential(self, element: str, stage: int = 1) -> float | None:
+        """Get ionization potential from database or estimate.
+
+        Parameters
+        ----------
+        element : str
+            Element symbol
+        stage : int
+            Ionization stage (1 = neutral → singly ionized, 2 = singly → doubly)
+
+        Returns
+        -------
+        float or None
+            Ionization potential in eV, or None if unavailable for stage > 1
+        """
         try:
-            ip = self.atomic_db.get_ionization_potential(element, 1)
+            ip = self.atomic_db.get_ionization_potential(element, stage)
             if ip is not None:
                 return ip
         except Exception:
             pass
 
-        # Fallback values for common elements
-        fallback = {"Fe": 7.87, "Cu": 7.73, "Al": 5.99, "Ti": 6.83, "Mg": 7.65, "Ca": 6.11}
-        return fallback.get(element, 7.0)
+        if stage == 1:
+            # Fallback values for common elements (stage 1 only)
+            fallback = {"Fe": 7.87, "Cu": 7.73, "Al": 5.99, "Ti": 6.83, "Mg": 7.65, "Ca": 6.11}
+            return fallback.get(element, 7.0)
+        return None
 
-    def _calculate_saha_factor(self, temperature_K: float, n_e: float, ip_eV: float) -> float:
-        """Calculate Saha ionization factor n_II/n_I."""
-        from cflibs.core.constants import SAHA_CONST_CM3
+    def compute_equilibrium_ne(
+        self,
+        temperature_K: float,
+        concentrations: Dict[str, float],
+        pressure_pa: float = 101325.0,
+        n_e_guess: float = 1e17,
+        max_iter: int = 50,
+        tol: float = 1e-3,
+    ) -> float:
+        """
+        Compute self-consistent electron density from pressure balance.
+
+        Iteratively solves:
+            n_total = P / (kT × (1 + Z_avg))
+            n_e = Z_avg × n_total
+
+        where Z_avg = Σ C_s × S_s / (1 + S_s) depends on n_e via the Saha ratio.
+
+        Parameters
+        ----------
+        temperature_K : float
+            Plasma temperature in Kelvin
+        concentrations : Dict[str, float]
+            Elemental concentrations (number fractions, sum to 1)
+        pressure_pa : float
+            Ambient pressure in Pa (default: 1 atm)
+        n_e_guess : float
+            Initial guess for n_e in cm^-3
+        max_iter : int
+            Maximum iterations
+        tol : float
+            Fractional convergence tolerance for n_e
+
+        Returns
+        -------
+        float
+            Self-consistent electron density in cm^-3
+        """
+        from cflibs.core.constants import KB
 
         T_eV = temperature_K / EV_TO_K
-        # S = (SAHA_CONST / n_e) × T_eV^1.5 × exp(-IP/T_eV)
-        S = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * np.exp(-ip_eV / T_eV)
-        return S
+        n_e = n_e_guess
+
+        # Pre-compute temperature-dependent quantities (constant across iterations)
+        element_data = {}
+        for el, C_s in concentrations.items():
+            ip_I = self._get_ionization_potential(el, 1) or 7.0
+            U_I = self._get_partition_function(el, 1, temperature_K)
+            U_II = self._get_partition_function(el, 2, temperature_K)
+            boltz_I = (T_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_eV)
+
+            ip_II = self._get_ionization_potential(el, 2)
+            boltz_II = 0.0
+            if ip_II is not None:
+                U_III = self._get_partition_function(el, 3, temperature_K)
+                boltz_II = (T_eV**1.5) * (U_III / U_II) * np.exp(-ip_II / T_eV)
+            element_data[el] = (C_s, boltz_I, boltz_II)
+
+        for _ in range(max_iter):
+            avg_Z = 0.0
+            for el, (C_s, boltz_I, boltz_II) in element_data.items():
+                S1 = (SAHA_CONST_CM3 / n_e) * boltz_I
+                S2 = (SAHA_CONST_CM3 / n_e) * boltz_II if boltz_II > 0 else 0.0
+
+                # avg_Z = <Z> = (S1 + 2*S1*S2) / (1 + S1 + S1*S2)
+                denom = 1.0 + S1 + S1 * S2
+                avg_Z += C_s * (S1 + 2.0 * S1 * S2) / denom
+
+            n_total_m3 = pressure_pa / (KB * temperature_K * (1.0 + avg_Z))
+            n_total_cm3 = n_total_m3 * 1e-6
+            n_e_new = avg_Z * n_total_cm3
+
+            if n_e_new > 0 and abs(n_e_new - n_e) / n_e < tol:
+                return n_e_new
+            n_e = 0.5 * n_e + 0.5 * n_e_new
+
+        logger.warning(
+            "compute_equilibrium_ne did not converge after %d iterations " "(last n_e=%.3e cm^-3)",
+            max_iter,
+            n_e,
+        )
+        return n_e
 
 
 class NoiseModel:

@@ -66,6 +66,7 @@ class TestGoldenSpectrumGenerator:
             concentrations={"Fe": 0.7, "H": 0.3},
             n_lines_per_element=5,
             seed=42,
+            min_intensity=0.01,
         )
 
         # Check both elements present
@@ -209,6 +210,7 @@ class TestNoiseModel:
             electron_density_cm3=1e17,
             concentrations={"Fe": 1.0},
             seed=42,
+            min_intensity=10.0,  # Above NoiseModel's clamp at 1.0
         )
 
         noisy = noise_model.apply(golden)
@@ -403,3 +405,70 @@ class TestGoldenSpectrumProperties:
         assert golden.electron_density_cm3 == 1e17
         assert len(golden.line_observations) == 1
         np.testing.assert_allclose(golden.temperature_eV, 10000.0 / 11604.5, rtol=0.01)
+
+
+class TestSelfConsistentElectronDensity:
+    """Tests for self-consistent n_e and round-trip recovery."""
+
+    @pytest.mark.requires_db
+    def test_compute_equilibrium_ne(self, atomic_db):
+        """Test that compute_equilibrium_ne converges to a physical value."""
+        generator = GoldenSpectrumGenerator(atomic_db)
+
+        n_e = generator.compute_equilibrium_ne(
+            temperature_K=10000.0,
+            concentrations={"Fe": 1.0},
+        )
+
+        # n_e should be positive and physically reasonable for 1 atm, 10000 K
+        assert n_e > 1e14
+        assert n_e < 1e19
+
+    @pytest.mark.requires_db
+    @pytest.mark.slow
+    def test_round_trip_self_consistent_ne(self, atomic_db):
+        """Round-trip with self-consistent n_e should recover all parameters.
+
+        Uses compute_equilibrium_ne to generate golden spectrum at the
+        physically correct n_e for the given T and pressure, then checks
+        that the solver recovers T, n_e, and concentrations.
+        """
+        generator = GoldenSpectrumGenerator(atomic_db)
+
+        T_K = 10000.0
+        concentrations = {"Fe": 1.0}
+
+        # Compute self-consistent n_e at 1 atm
+        n_e_eq = generator.compute_equilibrium_ne(T_K, concentrations)
+
+        # Generate golden spectrum at equilibrium n_e
+        golden = generator.generate(
+            temperature_K=T_K,
+            electron_density_cm3=n_e_eq,
+            concentrations=concentrations,
+            n_lines_per_element=10,
+            seed=42,
+            include_ionic=True,
+        )
+
+        assert len(golden.line_observations) > 0
+
+        # Run solver with same pressure
+        from cflibs.inversion.solver import IterativeCFLIBSSolver
+        from cflibs.core.constants import STP_PRESSURE
+
+        solver = IterativeCFLIBSSolver(atomic_db, max_iterations=20, pressure_pa=STP_PRESSURE)
+        result = solver.solve(golden.line_observations)
+
+        assert result.converged, f"Solver did not converge in {result.iterations} iterations"
+
+        # Temperature recovery
+        T_err = abs(result.temperature_K - T_K) / T_K
+        assert T_err < 0.15, f"Temperature error {T_err*100:.1f}% exceeds 15%"
+
+        # Electron density recovery (the key test for CF-LIBS-8sa)
+        ne_err = abs(result.electron_density_cm3 - n_e_eq) / n_e_eq
+        assert ne_err < 0.50, (
+            f"n_e error {ne_err*100:.1f}% exceeds 50%: "
+            f"true={n_e_eq:.2e}, recovered={result.electron_density_cm3:.2e}"
+        )
