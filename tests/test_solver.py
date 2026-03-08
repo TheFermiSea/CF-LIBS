@@ -146,3 +146,74 @@ def test_solver_mixed_stage_transform_recovers_temperature(mock_db):
     assert res.converged
     assert res.temperature_K == pytest.approx(T_K, rel=0.08)
     assert res.concentrations["A"] == pytest.approx(1.0, abs=1e-8)
+
+
+def test_solver_electron_density_pressure_balance(mock_db):
+    """Verify n_e converges to a self-consistent value from pressure balance.
+
+    Generate synthetic observations at the equilibrium n_e implied by
+    P = n_tot * kT * (1 + Z_avg), then check the solver recovers that n_e.
+    """
+    from cflibs.core.constants import KB, STP_PRESSURE
+
+    T_eV = 1.0
+    T_K = T_eV * EV_TO_K
+    ip = 7.0
+
+    # Compute self-consistent n_e at STP for single element
+    # Iterate: avg_Z = S/(1+S), n_tot = P/(kT*(1+avg_Z)), n_e = avg_Z * n_tot
+    U_I = 25.0  # matches mock_db partition function
+    U_II = 25.0
+    n_e_eq = 1e17  # initial guess
+    for _ in range(100):
+        S = (SAHA_CONST_CM3 / n_e_eq) * (T_eV**1.5) * (U_II / U_I) * np.exp(-ip / T_eV)
+        avg_Z = S / (1.0 + S)
+        n_tot = STP_PRESSURE / (KB * T_K * (1.0 + avg_Z)) * 1e-6  # cm^-3
+        n_e_new = avg_Z * n_tot
+        if abs(n_e_new - n_e_eq) / n_e_eq < 1e-6:
+            break
+        n_e_eq = 0.5 * n_e_eq + 0.5 * n_e_new
+
+    # Generate synthetic data at this equilibrium n_e
+    saha_offset = np.log((SAHA_CONST_CM3 / n_e_eq) * (T_eV**1.5))
+    common_intercept = 8.0
+    wavelength_nm = 500.0
+
+    observations = []
+    for E_k in [1.0, 2.0, 3.0, 4.0]:
+        y = common_intercept - E_k / T_eV
+        intensity = np.exp(y) / wavelength_nm
+        observations.append(
+            LineObservation(
+                wavelength_nm=wavelength_nm,
+                intensity=intensity,
+                intensity_uncertainty=max(intensity * 0.01, 1e-8),
+                element="A",
+                ionization_stage=1,
+                E_k_ev=E_k,
+                g_k=1,
+                A_ki=1.0,
+            )
+        )
+
+    for E_k in [2.0, 3.0, 4.0, 5.0]:
+        y = common_intercept + saha_offset - (ip + E_k) / T_eV
+        intensity = np.exp(y) / wavelength_nm
+        observations.append(
+            LineObservation(
+                wavelength_nm=wavelength_nm,
+                intensity=intensity,
+                intensity_uncertainty=max(intensity * 0.01, 1e-8),
+                element="A",
+                ionization_stage=2,
+                E_k_ev=E_k,
+                g_k=1,
+                A_ki=1.0,
+            )
+        )
+
+    solver = IterativeCFLIBSSolver(mock_db, max_iterations=20, pressure_pa=STP_PRESSURE)
+    res = solver.solve(observations)
+
+    assert res.converged
+    assert res.electron_density_cm3 == pytest.approx(n_e_eq, rel=0.25)
