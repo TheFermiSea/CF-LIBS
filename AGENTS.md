@@ -9,13 +9,18 @@
 
 ## Build, Test, and Development Commands
 - `uv venv --python 3.12` creates a virtual environment with `uv`.
-- `pip install -e "[dev]"` installs the project in editable mode with dev tools.
+- `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
 - `uv pip install -e ".[local]"` installs local dev extras (JAX Metal, hdf5, dev tools).
 - `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, hdf5, mpi4py).
 - `pytest tests/ -v` runs the full test suite.
 - `JAX_PLATFORMS=cpu pytest tests/` forces CPU backend for tests.
 - `pytest tests/test_plasma.py -v` runs a single test file.
+- `pytest tests/test_solver.py::test_name -v` runs a single test function.
 - `pytest -m "not requires_db"` skips database-dependent tests.
+- `pytest -m "not requires_jax"` skips JAX-dependent tests.
+- `pytest -m "not slow"` skips slow tests.
+- `pytest -m "unit"` runs only unit tests.
+- `pytest -m "integration"` runs only integration tests.
 - `black cflibs/ tests/` formats code.
 - `black --check cflibs/` checks formatting.
 - `ruff check cflibs/ tests/` runs linting.
@@ -44,7 +49,7 @@
 ## Testing Guidelines
 - Framework: pytest with optional `pytest-cov` and `pytest-benchmark`.
 - Coverage target for new code: >80% (see `CONTRIBUTING.md`).
-- Use markers to scope runs (e.g., `requires_db`, `requires_jax`, `slow`).
+- Use markers to scope runs (e.g., `requires_db`, `requires_jax`, `requires_bayesian`, `requires_uncertainty`, `requires_rust`, `slow`, `unit`, `integration`, `physics`, `nist_parity`).
 - Coverage report: `pytest tests/ --cov=cflibs --cov-report=html`.
 
 ## CLI & Data Workflows
