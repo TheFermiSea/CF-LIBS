@@ -332,8 +332,11 @@ def test_three_stage_ionization_coupling(atomic_db):
     total = sum(result.values())
     assert total == pytest.approx(n_total, rel=1e-10)
 
-    # If 3 stages present, verify Saha ratios are consistent
-    if 3 in result and result[3] > 0:
+    # At T=2 eV and n_e=1e15, stage 3 must be populated
+    assert (
+        3 in result and result[3] > 0
+    ), f"Expected 3-stage ionization at T=2 eV, n_e=1e15; got stages {list(result.keys())}"
+    if 3 in result:
         n_I = result[1]
         n_II = result[2]
         n_III = result[3]

@@ -75,12 +75,14 @@
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
+
    ```bash
    git pull --rebase
    bdh :force-sync  # only needed when you changed beads state; bdh mutations auto-sync
    git push
    git status  # MUST show "up to date with origin"
    ```
+
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
@@ -154,21 +156,25 @@ bdh :aweb mail open <alias>                                   # Read & acknowled
 Chat sessions are persistent per participant pair. Use `--start-conversation` when initiating a new exchange (longer wait timeout).
 
 **Starting a conversation:**
+
 ```bash
 bdh :aweb chat send-and-wait <alias> "question" --start-conversation
 ```
 
 **Replying (when someone is waiting for you):**
+
 ```bash
 bdh :aweb chat send-and-wait <alias> "response"
 ```
 
 **Final reply (you don't need their answer):**
+
 ```bash
 bdh :aweb chat send-and-leave <alias> "thanks, got it"
 ```
 
 **Other commands:**
+
 ```bash
 bdh :aweb chat pending          # List conversations with unread messages
 bdh :aweb chat open <alias>     # Read unread messages

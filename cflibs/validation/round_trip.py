@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
-from cflibs.core.constants import KB_EV, EV_TO_K
+from cflibs.core.constants import KB_EV, EV_TO_K, SAHA_CONST_CM3
 from cflibs.core.logging_config import get_logger
 from cflibs.inversion.boltzmann import LineObservation
 
@@ -201,15 +201,32 @@ class GoldenSpectrumGenerator:
 
         all_observations = []
 
+        T_eV = temperature_K / EV_TO_K
         for element, concentration in concentrations.items():
-            # Pre-compute Saha ratio and stage fractions for this element
-            ip = self._get_ionization_potential(element)
-            saha_ratio = self._calculate_saha_factor(
-                temperature_K, electron_density_cm3, ip, element
+            # Pre-compute Saha ratios and 3-stage coupled fractions
+            ip_I = self._get_ionization_potential(element, 1) or 7.0
+            U_I = self._get_partition_function(element, 1, temperature_K)
+            U_II = self._get_partition_function(element, 2, temperature_K)
+            S1 = (
+                (SAHA_CONST_CM3 / electron_density_cm3)
+                * (T_eV**1.5)
+                * (U_II / U_I)
+                * np.exp(-ip_I / T_eV)
             )
-            # f_I = 1/(1+S), f_II = S/(1+S)
-            f_I = 1.0 / (1.0 + saha_ratio)
-            f_II = saha_ratio / (1.0 + saha_ratio)
+
+            ip_II = self._get_ionization_potential(element, 2)
+            S2 = 0.0
+            if ip_II is not None:
+                U_III = self._get_partition_function(element, 3, temperature_K)
+                S2 = (
+                    (SAHA_CONST_CM3 / electron_density_cm3)
+                    * (T_eV**1.5)
+                    * (U_III / U_II)
+                    * np.exp(-ip_II / T_eV)
+                )
+            denom = 1.0 + S1 + S1 * S2
+            f_I = 1.0 / denom
+            f_II = S1 / denom
 
             for ion_stage in [1, 2] if include_ionic else [1]:
                 transitions = self._get_element_transitions(element, ion_stage, n_lines_per_element)
@@ -361,38 +378,33 @@ class GoldenSpectrumGenerator:
         }
         return fallback.get((element, ion_stage), 10.0)
 
-    def _get_ionization_potential(self, element: str) -> float:
-        """Get ionization potential from database or estimate."""
+    def _get_ionization_potential(self, element: str, stage: int = 1) -> float | None:
+        """Get ionization potential from database or estimate.
+
+        Parameters
+        ----------
+        element : str
+            Element symbol
+        stage : int
+            Ionization stage (1 = neutral → singly ionized, 2 = singly → doubly)
+
+        Returns
+        -------
+        float or None
+            Ionization potential in eV, or None if unavailable for stage > 1
+        """
         try:
-            ip = self.atomic_db.get_ionization_potential(element, 1)
+            ip = self.atomic_db.get_ionization_potential(element, stage)
             if ip is not None:
                 return ip
         except Exception:
             pass
 
-        # Fallback values for common elements
-        fallback = {"Fe": 7.87, "Cu": 7.73, "Al": 5.99, "Ti": 6.83, "Mg": 7.65, "Ca": 6.11}
-        return fallback.get(element, 7.0)
-
-    def _calculate_saha_factor(
-        self,
-        temperature_K: float,
-        n_e: float,
-        ip_eV: float,
-        element: str,
-    ) -> float:
-        """Calculate Saha ionization factor n_II/n_I.
-
-        Includes the partition function ratio U_II/U_I for physical consistency
-        with the forward Saha-Boltzmann solver.
-        """
-        from cflibs.core.constants import SAHA_CONST_CM3
-
-        T_eV = temperature_K / EV_TO_K
-        U_I = self._get_partition_function(element, 1, temperature_K)
-        U_II = self._get_partition_function(element, 2, temperature_K)
-        S = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_II / U_I) * np.exp(-ip_eV / T_eV)
-        return S
+        if stage == 1:
+            # Fallback values for common elements (stage 1 only)
+            fallback = {"Fe": 7.87, "Cu": 7.73, "Al": 5.99, "Ti": 6.83, "Mg": 7.65, "Ca": 6.11}
+            return fallback.get(element, 7.0)
+        return None
 
     def compute_equilibrium_ne(
         self,
@@ -432,19 +444,35 @@ class GoldenSpectrumGenerator:
         float
             Self-consistent electron density in cm^-3
         """
-        from cflibs.core.constants import KB, SAHA_CONST_CM3
+        from cflibs.core.constants import KB
 
         T_eV = temperature_K / EV_TO_K
         n_e = n_e_guess
 
+        # Pre-compute temperature-dependent quantities (constant across iterations)
+        element_data = {}
+        for el, C_s in concentrations.items():
+            ip_I = self._get_ionization_potential(el, 1) or 7.0
+            U_I = self._get_partition_function(el, 1, temperature_K)
+            U_II = self._get_partition_function(el, 2, temperature_K)
+            boltz_I = (T_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_eV)
+
+            ip_II = self._get_ionization_potential(el, 2)
+            boltz_II = 0.0
+            if ip_II is not None:
+                U_III = self._get_partition_function(el, 3, temperature_K)
+                boltz_II = (T_eV**1.5) * (U_III / U_II) * np.exp(-ip_II / T_eV)
+            element_data[el] = (C_s, boltz_I, boltz_II)
+
         for _ in range(max_iter):
             avg_Z = 0.0
-            for el, C_s in concentrations.items():
-                ip = self._get_ionization_potential(el)
-                U_I = self._get_partition_function(el, 1, temperature_K)
-                U_II = self._get_partition_function(el, 2, temperature_K)
-                S = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_II / U_I) * np.exp(-ip / T_eV)
-                avg_Z += C_s * S / (1.0 + S)
+            for el, (C_s, boltz_I, boltz_II) in element_data.items():
+                S1 = (SAHA_CONST_CM3 / n_e) * boltz_I
+                S2 = (SAHA_CONST_CM3 / n_e) * boltz_II if boltz_II > 0 else 0.0
+
+                # avg_Z = <Z> = (S1 + 2*S1*S2) / (1 + S1 + S1*S2)
+                denom = 1.0 + S1 + S1 * S2
+                avg_Z += C_s * (S1 + 2.0 * S1 * S2) / denom
 
             n_total_m3 = pressure_pa / (KB * temperature_K * (1.0 + avg_Z))
             n_total_cm3 = n_total_m3 * 1e-6
