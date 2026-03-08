@@ -80,3 +80,8 @@ conductor/setup_state.json
 
 # Git worktrees
 .worktrees/
+
+# Dolt database files (added by bd init)
+.dolt/
+.beadhub
+.aw/
