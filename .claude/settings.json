@@ -1,4 +1,67 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bdh :notify",
+            "type": "command"
+          }
+        ],
+        "matcher": ".*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/enforce-branch-before-edit.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/enforce-branch-before-edit.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": ".claude/hooks/validate-epic-close.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/session-start.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/clarify-vague-request.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Edit",
@@ -6,60 +69,7 @@
       "Bash(*)"
     ],
     "ask": [],
-    "deny": [],
-    "defaultMode": "default"
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/enforce-branch-before-edit.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/enforce-branch-before-edit.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/validate-epic-close.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [],
-    "SubagentStop": [],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/session-start.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/briansquires/code/CF-LIBS/.claude/hooks/clarify-vague-request.sh"
-          }
-        ]
-      }
-    ]
+    "defaultMode": "default",
+    "deny": []
   }
 }
