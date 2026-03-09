@@ -234,6 +234,253 @@ def invert_cmd(args):
         print(f"    {element}: {concentration:.4f} ± {unc:.4f}")
 
 
+def analyze_cmd(args):
+    """
+    End-to-end analysis command with sensible defaults.
+
+    Loads a CSV spectrum, runs line detection + iterative CF-LIBS inversion,
+    and outputs results in the requested format.
+    """
+    from cflibs.atomic.database import AtomicDatabase
+    from cflibs.inversion.line_detection import detect_line_observations
+    from cflibs.inversion.line_selection import LineSelector
+    from cflibs.inversion.solver import IterativeCFLIBSSolver
+    from cflibs.io.spectrum import load_spectrum
+
+    db_path = args.db_path or "libs_production.db"
+    if not Path(db_path).exists():
+        raise FileNotFoundError(
+            f"Atomic database not found: {db_path}. "
+            "Please run cflibs generate-db to create it."
+        )
+
+    elements = [e.strip() for e in args.elements.split(",")]
+    wavelength, intensity = load_spectrum(args.spectrum)
+    atomic_db = AtomicDatabase(db_path)
+
+    detection = detect_line_observations(
+        wavelength=wavelength,
+        intensity=intensity,
+        atomic_db=atomic_db,
+        elements=elements,
+    )
+
+    for warning in detection.warnings:
+        logger.warning(f"Line detection: {warning}")
+
+    selector = LineSelector()
+    selection = selector.select(
+        detection.observations,
+        resonance_lines=detection.resonance_lines,
+    )
+    observations = selection.selected_lines
+
+    if len(observations) == 0:
+        raise ValueError("No usable spectral lines detected.")
+
+    solver = IterativeCFLIBSSolver(atomic_db=atomic_db)
+
+    uncertainty_mode = getattr(args, "uncertainty", "none")
+    if uncertainty_mode == "analytical":
+        try:
+            result = solver.solve_with_uncertainty(observations)
+        except ImportError:
+            logger.warning(
+                "uncertainties package not installed; falling back to solve() without UQ. "
+                "Install with: pip install uncertainties"
+            )
+            result = solver.solve(observations)
+    elif uncertainty_mode == "mc":
+        from cflibs.inversion.uncertainty import MonteCarloUQ
+
+        mc = MonteCarloUQ(solver, n_samples=200)
+        mc_result = mc.run(observations)
+        result = solver.solve(observations)
+        # Merge MC uncertainties into result
+        result.concentration_uncertainties.update(mc_result.concentrations_std)
+        result = result.__class__(
+            temperature_K=mc_result.T_mean,
+            temperature_uncertainty_K=mc_result.T_std,
+            electron_density_cm3=mc_result.ne_mean,
+            concentrations=mc_result.concentrations_mean,
+            concentration_uncertainties=mc_result.concentrations_std,
+            iterations=result.iterations,
+            converged=result.converged,
+            quality_metrics=result.quality_metrics,
+        )
+    else:
+        result = solver.solve(observations)
+
+    fmt = getattr(args, "output_format", "table")
+    if fmt == "json":
+        import json
+
+        output = {
+            "temperature_K": result.temperature_K,
+            "temperature_uncertainty_K": result.temperature_uncertainty_K,
+            "electron_density_cm3": result.electron_density_cm3,
+            "concentrations": result.concentrations,
+            "concentration_uncertainties": result.concentration_uncertainties,
+            "converged": result.converged,
+            "iterations": result.iterations,
+            "quality_metrics": result.quality_metrics,
+        }
+        print(json.dumps(output, indent=2))
+    elif fmt == "csv":
+        print("element,concentration,uncertainty")
+        for el, conc in result.concentrations.items():
+            unc = result.concentration_uncertainties.get(el, 0.0)
+            print(f"{el},{conc:.6f},{unc:.6f}")
+    else:
+        print(f"Temperature : {result.temperature_K:.0f} ± {result.temperature_uncertainty_K:.0f} K")
+        print(f"n_e         : {result.electron_density_cm3:.3e} cm^-3")
+        print(f"Converged   : {result.converged} ({result.iterations} iterations)")
+        lte_ok = result.quality_metrics.get("lte_mcwhirter_satisfied", None)
+        if lte_ok is not None and not lte_ok:
+            print(
+                f"WARNING: McWhirter criterion NOT satisfied "
+                f"(n_e ratio = {result.quality_metrics.get('lte_n_e_ratio', 0):.2f})"
+            )
+        print("\nConcentrations:")
+        for el, conc in sorted(result.concentrations.items()):
+            unc = result.concentration_uncertainties.get(el, 0.0)
+            print(f"  {el:4s}: {conc:.4f} ± {unc:.4f}")
+
+
+def bayesian_cmd(args):
+    """
+    Bayesian CF-LIBS inversion via MCMC.
+
+    Requires: pip install cflibs[bayesian]
+    """
+    try:
+        import numpyro  # noqa: F401
+    except ImportError:
+        print(
+            "ERROR: Bayesian inference requires the [bayesian] optional group.\n"
+            "Install with: pip install cflibs[bayesian]"
+        )
+        sys.exit(1)
+
+    import numpy as np
+    from cflibs.inversion.bayesian import BayesianForwardModel, MCMCSampler
+    from cflibs.io.spectrum import load_spectrum
+
+    db_path = args.db_path or "libs_production.db"
+    if not Path(db_path).exists():
+        raise FileNotFoundError(f"Atomic database not found: {db_path}.")
+
+    elements = [e.strip() for e in args.elements.split(",")]
+    wavelength, intensity = load_spectrum(args.spectrum)
+
+    wl_min, wl_max = float(np.min(wavelength)), float(np.max(wavelength))
+
+    forward_model = BayesianForwardModel(
+        db_path=db_path,
+        elements=elements,
+        wavelength_range=(wl_min, wl_max),
+    )
+    sampler = MCMCSampler(forward_model=forward_model)
+
+    logger.info("Running MCMC...")
+    result = sampler.run(
+        observed=intensity,
+        num_samples=getattr(args, "samples", 1000),
+        num_chains=getattr(args, "chains", 1),
+    )
+
+    output_path = getattr(args, "output", None)
+    if output_path and result.inference_data is not None:
+        result.inference_data.to_netcdf(output_path)
+        print(f"MCMC trace saved to {output_path}")
+    else:
+        try:
+            import arviz as az
+
+            if result.inference_data is not None:
+                print(az.summary(result.inference_data))
+            else:
+                print(result.summary_table())
+        except ImportError:
+            print(result.summary_table())
+
+
+def batch_cmd(args):
+    """
+    Batch analysis: process all CSV files in a directory.
+    """
+    import csv as csv_mod
+    import json
+
+    from cflibs.atomic.database import AtomicDatabase
+    from cflibs.inversion.line_detection import detect_line_observations
+    from cflibs.inversion.line_selection import LineSelector
+    from cflibs.inversion.solver import IterativeCFLIBSSolver
+    from cflibs.io.spectrum import load_spectrum
+
+    directory = Path(args.directory)
+    if not directory.is_dir():
+        raise ValueError(f"Not a directory: {directory}")
+
+    db_path = args.db_path or "libs_production.db"
+    if not Path(db_path).exists():
+        raise FileNotFoundError(f"Atomic database not found: {db_path}.")
+
+    elements = [e.strip() for e in args.elements.split(",")]
+    atomic_db = AtomicDatabase(db_path)
+    solver = IterativeCFLIBSSolver(atomic_db=atomic_db)
+
+    csv_files = sorted(directory.glob("*.csv"))
+    if not csv_files:
+        print(f"No CSV files found in {directory}")
+        return
+
+    aggregate = []
+    for csv_path in csv_files:
+        try:
+            wavelength, intensity = load_spectrum(str(csv_path))
+            detection = detect_line_observations(
+                wavelength=wavelength,
+                intensity=intensity,
+                atomic_db=atomic_db,
+                elements=elements,
+            )
+            selector = LineSelector()
+            selection = selector.select(
+                detection.observations, resonance_lines=detection.resonance_lines
+            )
+            if not selection.selected_lines:
+                logger.warning(f"{csv_path.name}: no lines detected, skipping")
+                continue
+            result = solver.solve(selection.selected_lines)
+            row = {
+                "file": csv_path.name,
+                "temperature_K": result.temperature_K,
+                "electron_density_cm3": result.electron_density_cm3,
+                "converged": result.converged,
+                **{f"C_{el}": result.concentrations.get(el, 0.0) for el in elements},
+            }
+            aggregate.append(row)
+            logger.info(f"{csv_path.name}: T={result.temperature_K:.0f} K, converged={result.converged}")
+        except Exception as e:
+            logger.error(f"{csv_path.name}: {e}")
+
+    if not aggregate:
+        print("No spectra processed successfully.")
+        return
+
+    output_path = getattr(args, "output", None)
+    if output_path and str(output_path).endswith(".json"):
+        print(json.dumps(aggregate, indent=2))
+    else:
+        # CSV output
+        if aggregate:
+            fieldnames = list(aggregate[0].keys())
+            writer = csv_mod.DictWriter(sys.stdout, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(aggregate)
+
+
 def dbgen_cmd(args):
     """Database generation command."""
     from cflibs.atomic.database_generator import generate_database
@@ -385,6 +632,65 @@ def main():
         help="Output file path for results (default: print to stdout)",
     )
     invert_parser.set_defaults(func=invert_cmd)
+
+    # Analyze command (end-to-end with defaults)
+    analyze_parser = subparsers.add_parser(
+        "analyze", help="End-to-end CF-LIBS analysis with sensible defaults"
+    )
+    analyze_parser.add_argument("spectrum", type=str, help="Path to spectrum CSV file")
+    analyze_parser.add_argument(
+        "--elements", type=str, required=True, help="Comma-separated element list, e.g. Fe,Si,Ca"
+    )
+    analyze_parser.add_argument(
+        "--db-path", type=str, default=None, help="Path to atomic database (default: libs_production.db)"
+    )
+    analyze_parser.add_argument(
+        "--output", type=str, choices=["json", "csv", "table"], default="table",
+        dest="output_format", help="Output format (default: table)"
+    )
+    analyze_parser.add_argument(
+        "--uncertainty", type=str, choices=["analytical", "mc", "none"], default="none",
+        help="Uncertainty quantification method (default: none)"
+    )
+    analyze_parser.set_defaults(func=analyze_cmd)
+
+    # Bayesian command
+    bayesian_parser = subparsers.add_parser(
+        "bayesian", help="Bayesian CF-LIBS inversion via MCMC (requires [bayesian] extras)"
+    )
+    bayesian_parser.add_argument("spectrum", type=str, help="Path to spectrum CSV file")
+    bayesian_parser.add_argument(
+        "--elements", type=str, required=True, help="Comma-separated element list"
+    )
+    bayesian_parser.add_argument(
+        "--db-path", type=str, default=None, help="Path to atomic database"
+    )
+    bayesian_parser.add_argument(
+        "--samples", type=int, default=1000, help="MCMC samples per chain (default: 1000)"
+    )
+    bayesian_parser.add_argument(
+        "--chains", type=int, default=4, help="Number of MCMC chains (default: 4)"
+    )
+    bayesian_parser.add_argument(
+        "--output", type=str, default=None, help="Output NetCDF path for ArviZ trace"
+    )
+    bayesian_parser.set_defaults(func=bayesian_cmd)
+
+    # Batch command
+    batch_parser = subparsers.add_parser(
+        "batch", help="Process all CSV spectra in a directory"
+    )
+    batch_parser.add_argument("directory", type=str, help="Directory containing CSV spectra")
+    batch_parser.add_argument(
+        "--elements", type=str, required=True, help="Comma-separated element list"
+    )
+    batch_parser.add_argument(
+        "--db-path", type=str, default=None, help="Path to atomic database"
+    )
+    batch_parser.add_argument(
+        "--output", type=str, default=None, help="Output file path (.json for JSON, else CSV to stdout)"
+    )
+    batch_parser.set_defaults(func=batch_cmd)
 
     # Database generation command
     dbgen_parser = subparsers.add_parser(

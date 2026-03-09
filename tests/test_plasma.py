@@ -360,5 +360,62 @@ def test_three_stage_ionization_coupling(atomic_db):
     assert n_III == pytest.approx(S2 * n_II, rel=1e-10)
 
 
+class TestIonizationPotentialLowering:
+    """Tests for Debye-Hückel IPD correction."""
+
+    def test_canonical_libs_conditions(self):
+        """At T=10000 K, n_e=1e17 cm^-3, IPD should be ~0.03-0.06 eV."""
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        delta_chi = ionization_potential_lowering(n_e_cm3=1e17, T_K=10000.0)
+        assert 0.02 <= delta_chi <= 0.10, f"Expected 0.02-0.10 eV, got {delta_chi:.4f} eV"
+
+    def test_lower_temperature_gives_larger_correction(self):
+        """At lower T the Debye length is shorter -> larger IPD."""
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        delta_high_T = ionization_potential_lowering(n_e_cm3=1e17, T_K=20000.0)
+        delta_low_T = ionization_potential_lowering(n_e_cm3=1e17, T_K=6000.0)
+        assert delta_low_T > delta_high_T
+
+    def test_higher_density_gives_larger_correction(self):
+        """Denser plasma -> shorter Debye length -> larger IPD."""
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        delta_sparse = ionization_potential_lowering(n_e_cm3=1e16, T_K=10000.0)
+        delta_dense = ionization_potential_lowering(n_e_cm3=1e18, T_K=10000.0)
+        assert delta_dense > delta_sparse
+
+    def test_debye_huckel_formula(self):
+        """Verify the analytical formula matches the implementation."""
+        import numpy as np
+        from cflibs.plasma.saha_boltzmann import (
+            ionization_potential_lowering,
+            _E_ESU,
+            _KB_ERG,
+            _ERG_TO_EV,
+        )
+
+        n_e, T_K = 1e17, 10000.0
+        lambda_D = np.sqrt(_KB_ERG * T_K / (4.0 * np.pi * n_e * _E_ESU**2))
+        expected = (_E_ESU**2 / lambda_D) * _ERG_TO_EV
+
+        result = ionization_potential_lowering(n_e_cm3=n_e, T_K=T_K)
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_zero_density_returns_zero(self):
+        """Edge case: zero density should return 0.0."""
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        assert ionization_potential_lowering(n_e_cm3=0.0, T_K=10000.0) == 0.0
+
+    def test_unsupported_model_raises(self):
+        """Unsupported IPD model should raise ValueError."""
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        with pytest.raises(ValueError, match="Unsupported IPD model"):
+            ionization_potential_lowering(n_e_cm3=1e17, T_K=10000.0, model="stewart_pyatt")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

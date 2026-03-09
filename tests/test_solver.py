@@ -148,6 +148,35 @@ def test_solver_mixed_stage_transform_recovers_temperature(mock_db):
     assert res.concentrations["A"] == pytest.approx(1.0, abs=1e-8)
 
 
+def test_solver_quality_metrics_contain_lte(mock_db):
+    """Verify solve() populates LTE quality metrics in quality_metrics."""
+    solver = IterativeCFLIBSSolver(mock_db, max_iterations=5)
+    T_eV = 0.8617
+
+    obs = []
+    for E in [1.0, 2.0, 3.0]:
+        y = -E / T_eV + 10.0
+        obs.append(LineObservation(500.0, np.exp(y), 0.1, "A", 1, E, 1, 1e8))
+
+    res = solver.solve(obs)
+    assert "lte_mcwhirter_satisfied" in res.quality_metrics
+    assert "lte_n_e_ratio" in res.quality_metrics
+
+
+def test_solver_ipd_flag_runs_without_error(mock_db):
+    """Verify apply_ipd=True completes solve without raising."""
+    solver = IterativeCFLIBSSolver(mock_db, max_iterations=5, apply_ipd=True)
+    T_eV = 0.8617
+
+    obs = []
+    for E in [1.0, 2.0, 3.0]:
+        y = -E / T_eV + 10.0
+        obs.append(LineObservation(500.0, np.exp(y), 0.1, "A", 1, E, 1, 1e8))
+
+    res = solver.solve(obs)
+    assert res.converged
+
+
 def test_solver_electron_density_pressure_balance(mock_db):
     """Verify n_e converges to a self-consistent value from pressure balance.
 

@@ -78,12 +78,14 @@ class IterativeCFLIBSSolver:
         t_tolerance_k: float = 100.0,
         ne_tolerance_frac: float = 0.1,
         pressure_pa: float = STP_PRESSURE,
+        apply_ipd: bool = False,
     ):
         self.atomic_db = atomic_db
         self.max_iterations = max_iterations
         self.t_tolerance_k = t_tolerance_k
         self.ne_tolerance_frac = ne_tolerance_frac
         self.pressure_pa = pressure_pa
+        self.apply_ipd = apply_ipd
         self.boltzmann_fitter = BoltzmannPlotFitter(outlier_sigma=2.5)
 
     def _evaluate_partition_function(
@@ -136,6 +138,62 @@ class IterativeCFLIBSSolver:
             S = self._compute_saha_ratio(el, T_K, n_e_cm3, U_I, U_II, ips[el])
             multipliers[el] = 1.0 + max(S, 0.0)
         return multipliers
+
+    def _apply_saha_correction(
+        self,
+        obs_by_element: Dict[str, List[LineObservation]],
+        T_K: float,
+        n_e: float,
+        ips: Dict[str, float],
+    ) -> Dict[str, List[LineObservation]]:
+        """
+        Map ionic lines to the neutral energy plane via the Saha-Boltzmann transform.
+
+        For each ionic (stage-2) line, applies:
+          y* = y - log(SAHA_CONST * T^1.5 / n_e)
+          x* = E_k + IP
+
+        Neutral lines are passed through unchanged.
+
+        Parameters
+        ----------
+        obs_by_element : dict
+            Raw observations grouped by element symbol
+        T_K : float
+            Plasma temperature [K]
+        n_e : float
+            Electron density [cm^-3]
+        ips : dict
+            First ionization potentials by element [eV]
+
+        Returns
+        -------
+        dict
+            Corrected observations grouped by element symbol
+        """
+        T_eV = max(T_K / EV_TO_K, 0.1)
+        correction_term = np.log((SAHA_CONST_CM3 / n_e) * (T_eV**1.5))
+        corrected: Dict[str, List[LineObservation]] = defaultdict(list)
+
+        for el, obs_list in obs_by_element.items():
+            ip = ips.get(el, 15.0)
+            for obs in obs_list:
+                new_obs = LineObservation(
+                    wavelength_nm=obs.wavelength_nm,
+                    intensity=obs.intensity,
+                    intensity_uncertainty=obs.intensity_uncertainty,
+                    element=obs.element,
+                    ionization_stage=obs.ionization_stage,
+                    E_k_ev=obs.E_k_ev,
+                    g_k=obs.g_k,
+                    A_ki=obs.A_ki,
+                )
+                if obs.ionization_stage == 2:
+                    new_obs.intensity = obs.intensity * np.exp(-correction_term)
+                    new_obs.E_k_ev = obs.E_k_ev + ip
+                corrected[el].append(new_obs)
+
+        return dict(corrected)
 
     def solve(
         self, observations: List[LineObservation], closure_mode: str = "standard", **closure_kwargs
@@ -194,54 +252,22 @@ class IterativeCFLIBSSolver:
             # 2. Calculate Partition Functions & Saha Corrections
             partition_funcs = {}  # U_I for each element
             partition_funcs_II = {}
-            corrected_obs_map = defaultdict(list)
 
             for el in elements:
-                U_I = self._evaluate_partition_function(el, 1, T_K)
-                U_II = self._evaluate_partition_function(el, 2, T_K)
-                partition_funcs[el] = U_I
-                partition_funcs_II[el] = U_II
+                partition_funcs[el] = self._evaluate_partition_function(el, 1, T_K)
+                partition_funcs_II[el] = self._evaluate_partition_function(el, 2, T_K)
 
-                # Saha correction: map ionic lines to neutral energy plane
+            # Optionally apply Ionization Potential Depression (IPD)
+            if self.apply_ipd:
+                from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
 
-                # Standard Saha-Boltzmann linearization for ionic lines:
-                # y* = ln(I λ / gA) - ln(SahaConst * T^(3/2) / n_e)
-                # x* = E_k + IP
-                #
-                # The ionization energy belongs only on the transformed
-                # x-axis. Including exp(-IP/T) in the logarithmic y-shift and
-                # then also adding IP to x double-counts the ionization energy,
-                # which biases the common slope hot and skews composition.
-                correction_term = np.log((SAHA_CONST_CM3 / n_e) * (T_eV**1.5))
+                delta_chi = ionization_potential_lowering(n_e, T_K)
+                effective_ips = {el: max(ip - delta_chi, 0.0) for el, ip in ips.items()}
+            else:
+                effective_ips = ips
 
-                # Apply to observations
-                for obs in obs_by_element[el]:
-                    # Clone obs to avoid modifying original
-                    new_obs = LineObservation(
-                        wavelength_nm=obs.wavelength_nm,
-                        intensity=obs.intensity,
-                        intensity_uncertainty=obs.intensity_uncertainty,
-                        element=obs.element,
-                        ionization_stage=obs.ionization_stage,
-                        E_k_ev=obs.E_k_ev,
-                        g_k=obs.g_k,
-                        A_ki=obs.A_ki,
-                    )
-
-                    # Apply correction if Ion (Stage 2)
-                    if obs.ionization_stage == 2:
-                        # We hack the intensity to apply the logarithmic shift
-                        # y_new = y_old - correction
-                        # ln(I_new) = ln(I_old) - correction
-                        # I_new = I_old * exp(-correction)
-                        new_obs.intensity = obs.intensity * np.exp(-correction_term)
-                        # Ionic transition energies in the database are
-                        # excitation energies relative to the ionic ground
-                        # state. Move them onto the Saha-Boltzmann x-axis by
-                        # adding the first ionization potential once.
-                        new_obs.E_k_ev = obs.E_k_ev + ips[el]
-
-                    corrected_obs_map[el].append(new_obs)
+            # Map ionic lines to the neutral energy plane
+            corrected_obs_map = self._apply_saha_correction(obs_by_element, T_K, n_e, effective_ips)
 
             # 3. Multi-species Boltzmann Fit
             # Fit common slope
@@ -316,7 +342,7 @@ class IterativeCFLIBSSolver:
                 n_e,
                 partition_funcs,
                 partition_funcs_II,
-                ips,
+                effective_ips,
             )
 
             # 4. Closure
@@ -357,7 +383,7 @@ class IterativeCFLIBSSolver:
             for el, C_s in concentrations.items():
                 U_I = partition_funcs.get(el, 25.0)
                 U_II = partition_funcs_II.get(el, 15.0)
-                S = self._compute_saha_ratio(el, T_K, n_e, U_I, U_II, ips[el])
+                S = self._compute_saha_ratio(el, T_K, n_e, U_I, U_II, effective_ips[el])
                 eps_s = S / (1.0 + S)
                 total_eps += C_s * eps_s
 
@@ -386,6 +412,18 @@ class IterativeCFLIBSSolver:
                 converged = True
                 break
 
+        # LTE validity check
+        from cflibs.plasma.lte_validator import LTEValidator
+
+        lte_validator = LTEValidator()
+        lte_report = lte_validator.validate(
+            T_K=T_K,
+            n_e_cm3=n_e,
+            observations=observations,
+        )
+        quality_metrics = {"r_squared_last": 0.0}
+        quality_metrics.update(lte_report.quality_metrics)
+
         return CFLIBSResult(
             temperature_K=T_K,
             temperature_uncertainty_K=0.0,  # See solve_with_uncertainty for propagation
@@ -394,7 +432,7 @@ class IterativeCFLIBSSolver:
             concentration_uncertainties={},  # See solve_with_uncertainty for propagation
             iterations=len(history),
             converged=converged,
-            quality_metrics={"r_squared_last": 0.0},
+            quality_metrics=quality_metrics,
             electron_density_uncertainty_cm3=0.0,
             boltzmann_covariance=None,
         )
@@ -446,39 +484,69 @@ class IterativeCFLIBSSolver:
         )
         from uncertainties import ufloat
 
-        # Re-run final Boltzmann fit to get covariance
         # Group observations by element
-        obs_by_element = defaultdict(list)
+        obs_by_element: Dict[str, list] = defaultdict(list)
         for obs in observations:
             obs_by_element[obs.element].append(obs)
 
         elements = list(obs_by_element.keys())
 
-        # Use converged T to get partition functions
+        # Use converged plasma state
         T_K = result.temperature_K
+        n_e = result.electron_density_cm3
 
-        # Get intercepts with uncertainties by fitting each element
+        # Pre-fetch ionization potentials (same as solve())
+        ips = {}
+        for el in elements:
+            ip = self.atomic_db.get_ionization_potential(el, 1)
+            ips[el] = ip if ip is not None else 15.0
+
+        # Apply Saha correction so intercepts match those from solve()
+        corrected_obs_map = self._apply_saha_correction(obs_by_element, T_K, n_e, ips)
+
+        # Get partition functions at converged T
+        partition_funcs = {}
+        partition_funcs_II = {}
+        for el in elements:
+            partition_funcs[el] = self._evaluate_partition_function(el, 1, T_K)
+            partition_funcs_II[el] = self._evaluate_partition_function(el, 2, T_K)
+
+        abundance_multipliers = self._compute_abundance_multipliers(
+            elements,
+            T_K,
+            n_e,
+            partition_funcs,
+            partition_funcs_II,
+            ips,
+        )
+
+        # Fit per-element Boltzmann plots on Saha-corrected observations
         intercepts_u = {}
         covariances = {}
+        pooled_slope = 0.0
+        pooled_slope_var = 0.0
 
         for el in elements:
-            obs_list = obs_by_element[el]
+            obs_list = corrected_obs_map.get(el, [])
             if len(obs_list) < 3:
-                # Not enough points for covariance
                 continue
 
             fit_result = self.boltzmann_fitter.fit(obs_list)
 
             if fit_result.covariance_matrix is not None:
-                slope_u, intercept_u = create_boltzmann_uncertainties(
+                _, intercept_u = create_boltzmann_uncertainties(
                     fit_result.slope,
                     fit_result.intercept,
                     fit_result.covariance_matrix,
                 )
                 intercepts_u[el] = intercept_u
                 covariances[el] = fit_result.covariance_matrix
+                # Accumulate weighted slope for pooled temperature estimate
+                if fit_result.covariance_matrix[0, 0] > 0:
+                    w = 1.0 / fit_result.covariance_matrix[0, 0]
+                    pooled_slope += w * fit_result.slope
+                    pooled_slope_var += w
             else:
-                # Fallback to independent uncertainties
                 intercepts_u[el] = ufloat(
                     fit_result.intercept,
                     (
@@ -487,25 +555,6 @@ class IterativeCFLIBSSolver:
                         else 0.0
                     ),
                 )
-
-        # Get partition functions at converged T
-        partition_funcs = {}
-        partition_funcs_II = {}
-        ips = {}
-        for el in elements:
-            partition_funcs[el] = self._evaluate_partition_function(el, 1, T_K)
-            partition_funcs_II[el] = self._evaluate_partition_function(el, 2, T_K)
-            ip = self.atomic_db.get_ionization_potential(el, 1)
-            ips[el] = ip if ip is not None else 15.0
-
-        abundance_multipliers = self._compute_abundance_multipliers(
-            list(intercepts_u.keys()),
-            T_K,
-            result.electron_density_cm3,
-            partition_funcs,
-            partition_funcs_II,
-            ips,
-        )
 
         # Propagate through closure
         if closure_mode == "matrix" and "matrix_element" in closure_kwargs:
@@ -526,14 +575,16 @@ class IterativeCFLIBSSolver:
         # Extract nominal values and uncertainties
         conc_nominal, conc_uncert = extract_values_and_uncertainties(concentrations_u)
 
-        # Use temperature from first element's fit
+        # Temperature uncertainty from pooled slope estimate
+        from cflibs.inversion.uncertainty import temperature_from_slope
+
         T_err = 0.0
-        for el in elements:
-            obs_list = obs_by_element[el]
-            if len(obs_list) >= 3:
-                fit_result = self.boltzmann_fitter.fit(obs_list)
-                T_err = fit_result.temperature_uncertainty_K
-                break
+        if pooled_slope_var > 0:
+            slope_mean = pooled_slope / pooled_slope_var
+            slope_var = 1.0 / pooled_slope_var
+            slope_u_pooled = ufloat(slope_mean, np.sqrt(slope_var))
+            T_K_u = temperature_from_slope(slope_u_pooled)
+            T_err = float(T_K_u.std_dev) if np.isfinite(T_K_u.std_dev) else 0.0
 
         return CFLIBSResult(
             temperature_K=result.temperature_K,

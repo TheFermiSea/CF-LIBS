@@ -9,10 +9,15 @@ This module provides:
 """
 
 from cflibs.plasma.state import PlasmaState, SingleZoneLTEPlasma
-from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver
+from cflibs.plasma.saha_boltzmann import SahaBoltzmannSolver, ionization_potential_lowering
+from cflibs.plasma.lte_validator import LTEValidator, LTEReport, LTECheckResult
 
 __all__ = [
     "PlasmaState",
     "SingleZoneLTEPlasma",
     "SahaBoltzmannSolver",
+    "ionization_potential_lowering",
+    "LTEValidator",
+    "LTEReport",
+    "LTECheckResult",
 ]

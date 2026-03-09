@@ -818,3 +818,108 @@ class TestMonteCarloResultCompareWithBayesian:
         assert comparison["T_agreement"] is False
         assert comparison["T_difference"] > 0.1
         assert "DISAGREE" in comparison["summary"]
+
+
+@pytest.mark.requires_uncertainty
+class TestSolveWithUncertaintyConsistency:
+    """Regression tests: solve() and solve_with_uncertainty() must agree nominally."""
+
+    @pytest.fixture
+    def mock_db(self):
+        from unittest.mock import MagicMock
+        from cflibs.atomic.database import AtomicDatabase
+        from cflibs.atomic.structures import PartitionFunction
+
+        db = MagicMock(spec=AtomicDatabase)
+        db.get_ionization_potential.return_value = 7.0
+        coeffs_I = [3.2188, 0, 0, 0, 0]  # log(25) constant partition function
+        db.get_partition_coefficients.side_effect = lambda el, sp: PartitionFunction(
+            element=el,
+            ionization_stage=sp,
+            coefficients=coeffs_I,
+            t_min=1000,
+            t_max=20000,
+            source="test",
+        )
+        return db
+
+    def test_nominal_concentrations_agree_neutral_only(self, mock_db):
+        """solve() and solve_with_uncertainty() concentrations agree for neutral-only obs."""
+        from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
+        from cflibs.core.constants import EV_TO_K
+
+        T_eV = 1.0
+        solver = IterativeCFLIBSSolver(mock_db, max_iterations=15)
+
+        obs = []
+        for el, intercept in [("A", 10.0), ("B", 10.0)]:
+            for E in [1.0, 2.0, 3.0, 4.0]:
+                y = intercept - E / T_eV
+                obs.append(LineObservation(500.0, np.exp(y) / 500.0, 0.01 * np.exp(y) / 500.0, el, 1, E, 1, 1.0))
+
+        result_det = solver.solve(obs)
+        result_uq = solver.solve_with_uncertainty(obs)
+
+        for el in result_det.concentrations:
+            assert result_det.concentrations[el] == pytest.approx(
+                result_uq.concentrations[el], abs=0.02
+            ), f"Concentration for {el} disagrees between solve() and solve_with_uncertainty()"
+
+    def test_nominal_concentrations_agree_mixed_stage(self, mock_db):
+        """solve() and solve_with_uncertainty() agree for mixed neutral+ionic observations."""
+        from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
+        from cflibs.core.constants import EV_TO_K, SAHA_CONST_CM3
+
+        T_eV = 1.0
+        n_e_init = 1.0e17
+        ip = 7.0
+        wavelength_nm = 500.0
+        saha_offset = np.log((SAHA_CONST_CM3 / n_e_init) * (T_eV**1.5))
+        common_intercept = 8.0
+
+        solver = IterativeCFLIBSSolver(mock_db, max_iterations=15)
+        obs = []
+
+        # Neutral lines for element A
+        for E in [1.0, 2.0, 3.0]:
+            y = common_intercept - E / T_eV
+            intensity = np.exp(y) / wavelength_nm
+            obs.append(
+                LineObservation(wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 1, E, 1, 1.0)
+            )
+
+        # Ionic lines for element A
+        for E in [4.0, 5.0, 6.0]:
+            y = common_intercept + saha_offset - (ip + E) / T_eV
+            intensity = np.exp(y) / wavelength_nm
+            obs.append(
+                LineObservation(wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 2, E, 1, 1.0)
+            )
+
+        result_det = solver.solve(obs)
+        result_uq = solver.solve_with_uncertainty(obs)
+
+        # Nominal concentrations must agree within 2%
+        assert result_det.concentrations["A"] == pytest.approx(
+            result_uq.concentrations["A"], abs=0.02
+        )
+
+    def test_temperature_uncertainty_is_positive(self, mock_db):
+        """solve_with_uncertainty() should propagate a non-zero temperature uncertainty."""
+        from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
+        from cflibs.core.constants import EV_TO_K
+
+        T_eV = 1.0
+        solver = IterativeCFLIBSSolver(mock_db, max_iterations=15)
+
+        obs = []
+        for el in ["A", "B"]:
+            for E in [1.0, 2.0, 3.0, 4.0]:
+                y = 10.0 - E / T_eV
+                intensity = np.exp(y) / 500.0
+                obs.append(
+                    LineObservation(500.0, intensity, max(intensity * 0.02, 1e-10), el, 1, E, 1, 1.0)
+                )
+
+        result = solver.solve_with_uncertainty(obs)
+        assert result.temperature_uncertainty_K > 0.0
