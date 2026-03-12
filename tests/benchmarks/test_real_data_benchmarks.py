@@ -211,11 +211,14 @@ def test_three_element_mixture():
 
 @pytest.mark.nist_parity
 @pytest.mark.slow
+@pytest.mark.requires_uncertainty
 def test_mixed_stage_composition_accuracy():
     """
     Mixed neutral+ionic spectrum: concentrations must match within 5% after
     Saha correction (regression test for the CF-LIBS-fol bug fix).
     """
+    pytest.importorskip("uncertainties")
+
     T_eV = 1.0
     n_e = 1.0e17
     ip = 7.0
