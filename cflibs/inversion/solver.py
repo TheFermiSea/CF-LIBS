@@ -58,6 +58,28 @@ class CFLIBSResult:
     boltzmann_covariance: Optional[np.ndarray] = field(default=None, repr=False)
 
 
+@dataclass
+class _CommonSlopeElementStats:
+    """Weighted per-element statistics for the pooled Boltzmann fit."""
+
+    x_values: np.ndarray = field(repr=False)
+    y_values: np.ndarray = field(repr=False)
+    weights: np.ndarray = field(repr=False)
+    x_mean: float
+    y_mean: float
+
+
+@dataclass
+class _CommonSlopeFit:
+    """Result of the pooled common-slope Boltzmann regression."""
+
+    slope: float
+    slope_variance: float
+    intercepts: Dict[str, float]
+    element_stats: Dict[str, _CommonSlopeElementStats] = field(repr=False)
+    r_squared: float = 0.0
+
+
 class IterativeCFLIBSSolver:
     """
     Implements the iterative self-consistent CF-LIBS algorithm.
@@ -221,6 +243,92 @@ class IterativeCFLIBSSolver:
 
         return dict(corrected)
 
+    def _fit_common_boltzmann_plane(
+        self,
+        corrected_obs_map: Dict[str, List[LineObservation]],
+    ) -> Optional[_CommonSlopeFit]:
+        """
+        Fit a common Boltzmann slope across elements using weighted centering.
+
+        Each element contributes a weighted centroid in the corrected Boltzmann
+        plane. The shared slope is then fit through the pooled centered data,
+        which is the same regression model used by the deterministic solver.
+        """
+        pooled_x_parts: List[np.ndarray] = []
+        pooled_y_parts: List[np.ndarray] = []
+        pooled_w_parts: List[np.ndarray] = []
+        element_stats: Dict[str, _CommonSlopeElementStats] = {}
+
+        for el, obs_list in corrected_obs_map.items():
+            if len(obs_list) < 2:
+                continue
+
+            xs = np.array([o.E_k_ev for o in obs_list], dtype=float)
+            ys = np.array([o.y_value for o in obs_list], dtype=float)
+            ws = np.array(
+                [1.0 / o.y_uncertainty**2 if o.y_uncertainty > 0 else 1.0 for o in obs_list],
+                dtype=float,
+            )
+
+            valid_mask = np.isfinite(xs) & np.isfinite(ys) & np.isfinite(ws) & (ws > 0.0)
+            xs = xs[valid_mask]
+            ys = ys[valid_mask]
+            ws = ws[valid_mask]
+
+            if xs.size < 2:
+                continue
+
+            x_mean = float(np.average(xs, weights=ws))
+            y_mean = float(np.average(ys, weights=ws))
+
+            element_stats[el] = _CommonSlopeElementStats(
+                x_values=xs,
+                y_values=ys,
+                weights=ws,
+                x_mean=x_mean,
+                y_mean=y_mean,
+            )
+            pooled_x_parts.append(xs - x_mean)
+            pooled_y_parts.append(ys - y_mean)
+            pooled_w_parts.append(ws)
+
+        if not pooled_x_parts:
+            return None
+
+        pooled_x = np.concatenate(pooled_x_parts)
+        pooled_y = np.concatenate(pooled_y_parts)
+        pooled_w = np.concatenate(pooled_w_parts)
+
+        if pooled_x.size < 3:
+            return None
+
+        denom = float(np.sum(pooled_w * pooled_x**2))
+        if not np.isfinite(denom) or denom <= 0.0:
+            return None
+
+        slope = float(np.sum(pooled_w * pooled_x * pooled_y) / denom)
+        residuals = pooled_y - slope * pooled_x
+        ss_res = float(np.sum(pooled_w * residuals**2))
+        ss_tot = float(np.sum(pooled_w * pooled_y**2))
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0.0 else 1.0
+
+        dof = max(int(pooled_x.size) - 1, 1)
+        slope_variance = ss_res / (dof * denom)
+        if not np.isfinite(slope_variance) or slope_variance <= 0.0:
+            slope_variance = 1.0 / denom
+
+        intercepts = {
+            el: stats.y_mean - slope * stats.x_mean for el, stats in element_stats.items()
+        }
+
+        return _CommonSlopeFit(
+            slope=slope,
+            slope_variance=slope_variance,
+            intercepts=intercepts,
+            element_stats=element_stats,
+            r_squared=r_squared,
+        )
+
     def solve(
         self, observations: List[LineObservation], closure_mode: str = "standard", **closure_kwargs
     ) -> CFLIBSResult:
@@ -266,6 +374,7 @@ class IterativeCFLIBSSolver:
         converged = False
         history = []
         concentrations: Dict[str, float] = {}  # Initialize before loop
+        last_common_fit: Optional[_CommonSlopeFit] = None
 
         for _ in range(1, self.max_iterations + 1):
             T_prev = T_K
@@ -289,55 +398,13 @@ class IterativeCFLIBSSolver:
             corrected_obs_map = self._apply_saha_correction(obs_by_element, T_K, n_e, effective_ips)
 
             # 3. Multi-species Boltzmann Fit
-            # Fit common slope
-
-            # Calculate centroids
-            centroids = {}
-            pooled_x = []
-            pooled_y = []
-            pooled_w = []
-
-            for el, obs_list in corrected_obs_map.items():
-                if len(obs_list) < 2:
-                    continue
-
-                # Get valid points
-                xs = np.array([o.E_k_ev for o in obs_list])
-                ys = np.array([o.y_value for o in obs_list])
-                ws = np.array(
-                    [1.0 / o.y_uncertainty**2 if o.y_uncertainty > 0 else 1.0 for o in obs_list]
-                )
-
-                # Filter invalid
-                mask = np.isfinite(ys)
-                xs = xs[mask]
-                ys = ys[mask]
-                ws = ws[mask]
-
-                if len(xs) == 0:
-                    continue
-
-                # Centroids
-                x_bar = np.average(xs, weights=ws)
-                y_bar = np.average(ys, weights=ws)
-                centroids[el] = (x_bar, y_bar)
-
-                # Center data
-                pooled_x.extend(xs - x_bar)
-                pooled_y.extend(ys - y_bar)
-                pooled_w.extend(ws)
-
-            if len(pooled_x) < 3:
+            common_fit = self._fit_common_boltzmann_plane(corrected_obs_map)
+            if common_fit is None:
                 logger.warning("Insufficient points for fit")
                 break
 
-            # Fit slope through origin
-            pooled_x = np.array(pooled_x)
-            pooled_y = np.array(pooled_y)
-            pooled_w = np.array(pooled_w)
-
-            # Simple linear regression through origin: m = sum(wxy) / sum(wx^2)
-            slope = np.sum(pooled_w * pooled_x * pooled_y) / np.sum(pooled_w * pooled_x**2)
+            last_common_fit = common_fit
+            slope = common_fit.slope
 
             # Update T
             if slope >= 0:
@@ -349,11 +416,7 @@ class IterativeCFLIBSSolver:
             T_K = 0.5 * T_prev + 0.5 * T_new
 
             # Calculate Intercepts
-            intercepts = {}
-            for el in centroids:
-                x_bar, y_bar = centroids[el]
-                q_s = y_bar - slope * x_bar
-                intercepts[el] = q_s
+            intercepts = common_fit.intercepts
 
             abundance_multipliers = self._compute_abundance_multipliers(
                 list(intercepts.keys()),
@@ -440,7 +503,9 @@ class IterativeCFLIBSSolver:
             n_e_cm3=n_e,
             observations=observations,
         )
-        quality_metrics = {"r_squared_last": 0.0}
+        quality_metrics = {
+            "r_squared_last": last_common_fit.r_squared if last_common_fit is not None else 0.0
+        }
         quality_metrics.update(lte_report.quality_metrics)
 
         return CFLIBSResult(
@@ -496,7 +561,6 @@ class IterativeCFLIBSSolver:
 
         # Import uncertainty utilities (will raise ImportError if not available)
         from cflibs.inversion.uncertainty import (
-            create_boltzmann_uncertainties,
             propagate_through_closure_oxide,
             propagate_through_closure_standard,
             propagate_through_closure_matrix,
@@ -542,41 +606,35 @@ class IterativeCFLIBSSolver:
             effective_ips,
         )
 
-        # Fit per-element Boltzmann plots on Saha-corrected observations
+        common_fit = self._fit_common_boltzmann_plane(corrected_obs_map)
+        if common_fit is None:
+            return result
+
+        # Propagate the same common-slope model used by solve()
         intercepts_u = {}
         covariances = {}
-        pooled_slope = 0.0
-        pooled_slope_var = 0.0
+        slope_err = (
+            float(np.sqrt(common_fit.slope_variance))
+            if np.isfinite(common_fit.slope_variance) and common_fit.slope_variance > 0.0
+            else 0.0
+        )
+        slope_u = ufloat(common_fit.slope, slope_err)
 
-        for el in elements:
-            obs_list = corrected_obs_map.get(el, [])
-            if len(obs_list) < 3:
-                continue
+        for el, stats in common_fit.element_stats.items():
+            weight_sum = float(np.sum(stats.weights))
+            y_mean_err = np.sqrt(1.0 / weight_sum) if weight_sum > 0.0 else 0.0
+            y_mean_u = ufloat(stats.y_mean, y_mean_err)
+            intercept_u = y_mean_u - slope_u * stats.x_mean
+            intercepts_u[el] = intercept_u
 
-            fit_result = self.boltzmann_fitter.fit(obs_list)
-
-            if fit_result.covariance_matrix is not None:
-                _, intercept_u = create_boltzmann_uncertainties(
-                    fit_result.slope,
-                    fit_result.intercept,
-                    fit_result.covariance_matrix,
-                )
-                intercepts_u[el] = intercept_u
-                covariances[el] = fit_result.covariance_matrix
-                # Accumulate weighted slope for pooled temperature estimate
-                if fit_result.covariance_matrix[0, 0] > 0:
-                    w = 1.0 / fit_result.covariance_matrix[0, 0]
-                    pooled_slope += w * fit_result.slope
-                    pooled_slope_var += w
-            else:
-                intercepts_u[el] = ufloat(
-                    fit_result.intercept,
-                    (
-                        max(fit_result.intercept_uncertainty, 0.0)
-                        if np.isfinite(fit_result.intercept_uncertainty)
-                        else 0.0
-                    ),
-                )
+            intercept_var = y_mean_err**2 + (stats.x_mean**2) * common_fit.slope_variance
+            covariances[el] = np.array(
+                [
+                    [common_fit.slope_variance, -stats.x_mean * common_fit.slope_variance],
+                    [-stats.x_mean * common_fit.slope_variance, intercept_var],
+                ],
+                dtype=float,
+            )
 
         # Propagate through closure
         if closure_mode == "matrix" and "matrix_element" in closure_kwargs:
@@ -608,11 +666,8 @@ class IterativeCFLIBSSolver:
         from cflibs.inversion.uncertainty import temperature_from_slope
 
         T_err = 0.0
-        if pooled_slope_var > 0:
-            slope_mean = pooled_slope / pooled_slope_var
-            slope_var = 1.0 / pooled_slope_var
-            slope_u_pooled = ufloat(slope_mean, np.sqrt(slope_var))
-            T_K_u = temperature_from_slope(slope_u_pooled)
+        if slope_err > 0.0:
+            T_K_u = temperature_from_slope(slope_u)
             T_err = float(T_K_u.std_dev) if np.isfinite(T_K_u.std_dev) else 0.0
 
         return CFLIBSResult(
@@ -625,5 +680,5 @@ class IterativeCFLIBSSolver:
             converged=result.converged,
             quality_metrics=result.quality_metrics,
             electron_density_uncertainty_cm3=0.0,  # Would need iterative uncertainty
-            boltzmann_covariance=covariances.get(elements[0]) if covariances else None,
+            boltzmann_covariance=next(iter(covariances.values()), None),
         )
