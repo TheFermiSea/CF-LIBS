@@ -22,6 +22,14 @@ except ImportError:
     h5py = None
 
 try:
+    import zarr
+
+    HAS_ZARR = True
+except ImportError:
+    HAS_ZARR = False
+    zarr = None
+
+try:
     import jax
     import jax.numpy as jnp
     from jax import jit, vmap
@@ -51,6 +59,15 @@ if HAS_JAX:
     pass
 
 logger = get_logger("manifold.generator")
+
+
+def _infer_storage_format(output_path: Path) -> str:
+    suffix = output_path.suffix.lower()
+    if suffix == ".zarr":
+        return "zarr"
+    if suffix in {".h5", ".hdf5", ".hdf"}:
+        return "hdf5"
+    return "hdf5"
 
 
 class ManifoldGenerator:
@@ -807,68 +824,98 @@ class ManifoldGenerator:
                 in_axes=0,
             )(batch_params)
 
-        if not HAS_H5PY:
-            raise ImportError(
-                "h5py is required for manifold generation. " "Install with: pip install h5py"
-            )
-
-        # Open HDF5 file
         output_path = Path(self.config.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_format = _infer_storage_format(output_path)
+        chunk_rows = max(1, min(self.config.batch_size, n_samples))
 
         start_time = time.time()
 
-        with h5py.File(output_path, "w") as f:
-            # Create datasets
-            dset_spec = f.create_dataset(
+        if storage_format == "hdf5":
+            if not HAS_H5PY:
+                raise ImportError(
+                    "h5py is required for HDF5 manifold generation. "
+                    "Install with: pip install h5py"
+                )
+            output_root = h5py.File(output_path, "w")
+            dset_spec = output_root.create_dataset(
                 "spectra",
                 (n_samples, self.config.pixels),
                 dtype="f4",
+                chunks=(chunk_rows, self.config.pixels),
                 compression="gzip",
                 compression_opts=4,
             )
-            dset_param = f.create_dataset(
+            dset_param = output_root.create_dataset(
                 "params",
-                (n_samples, len(self.config.elements) + 2),  # T, ne, concentrations
+                (n_samples, len(self.config.elements) + 2),
                 dtype="f4",
+                chunks=(chunk_rows, len(self.config.elements) + 2),
             )
-            f.create_dataset("wavelength", data=np.array(wl_grid), dtype="f4")
+            output_root.create_dataset("wavelength", data=np.asarray(wl_grid, dtype=np.float32))
+            attrs = output_root.attrs
+        elif storage_format == "zarr":
+            if not HAS_ZARR:
+                raise ImportError(
+                    "zarr is required for Zarr manifold generation. Install with: pip install zarr"
+                )
+            output_root = zarr.open_group(str(output_path), mode="w")
+            dset_spec = output_root.create_array(
+                "spectra",
+                shape=(n_samples, self.config.pixels),
+                chunks=(chunk_rows, self.config.pixels),
+                dtype="f4",
+                overwrite=True,
+            )
+            dset_param = output_root.create_array(
+                "params",
+                shape=(n_samples, len(self.config.elements) + 2),
+                chunks=(chunk_rows, len(self.config.elements) + 2),
+                dtype="f4",
+                overwrite=True,
+            )
+            output_root.create_array(
+                "wavelength",
+                data=np.asarray(wl_grid, dtype=np.float32),
+                dtype="f4",
+                overwrite=True,
+            )
+            attrs = output_root.attrs
+        else:
+            raise ValueError(f"Unsupported manifold storage format: {storage_format}")
 
-            # Store metadata
-            f.attrs["elements"] = self.config.elements
-            f.attrs["wavelength_range"] = self.config.wavelength_range
-            f.attrs["temperature_range"] = self.config.temperature_range
-            f.attrs["density_range"] = self.config.density_range
-            f.attrs["physics_version"] = self.config.physics_version
-            f.attrs["use_voigt_profile"] = self.config.use_voigt_profile
-            f.attrs["use_stark_broadening"] = self.config.use_stark_broadening
-            f.attrs["instrument_fwhm_nm"] = self.config.instrument_fwhm_nm
+        attrs["elements"] = list(self.config.elements)
+        attrs["wavelength_range"] = list(self.config.wavelength_range)
+        attrs["temperature_range"] = list(self.config.temperature_range)
+        attrs["density_range"] = list(self.config.density_range)
+        attrs["physics_version"] = self.config.physics_version
+        attrs["use_voigt_profile"] = self.config.use_voigt_profile
+        attrs["use_stark_broadening"] = self.config.use_stark_broadening
+        attrs["instrument_fwhm_nm"] = self.config.instrument_fwhm_nm
 
-            # Process in batches
+        try:
             for i in range(0, n_samples, self.config.batch_size):
                 batch = params_arr[i : i + self.config.batch_size]
                 batch_jax = jnp.array(batch)
 
-                # Compute spectra
                 spectra = batch_spectrum(batch_jax)
+                spectra_np = np.array(spectra, dtype=np.float32)
 
-                # Convert to numpy
-                spectra_np = np.array(spectra)
-
-                # Save
                 end_idx = min(i + self.config.batch_size, n_samples)
                 dset_spec[i:end_idx] = spectra_np
                 dset_param[i:end_idx] = batch
 
-                # Progress update
                 if progress_callback:
                     progress_callback(i + len(batch), n_samples, (i + len(batch)) / n_samples)
                 elif i % (self.config.batch_size * 10) == 0:
                     logger.info(f"Generated {i}/{n_samples} ({i/n_samples:.1%})")
+        finally:
+            if storage_format == "hdf5":
+                output_root.close()
 
         total_time = time.time() - start_time
         logger.info(
             f"Manifold generation complete: {n_samples} spectra in {total_time:.2f}s "
             f"({n_samples/total_time:.0f} spectra/sec)"
         )
-        logger.info(f"Output saved to: {output_path}")
+        logger.info(f"Output saved to: {output_path} ({storage_format})")

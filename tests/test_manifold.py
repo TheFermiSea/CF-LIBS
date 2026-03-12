@@ -305,3 +305,82 @@ class TestManifoldLoader:
             assert len(loader.spectra) == 10
 
         # File should be closed now
+
+    def test_loader_creation_zarr(self, tmp_path):
+        """Test creating and loading a Zarr-backed manifold."""
+        zarr = pytest.importorskip("zarr")
+        manifold_path = tmp_path / "test_manifold.zarr"
+
+        root = zarr.open_group(str(manifold_path), mode="w")
+        root.create_array(
+            "spectra",
+            data=np.random.rand(10, 100).astype("f4"),
+            chunks=(4, 100),
+            overwrite=True,
+        )
+        root.create_array(
+            "params",
+            data=np.random.rand(10, 4).astype("f4"),
+            chunks=(4, 4),
+            overwrite=True,
+        )
+        root.create_array(
+            "wavelength",
+            data=np.linspace(250, 550, 100, dtype=np.float32),
+            overwrite=True,
+        )
+        root.attrs["elements"] = ["Ti", "Al"]
+        root.attrs["wavelength_range"] = [250.0, 550.0]
+        root.attrs["temperature_range"] = [0.5, 2.0]
+        root.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+
+        assert loader.storage_format == "zarr"
+        assert len(loader.spectra) == 10
+        assert len(loader.wavelength) == 100
+        assert loader.elements == ["Ti", "Al"]
+
+        loader.close()
+
+    def test_find_nearest_spectrum_zarr(self, tmp_path):
+        """Test chunked nearest-neighbor search over a Zarr manifold."""
+        zarr = pytest.importorskip("zarr")
+        manifold_path = tmp_path / "test_manifold.zarr"
+
+        n_samples = 10
+        n_pixels = 100
+        wavelength = np.linspace(250, 550, n_pixels, dtype=np.float32)
+        spectra = np.zeros((n_samples, n_pixels), dtype=np.float32)
+        params = np.zeros((n_samples, 4), dtype=np.float32)
+
+        for i in range(n_samples):
+            center = 300 + i * 20
+            spectra[i] = np.exp(-0.5 * ((wavelength - center) / 10) ** 2)
+            params[i] = [1.0, 1e17, 0.9, 0.1]
+
+        root = zarr.open_group(str(manifold_path), mode="w")
+        root.create_array("spectra", data=spectra, chunks=(3, n_pixels), overwrite=True)
+        root.create_array("params", data=params, chunks=(3, 4), overwrite=True)
+        root.create_array("wavelength", data=wavelength, overwrite=True)
+        root.attrs["elements"] = ["Ti", "Al"]
+        root.attrs["wavelength_range"] = [250.0, 550.0]
+        root.attrs["temperature_range"] = [0.5, 2.0]
+        root.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+
+        index, similarity, params_dict = loader.find_nearest_spectrum(
+            spectra[5], method="cosine", search_batch_size=3
+        )
+
+        assert index == 5
+        assert similarity > 0.9
+        assert params_dict["T_eV"] == pytest.approx(1.0)
+        assert params_dict["n_e_cm3"] == pytest.approx(1e17)
+
+        loader.close()
