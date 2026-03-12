@@ -6,7 +6,7 @@ import threading
 from typing import Dict, Tuple
 import numpy as np
 
-from cflibs.core.constants import SAHA_CONST_CM3, EV_TO_K
+from cflibs.core.constants import C_LIGHT, E_CHARGE, EV_TO_K, J_TO_EV, KB, SAHA_CONST_CM3
 from cflibs.plasma.state import SingleZoneLTEPlasma
 from cflibs.core.abc import SolverStrategy, AtomicDataSource
 from cflibs.core.cache import cached_partition_function
@@ -283,3 +283,90 @@ class SahaBoltzmannSolver(SolverStrategy):
 
         logger.debug(f"Solved Saha-Boltzmann for {len(plasma.species)} species")
         return all_populations
+
+
+# ---------------------------------------------------------------------------
+# Ionization Potential Depression (IPD)
+# ---------------------------------------------------------------------------
+
+# Derived CGS helpers built from the canonical SI constants in cflibs.core.constants
+_E_ESU = E_CHARGE * C_LIGHT * 10.0  # electron charge [esu = statcoulomb]
+_KB_ERG = KB * 1.0e7  # Boltzmann constant [erg/K]
+_ERG_TO_EV = J_TO_EV * 1.0e-7  # conversion factor erg -> eV
+
+
+def ionization_potential_lowering(
+    n_e_cm3: float,
+    T_K: float,
+    model: str = "debye_huckel",
+) -> float:
+    """
+    Compute the reduction in effective ionization potential due to plasma screening.
+
+    At high electron densities (n_e ~ 10^17 cm^-3), the Coulomb potential is
+    screened by the plasma, effectively lowering the ionization threshold.
+    Ignoring this effect leads to a small but systematic bias in the Saha
+    equation.
+
+    **Debye-Hückel model** (``model='debye_huckel'``):
+
+    .. math::
+
+        \\Delta\\chi = \\frac{e^2}{4\\pi\\varepsilon_0 \\lambda_D}
+
+    where the Debye length is:
+
+    .. math::
+
+        \\lambda_D = \\sqrt{\\frac{k_B T}{4\\pi n_e e^2}}
+
+    In Gaussian CGS this simplifies to:
+
+    .. math::
+
+        \\Delta\\chi = e^2 \\sqrt{\\frac{4\\pi n_e}{k_B T}}
+
+    Parameters
+    ----------
+    n_e_cm3 : float
+        Electron density [cm^-3]
+    T_K : float
+        Plasma temperature [K]
+    model : str
+        IPD model. Currently only ``'debye_huckel'`` is supported.
+
+    Returns
+    -------
+    float
+        Ionization potential depression [eV]. Always >= 0.
+
+    Raises
+    ------
+    ValueError
+        If an unsupported model name is given.
+
+    Examples
+    --------
+    >>> delta_chi = ionization_potential_lowering(1e17, 10000)
+    >>> 0.03 <= delta_chi <= 0.06  # ~0.04 eV at canonical LIBS conditions
+    True
+
+    References
+    ----------
+    - Stewart, J.C. & Pyatt, K.D. (1966) ApJ 144, 1203
+    - Kramida, A. et al. NIST Atomic Spectra Database
+    """
+    if model != "debye_huckel":
+        raise ValueError(f"Unsupported IPD model: {model!r}. Use 'debye_huckel'.")
+
+    if n_e_cm3 <= 0.0 or T_K <= 0.0:
+        return 0.0
+
+    # Debye length: lambda_D = sqrt(kT / (4*pi*n_e*e^2))  [cm]
+    lambda_D = np.sqrt(_KB_ERG * T_K / (4.0 * np.pi * n_e_cm3 * _E_ESU**2))
+
+    # IPD = e^2 / lambda_D  [erg]
+    delta_chi_erg = _E_ESU**2 / lambda_D
+
+    # Convert to eV
+    return float(delta_chi_erg * _ERG_TO_EV)

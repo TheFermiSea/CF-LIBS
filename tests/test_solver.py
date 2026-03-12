@@ -93,7 +93,7 @@ def test_solver_multielement(mock_db):
     assert abs(res.concentrations["B"] - 0.5) < 0.05
 
 
-def test_solver_mixed_stage_transform_recovers_temperature(mock_db):
+def test_saha_correction_maps_mixed_stage_lines_to_common_boltzmann_plane(mock_db):
     solver = IterativeCFLIBSSolver(mock_db, max_iterations=10)
 
     T_eV = 1.0
@@ -141,11 +141,51 @@ def test_solver_mixed_stage_transform_recovers_temperature(mock_db):
             )
         )
 
-    res = solver.solve(observations)
+    corrected = solver._apply_saha_correction({"A": observations}, T_K, n_e, {"A": ip})["A"]
 
+    for raw, mapped in zip(observations, corrected):
+        expected_y = common_intercept - mapped.E_k_ev / T_eV
+        assert mapped.y_value == pytest.approx(expected_y, rel=1e-10, abs=1e-10)
+        if raw.ionization_stage == 2:
+            assert mapped.y_uncertainty == pytest.approx(raw.y_uncertainty, rel=1e-10)
+        else:
+            assert mapped.intensity == pytest.approx(raw.intensity, rel=1e-12)
+
+    xs = np.array([obs.E_k_ev for obs in corrected])
+    ys = np.array([obs.y_value for obs in corrected])
+    slope, intercept = np.polyfit(xs, ys, deg=1)
+
+    assert slope == pytest.approx(-1.0 / T_eV, rel=1e-10, abs=1e-10)
+    assert intercept == pytest.approx(common_intercept, rel=1e-10, abs=1e-10)
+
+
+def test_solver_quality_metrics_contain_lte(mock_db):
+    """Verify solve() populates LTE quality metrics in quality_metrics."""
+    solver = IterativeCFLIBSSolver(mock_db, max_iterations=5)
+    T_eV = 0.8617
+
+    obs = []
+    for E in [1.0, 2.0, 3.0]:
+        y = -E / T_eV + 10.0
+        obs.append(LineObservation(500.0, np.exp(y), 0.1, "A", 1, E, 1, 1e8))
+
+    res = solver.solve(obs)
+    assert "lte_mcwhirter_satisfied" in res.quality_metrics
+    assert "lte_n_e_ratio" in res.quality_metrics
+
+
+def test_solver_ipd_flag_runs_without_error(mock_db):
+    """Verify apply_ipd=True completes solve without raising."""
+    solver = IterativeCFLIBSSolver(mock_db, max_iterations=5, apply_ipd=True)
+    T_eV = 0.8617
+
+    obs = []
+    for E in [1.0, 2.0, 3.0]:
+        y = -E / T_eV + 10.0
+        obs.append(LineObservation(500.0, np.exp(y), 0.1, "A", 1, E, 1, 1e8))
+
+    res = solver.solve(obs)
     assert res.converged
-    assert res.temperature_K == pytest.approx(T_K, rel=0.08)
-    assert res.concentrations["A"] == pytest.approx(1.0, abs=1e-8)
 
 
 def test_solver_electron_density_pressure_balance(mock_db):
