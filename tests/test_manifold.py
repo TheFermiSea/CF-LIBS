@@ -5,13 +5,17 @@ Tests for manifold generation module.
 import pytest
 import numpy as np
 
-pytest.importorskip("h5py")
-import h5py  # noqa: E402
+try:
+    import h5py  # noqa: E402
+except ImportError:  # pragma: no cover - exercised in minimal envs
+    h5py = None
 
 from cflibs.manifold.config import ManifoldConfig
 from cflibs.core.logging_config import setup_logging
 
 setup_logging()
+
+requires_h5py = pytest.mark.skipif(h5py is None, reason="h5py not installed")
 
 
 class TestManifoldConfig:
@@ -142,6 +146,7 @@ manifold:
 class TestManifoldLoader:
     """Tests for ManifoldLoader."""
 
+    @requires_h5py
     def test_loader_creation(self, tmp_path):
         """Test creating a mock manifold file and loading it."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -168,6 +173,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_find_nearest_spectrum(self, tmp_path):
         """Test finding nearest spectrum."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -212,6 +218,7 @@ class TestManifoldLoader:
         loader.close()
 
     @pytest.mark.requires_jax
+    @requires_h5py
     def test_find_nearest_spectrum_jax(self, tmp_path):
         """Test finding nearest spectrum with JAX."""
         try:
@@ -258,6 +265,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_get_spectrum(self, tmp_path):
         """Test getting spectrum by index."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -286,6 +294,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_context_manager(self, tmp_path):
         """Test using loader as context manager."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -305,3 +314,112 @@ class TestManifoldLoader:
             assert len(loader.spectra) == 10
 
         # File should be closed now
+
+    def test_loader_creation_zarr(self, tmp_path):
+        """Test creating and loading a Zarr-backed manifold."""
+        zarr = pytest.importorskip("zarr")
+        manifold_path = tmp_path / "test_manifold.zarr"
+
+        root = zarr.open_group(str(manifold_path), mode="w")
+        root.create_array(
+            "spectra",
+            data=np.random.rand(10, 100).astype("f4"),
+            chunks=(4, 100),
+            overwrite=True,
+        )
+        root.create_array(
+            "params",
+            data=np.random.rand(10, 4).astype("f4"),
+            chunks=(4, 4),
+            overwrite=True,
+        )
+        root.create_array(
+            "wavelength",
+            data=np.linspace(250, 550, 100, dtype=np.float32),
+            overwrite=True,
+        )
+        root.attrs["elements"] = ["Ti", "Al"]
+        root.attrs["wavelength_range"] = [250.0, 550.0]
+        root.attrs["temperature_range"] = [0.5, 2.0]
+        root.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+
+        assert loader.storage_format == "zarr"
+        assert len(loader.spectra) == 10
+        assert len(loader.wavelength) == 100
+        assert loader.elements == ["Ti", "Al"]
+
+        loader.close()
+
+    def test_generator_infers_zarr_for_directory_output(self, tmp_path):
+        """Test generator storage inference matches loader directory handling."""
+        from cflibs.manifold.generator import _infer_storage_format
+
+        manifold_dir = tmp_path / "manifold_store"
+        manifold_dir.mkdir()
+
+        assert _infer_storage_format(manifold_dir) == "zarr"
+
+    def test_find_nearest_spectrum_zarr(self, tmp_path):
+        """Test chunked nearest-neighbor search over a Zarr manifold."""
+        zarr = pytest.importorskip("zarr")
+        manifold_path = tmp_path / "test_manifold.zarr"
+
+        n_samples = 10
+        n_pixels = 100
+        wavelength = np.linspace(250, 550, n_pixels, dtype=np.float32)
+        spectra = np.zeros((n_samples, n_pixels), dtype=np.float32)
+        params = np.zeros((n_samples, 4), dtype=np.float32)
+
+        for i in range(n_samples):
+            center = 300 + i * 20
+            spectra[i] = np.exp(-0.5 * ((wavelength - center) / 10) ** 2)
+            params[i] = [1.0, 1e17, 0.9, 0.1]
+
+        root = zarr.open_group(str(manifold_path), mode="w")
+        root.create_array("spectra", data=spectra, chunks=(3, n_pixels), overwrite=True)
+        root.create_array("params", data=params, chunks=(3, 4), overwrite=True)
+        root.create_array("wavelength", data=wavelength, overwrite=True)
+        root.attrs["elements"] = ["Ti", "Al"]
+        root.attrs["wavelength_range"] = [250.0, 550.0]
+        root.attrs["temperature_range"] = [0.5, 2.0]
+        root.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+
+        index, similarity, params_dict = loader.find_nearest_spectrum(
+            spectra[5], method="cosine", search_batch_size=3
+        )
+
+        assert index == 5
+        assert similarity > 0.9
+        assert params_dict["T_eV"] == pytest.approx(1.0)
+        assert params_dict["n_e_cm3"] == pytest.approx(1e17)
+
+        loader.close()
+
+    @requires_h5py
+    def test_find_nearest_spectrum_rejects_empty_manifold(self, tmp_path):
+        """Test nearest-spectrum search fails clearly for empty manifolds."""
+        manifold_path = tmp_path / "empty_manifold.h5"
+
+        with h5py.File(manifold_path, "w") as f:
+            f.create_dataset("spectra", shape=(0, 100), dtype="f4")
+            f.create_dataset("params", shape=(0, 4), dtype="f4")
+            f.create_dataset("wavelength", data=np.linspace(250, 550, 100), dtype="f4")
+            f.attrs["elements"] = ["Ti", "Al"]
+            f.attrs["wavelength_range"] = [250.0, 550.0]
+            f.attrs["temperature_range"] = [0.5, 2.0]
+            f.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+        with pytest.raises(ValueError, match="empty manifold"):
+            loader.find_nearest_spectrum(np.zeros(100, dtype=np.float32))
+        loader.close()
