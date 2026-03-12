@@ -5,13 +5,17 @@ Tests for manifold generation module.
 import pytest
 import numpy as np
 
-pytest.importorskip("h5py")
-import h5py  # noqa: E402
+try:
+    import h5py  # noqa: E402
+except ImportError:  # pragma: no cover - exercised in minimal envs
+    h5py = None
 
 from cflibs.manifold.config import ManifoldConfig
 from cflibs.core.logging_config import setup_logging
 
 setup_logging()
+
+requires_h5py = pytest.mark.skipif(h5py is None, reason="h5py not installed")
 
 
 class TestManifoldConfig:
@@ -142,6 +146,7 @@ manifold:
 class TestManifoldLoader:
     """Tests for ManifoldLoader."""
 
+    @requires_h5py
     def test_loader_creation(self, tmp_path):
         """Test creating a mock manifold file and loading it."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -168,6 +173,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_find_nearest_spectrum(self, tmp_path):
         """Test finding nearest spectrum."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -212,6 +218,7 @@ class TestManifoldLoader:
         loader.close()
 
     @pytest.mark.requires_jax
+    @requires_h5py
     def test_find_nearest_spectrum_jax(self, tmp_path):
         """Test finding nearest spectrum with JAX."""
         try:
@@ -258,6 +265,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_get_spectrum(self, tmp_path):
         """Test getting spectrum by index."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -286,6 +294,7 @@ class TestManifoldLoader:
 
         loader.close()
 
+    @requires_h5py
     def test_context_manager(self, tmp_path):
         """Test using loader as context manager."""
         manifold_path = tmp_path / "test_manifold.h5"
@@ -392,4 +401,25 @@ class TestManifoldLoader:
         assert params_dict["T_eV"] == pytest.approx(1.0)
         assert params_dict["n_e_cm3"] == pytest.approx(1e17)
 
+        loader.close()
+
+    @requires_h5py
+    def test_find_nearest_spectrum_rejects_empty_manifold(self, tmp_path):
+        """Test nearest-spectrum search fails clearly for empty manifolds."""
+        manifold_path = tmp_path / "empty_manifold.h5"
+
+        with h5py.File(manifold_path, "w") as f:
+            f.create_dataset("spectra", shape=(0, 100), dtype="f4")
+            f.create_dataset("params", shape=(0, 4), dtype="f4")
+            f.create_dataset("wavelength", data=np.linspace(250, 550, 100), dtype="f4")
+            f.attrs["elements"] = ["Ti", "Al"]
+            f.attrs["wavelength_range"] = [250.0, 550.0]
+            f.attrs["temperature_range"] = [0.5, 2.0]
+            f.attrs["density_range"] = [1e16, 1e19]
+
+        from cflibs.manifold.loader import ManifoldLoader
+
+        loader = ManifoldLoader(str(manifold_path))
+        with pytest.raises(ValueError, match="empty manifold"):
+            loader.find_nearest_spectrum(np.zeros(100, dtype=np.float32))
         loader.close()

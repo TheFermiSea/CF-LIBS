@@ -34,8 +34,8 @@ dependencies = [
 jax-cpu = ["jax[cpu]>=0.4.26"]
 # JAX for Apple Silicon Metal backend
 jax-metal = [
-    "jax>=0.5.0,<0.6.0",
-    "jaxlib>=0.5.0,<0.6.0",
+    "jax>=0.5.0,<0.6.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "jaxlib>=0.5.0,<0.6.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
     "jax-metal>=0.1.1,<0.2.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]
 # JAX for NVIDIA GPU (CUDA) - for cluster deployment

@@ -886,16 +886,16 @@ class ManifoldGenerator:
         else:
             raise ValueError(f"Unsupported manifold storage format: {storage_format}")
 
-        attrs["elements"] = list(self.config.elements)
-        attrs["wavelength_range"] = list(self.config.wavelength_range)
-        attrs["temperature_range"] = list(self.config.temperature_range)
-        attrs["density_range"] = list(self.config.density_range)
-        attrs["physics_version"] = self.config.physics_version
-        attrs["use_voigt_profile"] = self.config.use_voigt_profile
-        attrs["use_stark_broadening"] = self.config.use_stark_broadening
-        attrs["instrument_fwhm_nm"] = self.config.instrument_fwhm_nm
-
         try:
+            attrs["elements"] = list(self.config.elements)
+            attrs["wavelength_range"] = list(self.config.wavelength_range)
+            attrs["temperature_range"] = list(self.config.temperature_range)
+            attrs["density_range"] = list(self.config.density_range)
+            attrs["physics_version"] = self.config.physics_version
+            attrs["use_voigt_profile"] = self.config.use_voigt_profile
+            attrs["use_stark_broadening"] = self.config.use_stark_broadening
+            attrs["instrument_fwhm_nm"] = self.config.instrument_fwhm_nm
+
             for i in range(0, n_samples, self.config.batch_size):
                 batch = params_arr[i : i + self.config.batch_size]
                 batch_jax = jnp.array(batch)
