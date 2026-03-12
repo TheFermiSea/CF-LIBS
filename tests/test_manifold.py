@@ -345,6 +345,15 @@ class TestManifoldLoader:
 
         loader.close()
 
+    def test_generator_infers_zarr_for_directory_output(self, tmp_path):
+        """Test generator storage inference matches loader directory handling."""
+        from cflibs.manifold.generator import _infer_storage_format
+
+        manifold_dir = tmp_path / "manifold_store"
+        manifold_dir.mkdir()
+
+        assert _infer_storage_format(manifold_dir) == "zarr"
+
     def test_find_nearest_spectrum_zarr(self, tmp_path):
         """Test chunked nearest-neighbor search over a Zarr manifold."""
         zarr = pytest.importorskip("zarr")

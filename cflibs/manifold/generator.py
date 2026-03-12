@@ -62,6 +62,8 @@ logger = get_logger("manifold.generator")
 
 
 def _infer_storage_format(output_path: Path) -> str:
+    if output_path.is_dir():
+        return "zarr"
     suffix = output_path.suffix.lower()
     if suffix == ".zarr":
         return "zarr"

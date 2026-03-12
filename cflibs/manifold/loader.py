@@ -325,6 +325,15 @@ class ManifoldLoader:
         """
         Build vector index for fast similarity search.
 
+        Notes
+        -----
+        ``build_vector_index()`` materializes ``self.spectra[:]`` with
+        ``np.asarray(..., dtype=np.float32)`` before fitting
+        ``SpectralEmbedder`` and ``VectorIndex``. That eager load is expected
+        because the current PCA embedding path is in-memory, but it means large
+        manifolds should be subsampled or preprocessed with an external
+        out-of-core workflow before calling this method.
+
         Parameters
         ----------
         n_components : int
