@@ -139,6 +139,21 @@ class IterativeCFLIBSSolver:
             multipliers[el] = 1.0 + max(S, 0.0)
         return multipliers
 
+    def _compute_effective_ips(
+        self,
+        ips: Dict[str, float],
+        n_e: float,
+        T_K: float,
+    ) -> Dict[str, float]:
+        """Compute ionization potentials with optional plasma screening applied."""
+        if not self.apply_ipd:
+            return ips
+
+        from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+
+        delta_chi = ionization_potential_lowering(n_e, T_K)
+        return {el: max(ip - delta_chi, 0.0) for el, ip in ips.items()}
+
     def _apply_saha_correction(
         self,
         obs_by_element: Dict[str, List[LineObservation]],
@@ -172,25 +187,36 @@ class IterativeCFLIBSSolver:
             Corrected observations grouped by element symbol
         """
         T_eV = max(T_K / EV_TO_K, 0.1)
-        correction_term = np.log((SAHA_CONST_CM3 / n_e) * (T_eV**1.5))
+        safe_ne = max(n_e, 1e10)
+        correction_term = np.log((SAHA_CONST_CM3 / safe_ne) * (T_eV**1.5))
+        scale = np.exp(-correction_term)
         corrected: Dict[str, List[LineObservation]] = defaultdict(list)
 
         for el, obs_list in obs_by_element.items():
             ip = ips.get(el, 15.0)
             for obs in obs_list:
-                new_obs = LineObservation(
-                    wavelength_nm=obs.wavelength_nm,
-                    intensity=obs.intensity,
-                    intensity_uncertainty=obs.intensity_uncertainty,
-                    element=obs.element,
-                    ionization_stage=obs.ionization_stage,
-                    E_k_ev=obs.E_k_ev,
-                    g_k=obs.g_k,
-                    A_ki=obs.A_ki,
-                )
                 if obs.ionization_stage == 2:
-                    new_obs.intensity = obs.intensity * np.exp(-correction_term)
-                    new_obs.E_k_ev = obs.E_k_ev + ip
+                    new_obs = LineObservation(
+                        wavelength_nm=obs.wavelength_nm,
+                        intensity=obs.intensity * scale,
+                        intensity_uncertainty=obs.intensity_uncertainty * scale,
+                        element=obs.element,
+                        ionization_stage=obs.ionization_stage,
+                        E_k_ev=obs.E_k_ev + ip,
+                        g_k=obs.g_k,
+                        A_ki=obs.A_ki,
+                    )
+                else:
+                    new_obs = LineObservation(
+                        wavelength_nm=obs.wavelength_nm,
+                        intensity=obs.intensity,
+                        intensity_uncertainty=obs.intensity_uncertainty,
+                        element=obs.element,
+                        ionization_stage=obs.ionization_stage,
+                        E_k_ev=obs.E_k_ev,
+                        g_k=obs.g_k,
+                        A_ki=obs.A_ki,
+                    )
                 corrected[el].append(new_obs)
 
         return dict(corrected)
@@ -257,14 +283,7 @@ class IterativeCFLIBSSolver:
                 partition_funcs[el] = self._evaluate_partition_function(el, 1, T_K)
                 partition_funcs_II[el] = self._evaluate_partition_function(el, 2, T_K)
 
-            # Optionally apply Ionization Potential Depression (IPD)
-            if self.apply_ipd:
-                from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
-
-                delta_chi = ionization_potential_lowering(n_e, T_K)
-                effective_ips = {el: max(ip - delta_chi, 0.0) for el, ip in ips.items()}
-            else:
-                effective_ips = ips
+            effective_ips = self._compute_effective_ips(ips, n_e, T_K)
 
             # Map ionic lines to the neutral energy plane
             corrected_obs_map = self._apply_saha_correction(obs_by_element, T_K, n_e, effective_ips)
@@ -501,14 +520,7 @@ class IterativeCFLIBSSolver:
             ip = self.atomic_db.get_ionization_potential(el, 1)
             ips[el] = ip if ip is not None else 15.0
 
-        # Apply IPD if enabled (must match the effective_ips used in solve())
-        if self.apply_ipd:
-            from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
-
-            delta_chi = ionization_potential_lowering(n_e, T_K)
-            effective_ips = {el: max(ip - delta_chi, 0.0) for el, ip in ips.items()}
-        else:
-            effective_ips = ips
+        effective_ips = self._compute_effective_ips(ips, n_e, T_K)
 
         # Apply Saha correction so intercepts match those from solve()
         corrected_obs_map = self._apply_saha_correction(obs_by_element, T_K, n_e, effective_ips)

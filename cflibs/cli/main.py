@@ -250,8 +250,7 @@ def analyze_cmd(args):
     db_path = args.db_path or "libs_production.db"
     if not Path(db_path).exists():
         raise FileNotFoundError(
-            f"Atomic database not found: {db_path}. "
-            "Please run cflibs generate-db to create it."
+            f"Atomic database not found: {db_path}. " "Please run cflibs generate-db to create it."
         )
 
     elements = [e.strip() for e in args.elements.split(",")]
@@ -296,8 +295,6 @@ def analyze_cmd(args):
         mc = MonteCarloUQ(solver, n_samples=200)
         mc_result = mc.run(observations)
         result = solver.solve(observations)
-        # Merge MC uncertainties into result
-        result.concentration_uncertainties.update(mc_result.concentrations_std)
         result = result.__class__(
             temperature_K=mc_result.T_mean,
             temperature_uncertainty_K=mc_result.T_std,
@@ -332,7 +329,9 @@ def analyze_cmd(args):
             unc = result.concentration_uncertainties.get(el, 0.0)
             print(f"{el},{conc:.6f},{unc:.6f}")
     else:
-        print(f"Temperature : {result.temperature_K:.0f} ± {result.temperature_uncertainty_K:.0f} K")
+        print(
+            f"Temperature : {result.temperature_K:.0f} ± {result.temperature_uncertainty_K:.0f} K"
+        )
         print(f"n_e         : {result.electron_density_cm3:.3e} cm^-3")
         print(f"Converged   : {result.converged} ({result.iterations} iterations)")
         lte_ok = result.quality_metrics.get("lte_mcwhirter_satisfied", None)
@@ -385,8 +384,8 @@ def bayesian_cmd(args):
     logger.info("Running MCMC...")
     result = sampler.run(
         observed=intensity,
-        num_samples=getattr(args, "samples", 1000),
-        num_chains=getattr(args, "chains", 1),
+        num_samples=args.samples,
+        num_chains=args.chains,
     )
 
     output_path = getattr(args, "output", None)
@@ -461,7 +460,9 @@ def batch_cmd(args):
                 **{f"C_{el}": result.concentrations.get(el, 0.0) for el in elements},
             }
             aggregate.append(row)
-            logger.info(f"{csv_path.name}: T={result.temperature_K:.0f} K, converged={result.converged}")
+            logger.info(
+                f"{csv_path.name}: T={result.temperature_K:.0f} K, converged={result.converged}"
+            )
         except Exception as e:
             logger.error(f"{csv_path.name}: {e}")
 
@@ -471,14 +472,22 @@ def batch_cmd(args):
 
     output_path = getattr(args, "output", None)
     if output_path and str(output_path).endswith(".json"):
-        print(json.dumps(aggregate, indent=2))
-    else:
-        # CSV output
-        if aggregate:
-            fieldnames = list(aggregate[0].keys())
-            writer = csv_mod.DictWriter(sys.stdout, fieldnames=fieldnames)
+        with open(output_path, "w", encoding="utf-8") as fh:
+            json.dump(aggregate, fh, indent=2)
+        print(f"Results written to {output_path}")
+    elif output_path:
+        fieldnames = list(aggregate[0].keys())
+        with open(output_path, "w", newline="") as fh:
+            writer = csv_mod.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(aggregate)
+        print(f"Results written to {output_path}")
+    else:
+        # Default: CSV to stdout
+        fieldnames = list(aggregate[0].keys())
+        writer = csv_mod.DictWriter(sys.stdout, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(aggregate)
 
 
 def dbgen_cmd(args):
@@ -642,15 +651,25 @@ def main():
         "--elements", type=str, required=True, help="Comma-separated element list, e.g. Fe,Si,Ca"
     )
     analyze_parser.add_argument(
-        "--db-path", type=str, default=None, help="Path to atomic database (default: libs_production.db)"
+        "--db-path",
+        type=str,
+        default=None,
+        help="Path to atomic database (default: libs_production.db)",
     )
     analyze_parser.add_argument(
-        "--output", type=str, choices=["json", "csv", "table"], default="table",
-        dest="output_format", help="Output format (default: table)"
+        "--format",
+        type=str,
+        choices=["json", "csv", "table"],
+        default="table",
+        dest="output_format",
+        help="Output format (default: table)",
     )
     analyze_parser.add_argument(
-        "--uncertainty", type=str, choices=["analytical", "mc", "none"], default="none",
-        help="Uncertainty quantification method (default: none)"
+        "--uncertainty",
+        type=str,
+        choices=["analytical", "mc", "none"],
+        default="none",
+        help="Uncertainty quantification method (default: none)",
     )
     analyze_parser.set_defaults(func=analyze_cmd)
 
@@ -677,18 +696,17 @@ def main():
     bayesian_parser.set_defaults(func=bayesian_cmd)
 
     # Batch command
-    batch_parser = subparsers.add_parser(
-        "batch", help="Process all CSV spectra in a directory"
-    )
+    batch_parser = subparsers.add_parser("batch", help="Process all CSV spectra in a directory")
     batch_parser.add_argument("directory", type=str, help="Directory containing CSV spectra")
     batch_parser.add_argument(
         "--elements", type=str, required=True, help="Comma-separated element list"
     )
+    batch_parser.add_argument("--db-path", type=str, default=None, help="Path to atomic database")
     batch_parser.add_argument(
-        "--db-path", type=str, default=None, help="Path to atomic database"
-    )
-    batch_parser.add_argument(
-        "--output", type=str, default=None, help="Output file path (.json for JSON, else CSV to stdout)"
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (.json for JSON, else CSV to stdout)",
     )
     batch_parser.set_defaults(func=batch_cmd)
 

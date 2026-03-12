@@ -846,7 +846,6 @@ class TestSolveWithUncertaintyConsistency:
     def test_nominal_concentrations_agree_neutral_only(self, mock_db):
         """solve() and solve_with_uncertainty() concentrations agree for neutral-only obs."""
         from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
-        from cflibs.core.constants import EV_TO_K
 
         T_eV = 1.0
         solver = IterativeCFLIBSSolver(mock_db, max_iterations=15)
@@ -855,7 +854,11 @@ class TestSolveWithUncertaintyConsistency:
         for el, intercept in [("A", 10.0), ("B", 10.0)]:
             for E in [1.0, 2.0, 3.0, 4.0]:
                 y = intercept - E / T_eV
-                obs.append(LineObservation(500.0, np.exp(y) / 500.0, 0.01 * np.exp(y) / 500.0, el, 1, E, 1, 1.0))
+                obs.append(
+                    LineObservation(
+                        500.0, np.exp(y) / 500.0, 0.01 * np.exp(y) / 500.0, el, 1, E, 1, 1.0
+                    )
+                )
 
         result_det = solver.solve(obs)
         result_uq = solver.solve_with_uncertainty(obs)
@@ -868,7 +871,7 @@ class TestSolveWithUncertaintyConsistency:
     def test_nominal_concentrations_agree_mixed_stage(self, mock_db):
         """solve() and solve_with_uncertainty() agree for mixed neutral+ionic observations."""
         from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
-        from cflibs.core.constants import EV_TO_K, SAHA_CONST_CM3
+        from cflibs.core.constants import SAHA_CONST_CM3
 
         T_eV = 1.0
         n_e_init = 1.0e17
@@ -885,7 +888,9 @@ class TestSolveWithUncertaintyConsistency:
             y = common_intercept - E / T_eV
             intensity = np.exp(y) / wavelength_nm
             obs.append(
-                LineObservation(wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 1, E, 1, 1.0)
+                LineObservation(
+                    wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 1, E, 1, 1.0
+                )
             )
 
         # Ionic lines for element A
@@ -893,7 +898,9 @@ class TestSolveWithUncertaintyConsistency:
             y = common_intercept + saha_offset - (ip + E) / T_eV
             intensity = np.exp(y) / wavelength_nm
             obs.append(
-                LineObservation(wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 2, E, 1, 1.0)
+                LineObservation(
+                    wavelength_nm, intensity, max(intensity * 0.02, 1e-10), "A", 2, E, 1, 1.0
+                )
             )
 
         result_det = solver.solve(obs)
@@ -907,7 +914,6 @@ class TestSolveWithUncertaintyConsistency:
     def test_temperature_uncertainty_is_positive(self, mock_db):
         """solve_with_uncertainty() should propagate a non-zero temperature uncertainty."""
         from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
-        from cflibs.core.constants import EV_TO_K
 
         T_eV = 1.0
         solver = IterativeCFLIBSSolver(mock_db, max_iterations=15)
@@ -918,7 +924,9 @@ class TestSolveWithUncertaintyConsistency:
                 y = 10.0 - E / T_eV
                 intensity = np.exp(y) / 500.0
                 obs.append(
-                    LineObservation(500.0, intensity, max(intensity * 0.02, 1e-10), el, 1, E, 1, 1.0)
+                    LineObservation(
+                        500.0, intensity, max(intensity * 0.02, 1e-10), el, 1, E, 1, 1.0
+                    )
                 )
 
         result = solver.solve_with_uncertainty(obs)

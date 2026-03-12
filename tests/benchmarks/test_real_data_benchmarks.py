@@ -26,12 +26,13 @@ from unittest.mock import MagicMock
 from cflibs.inversion.solver import IterativeCFLIBSSolver, LineObservation
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.atomic.structures import PartitionFunction
-from cflibs.core.constants import EV_TO_K, SAHA_CONST_CM3
+from cflibs.core.constants import SAHA_CONST_CM3
 
 
 # ---------------------------------------------------------------------------
 # Shared fixture: minimal mock database
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_db(ip_map: dict = None):
     """
@@ -110,6 +111,7 @@ def _synthetic_lines_for_element(
 # Benchmark: Binary mixture (equal concentrations)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.nist_parity
 def test_binary_equal_concentrations():
     """
@@ -125,9 +127,7 @@ def test_binary_equal_concentrations():
 
     obs = []
     for el in ["Cu", "Zn"]:
-        obs += _synthetic_lines_for_element(
-            el, 1, intercept, T_eV, n_e, 7.0, [1.0, 2.0, 3.0, 4.0]
-        )
+        obs += _synthetic_lines_for_element(el, 1, intercept, T_eV, n_e, 7.0, [1.0, 2.0, 3.0, 4.0])
 
     solver = IterativeCFLIBSSolver(_make_mock_db(), max_iterations=15)
     result = solver.solve(obs)
@@ -166,12 +166,12 @@ def test_dominant_minor_composition():
     result = solver.solve(obs)
 
     assert result.converged
-    assert abs(result.concentrations.get("Cu", 0) - 0.70) < 0.05, (
-        f"Cu concentration {result.concentrations.get('Cu', 0):.3f} not within 0.05 of 0.70"
-    )
-    assert abs(result.concentrations.get("Zn", 0) - 0.30) < 0.05, (
-        f"Zn concentration {result.concentrations.get('Zn', 0):.3f} not within 0.05 of 0.30"
-    )
+    assert (
+        abs(result.concentrations.get("Cu", 0) - 0.70) < 0.05
+    ), f"Cu concentration {result.concentrations.get('Cu', 0):.3f} not within 0.05 of 0.70"
+    assert (
+        abs(result.concentrations.get("Zn", 0) - 0.30) < 0.05
+    ), f"Zn concentration {result.concentrations.get('Zn', 0):.3f} not within 0.05 of 0.30"
 
 
 @pytest.mark.nist_parity
@@ -204,9 +204,9 @@ def test_three_element_mixture():
     assert result.converged
     for el, C_exp in C_target.items():
         C_got = result.concentrations.get(el, 0)
-        assert abs(C_got - C_exp) < 0.05, (
-            f"{el}: expected {C_exp:.3f}, got {C_got:.3f} (diff > 0.05)"
-        )
+        assert (
+            abs(C_got - C_exp) < 0.05
+        ), f"{el}: expected {C_exp:.3f}, got {C_got:.3f} (diff > 0.05)"
 
 
 @pytest.mark.nist_parity

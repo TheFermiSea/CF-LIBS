@@ -17,16 +17,13 @@ from typing import List, Optional
 
 import numpy as np
 
+from cflibs.core.constants import KB_EV, MCWHIRTER_CONST
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("plasma.lte_validator")
 
-# McWhirter criterion constant: n_e >= C * sqrt(T_K) * delta_E_eV^3
-# C = 1.6e12 cm^-3 K^{-1/2} eV^{-3}
-MCWHIRTER_C = 1.6e12  # cm^-3 K^{-1/2} eV^{-3}
-
-# kB in eV/K
-KB_EV = 8.617333262e-5
+# Backward-compatible alias for tests/importers that still reference the old name.
+MCWHIRTER_C = MCWHIRTER_CONST
 
 
 @dataclass
@@ -123,7 +120,7 @@ class LTEValidator:
         -------
         LTECheckResult
         """
-        n_e_required = MCWHIRTER_C * np.sqrt(T_K) * delta_E_eV**3
+        n_e_required = MCWHIRTER_CONST * np.sqrt(T_K) * delta_E_eV**3
         ratio = n_e_cm3 / n_e_required if n_e_required > 0 else float("inf")
         satisfied = n_e_cm3 >= n_e_required
 
@@ -254,7 +251,12 @@ class LTEValidator:
                     gaps = [energies[i + 1] - energies[i] for i in range(len(energies) - 1)]
                     delta_E_eV = float(max(gaps))
                 else:
-                    delta_E_eV = float(energies[0]) if energies else 2.0
+                    # Single energy level: delta_E is undefined; use conservative default
+                    delta_E_eV = 2.0
+                    logger.warning(
+                        "Only one unique energy level in observations; "
+                        "using default 2.0 eV for McWhirter criterion"
+                    )
                 delta_E_eV = max(delta_E_eV, 0.1)  # floor to avoid degenerate case
             else:
                 delta_E_eV = 2.0  # conservative default
