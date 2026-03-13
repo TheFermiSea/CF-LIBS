@@ -251,11 +251,18 @@ class IterativeCFLIBSSolver:
         corrected_obs_map: Dict[str, List[LineObservation]],
     ) -> Optional[_CommonSlopeFit]:
         """
-        Fit a common Boltzmann slope across elements using weighted centering.
-
-        Each element contributes a weighted centroid in the corrected Boltzmann
-        plane. The shared slope is then fit through the pooled centered data,
-        which is the same regression model used by the deterministic solver.
+        Compute a pooled Boltzmann slope common to multiple elements by fitting a single weighted linear slope to per-element centered Boltzmann data.
+        
+        For each element with at least two valid corrected observations, this routine computes weighted means in the Boltzmann plane, centers the element's points by those means, and pools the centered points across elements to fit a single slope. The result includes the fitted slope, its variance (accounting for one common slope plus one intercept per contributing element), per-element intercepts, per-element statistics (original values, weights, and means), and an R² goodness-of-fit metric.
+        
+        Returns:
+            _CommonSlopeFit | None: A _CommonSlopeFit with fields:
+                - slope: fitted common slope
+                - slope_variance: estimated variance of the slope
+                - intercepts: mapping from element to fitted intercept on the original (uncentered) scale
+                - element_stats: per-element _CommonSlopeElementStats containing x/y values, weights, and means
+                - r_squared: weighted R² of the pooled centered fit
+            Returns None if there is insufficient valid data to perform the pooled fit.
         """
         pooled_x_parts: List[np.ndarray] = []
         pooled_y_parts: List[np.ndarray] = []
@@ -339,20 +346,25 @@ class IterativeCFLIBSSolver:
         self, observations: List[LineObservation], closure_mode: str = "standard", **closure_kwargs
     ) -> CFLIBSResult:
         """
-        Solve for plasma parameters.
-
-        Parameters
-        ----------
-        observations : List[LineObservation]
-            Spectral lines
-        closure_mode : str
-            'standard', 'matrix', or 'oxide'
-        closure_kwargs : dict
-            Arguments for closure equation (e.g. matrix_element)
-
-        Returns
-        -------
-        CFLIBSResult
+        Estimate plasma temperature, electron density, and elemental concentrations from spectral line observations using the iterative CF-LIBS algorithm.
+        
+        Parameters:
+            observations (List[LineObservation]): Spectral line observations to invert; lines are grouped by element.
+            closure_mode (str): Closure method for converting Boltzmann intercepts to concentrations. One of "standard", "matrix", or "oxide".
+            **closure_kwargs: Additional keyword arguments forwarded to the chosen closure method (for example, a matrix_element for "matrix" mode).
+        
+        Returns:
+            CFLIBSResult: Final inversion result containing:
+                - temperature_K: Estimated plasma temperature (Kelvin).
+                - temperature_uncertainty_K: Set to 0.0 in this routine (see solve_with_uncertainty for propagated uncertainties).
+                - electron_density_cm3: Estimated electron density (cm^-3).
+                - concentrations: Dictionary of elemental concentrations (relative units returned by the chosen closure).
+                - concentration_uncertainties: Empty in this routine (see solve_with_uncertainty).
+                - iterations: Number of iterations performed.
+                - converged: Whether the iterative solver met convergence criteria.
+                - quality_metrics: Diagnostics including the last Boltzmann fit R^2 and LTE validation metrics.
+                - electron_density_uncertainty_cm3: Set to 0.0 here.
+                - boltzmann_covariance: None in this routine; covariance information is produced by solve_with_uncertainty.
         """
         # 1. Initialization
         T_K = 10000.0
@@ -534,33 +546,26 @@ class IterativeCFLIBSSolver:
         **closure_kwargs,
     ) -> CFLIBSResult:
         """
-        Solve for plasma parameters with full uncertainty propagation.
-
-        Uses the `uncertainties` package to propagate uncertainties through:
-        1. Boltzmann fit (with slope-intercept correlation)
-        2. Saha correction
-        3. Closure equation
-
-        Requires: `pip install uncertainties>=3.2.0` or `pip install cflibs[uncertainty]`
-
-        Parameters
-        ----------
-        observations : List[LineObservation]
-            Spectral lines with intensity uncertainties
-        closure_mode : str
-            'standard' or 'matrix' (oxide not yet supported)
-        closure_kwargs : dict
-            Arguments for closure equation (e.g. matrix_element, matrix_fraction)
-
-        Returns
-        -------
-        CFLIBSResult
-            With populated uncertainty fields
-
-        Raises
-        ------
-        ImportError
-            If uncertainties package not installed
+        Compute plasma parameters while propagating measurement and fit uncertainties.
+        
+        Performs uncertainty propagation through the pooled Boltzmann fit, Saha
+        correction, and the chosen closure equation, returning the same result
+        structure as solve() augmented with uncertainty fields.
+        
+        Parameters:
+            observations (List[LineObservation]): Spectral lines with intensity uncertainties.
+            closure_mode (str): Closure algorithm to use ('standard', 'matrix', or 'oxide').
+            **closure_kwargs: Arguments passed to the chosen closure routine (e.g. 'matrix_element',
+                'matrix_fraction', or 'oxide_stoichiometry').
+        
+        Returns:
+            CFLIBSResult: Solver result including populated uncertainty fields:
+                - temperature_uncertainty_K: estimated standard deviation of temperature (K)
+                - concentration_uncertainties: per-element concentration uncertainties
+                - boltzmann_covariance: selected 2x2 covariance matrix for slope/intercept (or None)
+        
+        Raises:
+            ImportError: If the external `uncertainties`-based utilities are not available.
         """
         # First run the standard solver to convergence
         result = self.solve(observations, closure_mode, **closure_kwargs)
