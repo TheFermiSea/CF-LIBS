@@ -43,7 +43,10 @@ class CFLIBSResult:
     quality_metrics : Dict[str, float]
         Quality metrics (R², chi², etc.)
     boltzmann_covariance : np.ndarray, optional
-        2x2 covariance matrix of final Boltzmann fit (slope, intercept)
+        2x2 covariance matrix of a representative pooled Boltzmann fit
+        (slope, intercept). For multi-element uncertainty solves this stores
+        the covariance for the selected reference element noted in
+        ``quality_metrics["boltzmann_covariance_element"]``.
     """
 
     temperature_K: float
@@ -312,7 +315,10 @@ class IterativeCFLIBSSolver:
         ss_tot = float(np.sum(pooled_w * pooled_y**2))
         r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0.0 else 1.0
 
-        dof = max(int(pooled_x.size) - 1, 1)
+        # The centered pooled fit is equivalent to y = a_element + m x, so the
+        # residual variance must account for one common slope plus one intercept
+        # per contributing element.
+        dof = max(int(pooled_x.size) - (1 + len(element_stats)), 1)
         slope_variance = ss_res / (dof * denom)
         if not np.isfinite(slope_variance) or slope_variance <= 0.0:
             slope_variance = 1.0 / denom
@@ -670,6 +676,22 @@ class IterativeCFLIBSSolver:
             T_K_u = temperature_from_slope(slope_u)
             T_err = float(T_K_u.std_dev) if np.isfinite(T_K_u.std_dev) else 0.0
 
+        selected_covariance = None
+        covariance_element = None
+        if covariances:
+            preferred_element = (
+                closure_kwargs.get("matrix_element") if closure_mode == "matrix" else None
+            )
+            if preferred_element in covariances:
+                covariance_element = preferred_element
+            else:
+                covariance_element = sorted(covariances)[0]
+            selected_covariance = covariances[covariance_element]
+
+        quality_metrics = dict(result.quality_metrics)
+        if covariance_element is not None:
+            quality_metrics["boltzmann_covariance_element"] = covariance_element
+
         return CFLIBSResult(
             temperature_K=result.temperature_K,
             temperature_uncertainty_K=T_err,
@@ -678,7 +700,7 @@ class IterativeCFLIBSSolver:
             concentration_uncertainties=conc_uncert if conc_uncert else {},
             iterations=result.iterations,
             converged=result.converged,
-            quality_metrics=result.quality_metrics,
+            quality_metrics=quality_metrics,
             electron_density_uncertainty_cm3=0.0,  # Would need iterative uncertainty
-            boltzmann_covariance=next(iter(covariances.values()), None),
+            boltzmann_covariance=selected_covariance,
         )

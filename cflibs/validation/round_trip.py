@@ -620,6 +620,10 @@ class RoundTripValidator:
         Fractional tolerance for electron density (default: 0.20 = 20%)
     concentration_tolerance : float
         Fractional tolerance for concentrations (default: 0.10 = 10%)
+        This default was tightened from 0.15 in March 2026 to align the
+        round-trip validator with the Phase 7 synthetic recovery target. Pass
+        ``concentration_tolerance=0.15`` explicitly to preserve the earlier
+        behavior in existing workflows.
     """
 
     def __init__(

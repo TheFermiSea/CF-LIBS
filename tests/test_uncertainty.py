@@ -1027,5 +1027,8 @@ class TestSolveWithUncertaintyConsistency:
             )
             assert result_uq.concentration_uncertainties[element] > 0.0
 
+        assert result_uq.boltzmann_covariance is not None
+        assert result_uq.boltzmann_covariance.shape == (2, 2)
+        assert result_uq.quality_metrics["boltzmann_covariance_element"] == "A"
         assert result_uq.temperature_uncertainty_K > 0.0
         assert result_uq.temperature_uncertainty_K < 0.5 * result_uq.temperature_K
