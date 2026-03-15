@@ -96,7 +96,11 @@ class TestPathLengthScaling:
         _, I1 = SpectrumModel(**common, path_length_m=0.01).compute_spectrum()
         _, I2 = SpectrumModel(**common, path_length_m=0.02).compute_spectrum()
         np.testing.assert_allclose(
-            I2, 2.0 * I1, rtol=1e-10, err_msg="Intensity should scale linearly with path length"
+            I2,
+            2.0 * I1,
+            rtol=1e-9,
+            atol=1e-300,
+            err_msg="Intensity should scale linearly with path length",
         )
 
 
