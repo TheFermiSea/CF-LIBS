@@ -551,6 +551,40 @@ class PriorConfig:
     log_ne_range: Tuple[float, float] = (15.0, 19.0)
     concentration_alpha: float = 1.0
 
+    @classmethod
+    def geological(cls, **kwargs) -> "PriorConfig":
+        """Geological sample prior: broad T/ne, sparse concentrations.
+
+        Geological samples often have a dominant matrix element (Si, Fe)
+        with several minor components. Dirichlet alpha < 1 favors sparse
+        compositions.
+        """
+        defaults = {"concentration_alpha": 0.5, "T_eV_range": (0.5, 2.0)}
+        defaults.update(kwargs)
+        return cls(**defaults)
+
+    @classmethod
+    def metallurgical(cls, **kwargs) -> "PriorConfig":
+        """Metallurgical alloy prior: moderate T, peaked concentrations.
+
+        Alloys have well-characterized compositions with known major
+        elements. Dirichlet alpha > 1 favors more equal distributions.
+        """
+        defaults = {"concentration_alpha": 2.0, "T_eV_range": (0.6, 1.5)}
+        defaults.update(kwargs)
+        return cls(**defaults)
+
+    @classmethod
+    def uninformative(cls, **kwargs) -> "PriorConfig":
+        """Maximally uninformative prior: uniform on simplex.
+
+        Dirichlet(1) = uniform distribution on the concentration simplex.
+        Use when no prior information about sample composition exists.
+        """
+        defaults = {"concentration_alpha": 1.0}
+        defaults.update(kwargs)
+        return cls(**defaults)
+
 
 class ConvergenceStatus(Enum):
     """MCMC convergence status."""
