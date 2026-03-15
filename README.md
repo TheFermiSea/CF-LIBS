@@ -513,7 +513,7 @@ print("species densities:", result.species)
 
 ## Development Roadmap
 
-This section details the **stepwise path** from the current empty scaffold to a **full CF‑LIBS physics and inversion engine**.
+This section is a maintained roadmap that tracks the **stepwise path** from the initial scaffold to a **full CF‑LIBS physics and inversion engine**.
 
 ### Phase 0 – Scaffold & Core Utilities
 
