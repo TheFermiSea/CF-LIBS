@@ -23,6 +23,7 @@ References
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -236,8 +237,6 @@ class ChemCamParser:
         where TT is the target number (2 digits) and SSS is the sol
         (variable-width integer before the trailing ``P1``).
         """
-        import re
-
         try:
             # Match: CCAM<target_digits><sol_digits>P<version>
             match = re.search(r"CCAM(\d{2})(\d+)P\d", product_id)

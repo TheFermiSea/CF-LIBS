@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
-from cflibs.pds.corpus import CorpusEntry
+from cflibs.pds.corpus import CorpusEntry, Instrument
 from cflibs.pds.chemcam import ChemCamSpectrum
 from cflibs.pds.supercam import SuperCamSpectrum
 
@@ -93,6 +93,9 @@ def map_chemcam_to_validation(
     entry: CorpusEntry,
 ) -> PDSValidationDataset:
     """Map a parsed ChemCam spectrum into the validation schema."""
+    if entry.instrument != Instrument.CHEMCAM:
+        raise ValueError(f"Entry {entry.entry_id} is {entry.instrument.value}, not chemcam")
+
     provenance = {
         "product_id": spectrum.product_id,
         "pds_base_url": entry.pds_base_url,
@@ -129,6 +132,9 @@ def map_supercam_to_validation(
     entry: CorpusEntry,
 ) -> PDSValidationDataset:
     """Map a parsed SuperCam spectrum into the validation schema."""
+    if entry.instrument != Instrument.SUPERCAM:
+        raise ValueError(f"Entry {entry.entry_id} is {entry.instrument.value}, not supercam")
+
     provenance = {
         "product_id": spectrum.product_id,
         "pds_base_url": entry.pds_base_url,
