@@ -102,12 +102,12 @@ def map_chemcam_to_validation(
         **spectrum.metadata,
     }
 
-    quality = "quantified" if entry.expected_elements else "unknown"
-    has_quantified = any(v is not None for v in entry.expected_elements.values())
-    if has_quantified:
+    if any(v is not None for v in entry.expected_elements.values()):
         quality = "quantified"
     elif entry.expected_elements:
         quality = "qualitative"
+    else:
+        quality = "unknown"
 
     return PDSValidationDataset(
         entry_id=entry.entry_id,

@@ -229,19 +229,20 @@ class ChemCamParser:
         return ranges
 
     def _extract_sol_from_product_id(self, product_id: str) -> int:
-        """Try to extract sol number from product ID naming convention."""
-        # ChemCam CL5 product IDs end with ...CCAMNNXXXP1
-        # where NNN is target number and XXX is sol
-        # Format: CL5_<sclk>RCE_F<seq>CCAM<target><sol>P1
+        """Try to extract sol number from product ID naming convention.
+
+        ChemCam CL5 product IDs follow the pattern:
+            CL5_<sclk>RCE_F<seq>CCAM<TT><SSS>P1
+        where TT is the target number (2 digits) and SSS is the sol
+        (variable-width integer before the trailing ``P1``).
+        """
+        import re
+
         try:
-            if "CCAM" in product_id:
-                after_ccam = product_id.split("CCAM")[1]
-                # Last 3-4 digits before P1 are the sol
-                digits = "".join(c for c in after_ccam if c.isdigit())
-                if len(digits) >= 4:
-                    return int(digits[-4:])
-                elif len(digits) >= 3:
-                    return int(digits[-3:])
+            # Match: CCAM<target_digits><sol_digits>P<version>
+            match = re.search(r"CCAM(\d{2})(\d+)P\d", product_id)
+            if match:
+                return int(match.group(2))
         except (IndexError, ValueError):
             pass
         return 0

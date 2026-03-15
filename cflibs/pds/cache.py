@@ -16,10 +16,11 @@ Cache layout:
 
 from __future__ import annotations
 
+import shutil
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from cflibs.core.logging_config import get_logger
 from cflibs.pds.corpus import CorpusEntry
@@ -28,17 +29,22 @@ logger = get_logger("pds.cache")
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "cflibs" / "pds"
 
+# Minimum size (bytes) for a cached file to be considered valid.
+# PDS CSV files are at least a few KB; anything smaller is likely
+# a truncated download or an HTML error page.
+_MIN_VALID_SIZE = 256
+
 
 class PDSCache:
     """Local cache for PDS data products.
 
     Parameters
     ----------
-    cache_dir : Path or str, optional
+    cache_dir : Path, str, or None
         Root directory for cached files. Defaults to ``~/.cache/cflibs/pds/``.
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None) -> None:
+    def __init__(self, cache_dir: Union[Path, str, None] = None) -> None:
         self.cache_dir = Path(cache_dir) if cache_dir else _DEFAULT_CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,9 +65,25 @@ class PDSCache:
         return self._entry_dir(entry) / self._entry_filename(entry)
 
     def is_cached(self, entry: CorpusEntry) -> bool:
-        """Check if the entry is already in the local cache."""
+        """Check if the entry is in the local cache with valid content.
+
+        A file is considered valid only if it exists, exceeds the minimum
+        size threshold, and does not look like an HTML error page.
+        """
         p = self.cached_path(entry)
-        return p.exists() and p.stat().st_size > 0
+        if not p.exists():
+            return False
+        size = p.stat().st_size
+        if size < _MIN_VALID_SIZE:
+            return False
+        # Reject HTML error pages (PDS servers return these on 404)
+        try:
+            head = p.read_bytes()[:64]
+            if b"<html" in head.lower() or b"<!doctype" in head.lower():
+                return False
+        except OSError:
+            return False
+        return True
 
     def fetch(self, entry: CorpusEntry, timeout: int = 60) -> Path:
         """Download a PDS data product if not already cached.
@@ -92,7 +114,9 @@ class PDSCache:
         logger.info("Downloading %s → %s", url, dest)
 
         try:
-            urllib.request.urlretrieve(url, str(dest))
+            response = urllib.request.urlopen(url, timeout=timeout)
+            with open(dest, "wb") as f:
+                f.write(response.read())
         except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
             # Clean up partial download
             if dest.exists():
@@ -138,8 +162,6 @@ class PDSCache:
                 p.unlink()
                 logger.info("Removed cached file: %s", p)
         else:
-            import shutil
-
             if self.cache_dir.exists():
                 shutil.rmtree(self.cache_dir)
                 self.cache_dir.mkdir(parents=True, exist_ok=True)

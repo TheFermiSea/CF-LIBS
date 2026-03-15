@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.unit
+
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "pds"
 CHEMCAM_FIXTURE = FIXTURE_DIR / "chemcam" / "CL5_test_fixture.csv"
 SUPERCAM_FIXTURE = FIXTURE_DIR / "supercam" / "SC3_test_fixture.csv"
@@ -166,7 +168,7 @@ class TestPDSCache:
 
         # Simulate a cached file
         path = cache.cached_path(entry)
-        path.write_text("test data")
+        path.write_text("wavelength_nm,intensity\n" + "300.0,1000.0\n" * 50)
         assert cache.is_cached(entry)
 
     def test_clear_specific_entry(self, tmp_path):
@@ -177,7 +179,7 @@ class TestPDSCache:
         entry = PDSCorpus().entries[0]
 
         path = cache.cached_path(entry)
-        path.write_text("test data")
+        path.write_text("wavelength_nm,intensity\n" + "300.0,1000.0\n" * 50)
         assert cache.is_cached(entry)
 
         cache.clear(entry)
@@ -244,6 +246,15 @@ class TestChemCamParser:
         spectrum = parser.parse(CHEMCAM_FIXTURE)
         total_points = sum(end - start for start, end in spectrum.spectrometer_ranges)
         assert total_points == len(spectrum.wavelength)
+
+    def test_sol_extraction_from_product_id(self, parser):
+        """Sol extraction fallback should parse ChemCam product IDs correctly."""
+        # Pattern: ...CCAM<TT><SSS>P1 where TT=target, SSS=sol
+        assert parser._extract_sol_from_product_id("CL5_398755580RCE_F0050104CCAM01069P1") == 69
+        assert parser._extract_sol_from_product_id("CL5_398755715RCE_F0050104CCAM03069P1") == 69
+        assert parser._extract_sol_from_product_id("CL5_398756800RCE_F0050104CCAM09069P1") == 69
+        assert parser._extract_sol_from_product_id("CL5_UNKNOWN_CCAM051234P1") == 1234
+        assert parser._extract_sol_from_product_id("no_ccam_here") == 0
 
 
 # ============================================================================
