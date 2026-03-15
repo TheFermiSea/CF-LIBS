@@ -145,6 +145,7 @@ def test_partition_function_physical_bounds(nist_reference, element, stage, T_st
     assert U_min <= U <= U_max, f"U({element} {stage}, T={T_str}K) = {U} not in [{U_min}, {U_max}]"
 
 
+@pytest.mark.requires_db
 def test_polynomial_fit_accuracy_at_key_temps(nist_reference):
     """Polynomial fits must reproduce reference values within 2% at key temperatures."""
     import sqlite3
@@ -201,10 +202,12 @@ def test_partition_function_monotonic_with_temperature(nist_reference):
             if U_values[-1] < U_values[0] * 0.99:
                 n_non_monotonic += 1
 
-    # Allow a few exceptions (some species with very complex level structures)
-    assert n_non_monotonic == 0, f"{n_non_monotonic}/{n_total} species have non-monotonic U(T)"
+    assert (
+        n_non_monotonic == 0
+    ), f"{n_non_monotonic}/{n_total} species have decreasing U(T) trend (U_max < 0.99 * U_min)"
 
 
+@pytest.mark.requires_db
 def test_database_has_expanded_coefficients():
     """Database should have 106+ partition function coefficient sets."""
     import sqlite3

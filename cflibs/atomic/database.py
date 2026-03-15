@@ -161,15 +161,14 @@ class AtomicDatabase(AtomicDataSource):
             logger.info("Populating partition_functions with NIST Irwin coefficients...")
             self._populate_partition_functions(cursor)
 
-        # 7. Backfill aki_uncertainty from accuracy_grade or heuristic if empty
-        cursor.execute("SELECT COUNT(*) FROM lines WHERE aki_uncertainty IS NOT NULL")
-        n_with_unc = cursor.fetchone()[0]
-        if n_with_unc == 0:
-            cursor.execute("SELECT COUNT(*) FROM lines WHERE aki IS NOT NULL")
-            n_lines = cursor.fetchone()[0]
-            if n_lines > 0:
-                logger.info("Backfilling aki_uncertainty with NIST-style heuristic...")
-                self._populate_aki_uncertainties(cursor)
+        # 7. Backfill aki_uncertainty from accuracy_grade or heuristic where missing
+        cursor.execute(
+            "SELECT COUNT(*) FROM lines WHERE aki IS NOT NULL AND aki_uncertainty IS NULL"
+        )
+        n_missing = cursor.fetchone()[0]
+        if n_missing > 0:
+            logger.info("Backfilling %d lines missing aki_uncertainty...", n_missing)
+            self._populate_aki_uncertainties(cursor)
 
         conn.commit()
 
@@ -506,10 +505,11 @@ class AtomicDatabase(AtomicDataSource):
         # Check if new columns exist in the actual query execution (though schema check should have fixed it)
         # We select all relevant columns.
         query = """
-            SELECT 
-                element, sp_num, wavelength_nm, aki, ek_ev, ei_ev, 
+            SELECT
+                element, sp_num, wavelength_nm, aki, ek_ev, ei_ev,
                 gk, gi, rel_int,
-                stark_w, stark_alpha, stark_shift, is_resonance
+                stark_w, stark_alpha, stark_shift, is_resonance,
+                aki_uncertainty, accuracy_grade
             FROM lines
             WHERE element = ?
         """
@@ -563,15 +563,9 @@ class AtomicDatabase(AtomicDataSource):
             )
 
             aki_uncertainty = (
-                float(row["aki_uncertainty"])
-                if "aki_uncertainty" in row and pd.notna(row.get("aki_uncertainty"))
-                else None
+                float(row["aki_uncertainty"]) if pd.notna(row["aki_uncertainty"]) else None
             )
-            accuracy_grade = (
-                str(row["accuracy_grade"])
-                if "accuracy_grade" in row and pd.notna(row.get("accuracy_grade"))
-                else None
-            )
+            accuracy_grade = str(row["accuracy_grade"]) if pd.notna(row["accuracy_grade"]) else None
 
             trans = Transition(
                 element=row["element"],

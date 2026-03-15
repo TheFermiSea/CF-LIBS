@@ -22,7 +22,10 @@ from pathlib import Path
 
 import numpy as np
 
+# Allow running as standalone script without full package install
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from cflibs.core.constants import EV_TO_K  # noqa: E402
 
 # Temperatures for computing U(T) — 2000 to 20000 K in 1000 K steps
 TEMPERATURES = np.arange(2000.0, 20001.0, 1000.0)
@@ -74,7 +77,7 @@ def compute_partition_function_from_levels(
     float
         Partition function value
     """
-    kT_eV = T_K / 11604.5  # EV_TO_K = 11604.5
+    kT_eV = T_K / EV_TO_K
     max_e = ip_ev * 0.98 if ip_ev else 50.0
 
     U = 0.0

@@ -28,6 +28,7 @@ def db_conn():
     conn.close()
 
 
+@pytest.mark.requires_db
 def test_schema_has_aki_uncertainty_column(db_conn):
     """Schema migration adds aki_uncertainty column."""
     cursor = db_conn.execute("PRAGMA table_info(lines)")
@@ -35,6 +36,7 @@ def test_schema_has_aki_uncertainty_column(db_conn):
     assert "aki_uncertainty" in cols
 
 
+@pytest.mark.requires_db
 def test_schema_has_accuracy_grade_column(db_conn):
     """Schema migration adds accuracy_grade column."""
     cursor = db_conn.execute("PRAGMA table_info(lines)")
@@ -42,6 +44,7 @@ def test_schema_has_accuracy_grade_column(db_conn):
     assert "accuracy_grade" in cols
 
 
+@pytest.mark.requires_db
 def test_accuracy_grades_populated_for_majority(db_conn):
     """NIST accuracy grades mapped for >80% of lines with A_ki."""
     cursor = db_conn.execute(
@@ -55,6 +58,7 @@ def test_accuracy_grades_populated_for_majority(db_conn):
     assert coverage >= 0.80, f"Only {coverage:.1%} of lines have accuracy grades"
 
 
+@pytest.mark.requires_db
 def test_aki_uncertainty_values_are_valid(db_conn):
     """aki_uncertainty values should be between 0 and 1."""
     cursor = db_conn.execute(
@@ -65,6 +69,7 @@ def test_aki_uncertainty_values_are_valid(db_conn):
     assert row[1] <= 1.0, f"Uncertainty > 100% found: {row[1]}"
 
 
+@pytest.mark.requires_db
 def test_accuracy_grade_values_are_valid(db_conn):
     """accuracy_grade values should be valid NIST grades."""
     valid_grades = {"AAA", "AA", "A+", "A", "B+", "B", "C+", "C", "D+", "D", "E"}
@@ -76,6 +81,7 @@ def test_accuracy_grade_values_are_valid(db_conn):
     assert not invalid, f"Invalid accuracy grades found: {invalid}"
 
 
+@pytest.mark.requires_db
 def test_no_data_loss_after_migration(db_conn):
     """Migration should not alter existing data columns."""
     cursor = db_conn.execute("SELECT COUNT(*) FROM lines WHERE aki IS NOT NULL")
@@ -142,9 +148,10 @@ def test_atomic_data_uncertainty_empty_transitions():
     """from_transitions with no uncertainties uses fallback."""
     from cflibs.inversion.uncertainty import AtomicDataUncertainty
 
-    t1 = MagicMock(wavelength_nm=404.581, spec=["wavelength_nm"])
-    # No aki_uncertainty attribute
-    del t1.aki_uncertainty
+    import types
+
+    t1 = types.SimpleNamespace(wavelength_nm=404.581)
+    # No aki_uncertainty attribute — SimpleNamespace won't have it
 
     adu = AtomicDataUncertainty.from_transitions([t1])
     assert adu.default_A_uncertainty == 0.10  # Grade B fallback
