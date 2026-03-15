@@ -15,7 +15,14 @@ from cflibs.inversion.boltzmann import (
     BoltzmannPlotFitter,
     FitMethod,
 )
-from cflibs.inversion.closure import ClosureEquation, ClosureResult
+from cflibs.inversion.closure import (
+    ClosureEquation,
+    ClosureResult,
+    ClosureMode,
+    clr_transform,
+    ilr_transform,
+    ilr_inverse,
+)
 from cflibs.inversion.solver import IterativeCFLIBSSolver, CFLIBSResult
 from cflibs.inversion.quality import (
     QualityMetrics,
@@ -315,6 +322,10 @@ __all__ = [
     # Closure
     "ClosureEquation",
     "ClosureResult",
+    "ClosureMode",
+    "clr_transform",
+    "ilr_transform",
+    "ilr_inverse",
     # Solver
     "IterativeCFLIBSSolver",
     "CFLIBSResult",
