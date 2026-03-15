@@ -147,6 +147,47 @@ class ClosureResult:
     mode: str  # Mode used ('standard', 'matrix', 'oxide')
 
 
+@dataclass
+class DirichletResidualResult:
+    """
+    Result from Dirichlet-residual closure.
+
+    This closure mode adds a latent "dark element" residual category to absorb
+    mass from undetected elements (e.g., S, P with VUV lines outside
+    spectrometer range).  Instead of inflating all detected concentrations via
+    standard sum-to-one normalization, detected elements are normalized to fill
+    only ``(1 - residual_fraction)`` of the total mass budget.
+
+    Attributes
+    ----------
+    concentrations : Dict[str, float]
+        Detected element concentrations (sum to ``1 - residual_fraction``).
+    residual_fraction : float
+        Estimated missing mass fraction (gamma_residual).
+    raw_closure_sum : float
+        Sum of raw (un-normalized) concentrations before any adjustment.
+    closure_diagnostic : float
+        Absolute deviation ``|raw_closure_sum - 1|``.  Large values signal
+        significant missing (positive) or over-counted (negative) mass.
+    mode : str
+        ``'simple'`` or ``'dirichlet'``.
+    alpha_residual : float
+        Prior strength for the residual category (Dirichlet mode only;
+        meaningless in simple mode).
+    experimental_factor : float
+        The eliminated factor *F* used for normalization, consistent with
+        the standard closure interface.
+    """
+
+    concentrations: Dict[str, float]
+    residual_fraction: float
+    raw_closure_sum: float
+    closure_diagnostic: float
+    mode: str
+    alpha_residual: float
+    experimental_factor: float = 0.0
+
+
 class ClosureEquation:
     """
     Handles the closure equation (normalization) step of CF-LIBS.
@@ -422,4 +463,121 @@ class ClosureEquation:
             experimental_factor=F,
             total_measured=total_measured,
             mode="ilr",
+        )
+
+    @staticmethod
+    def apply_dirichlet_residual(
+        intercepts: Dict[str, float],
+        partition_funcs: Dict[str, float],
+        abundance_multipliers: Optional[Dict[str, float]] = None,
+        mode: str = "simple",
+        alpha_residual: float = 2.0,
+        alpha_detected: float = 1.0,
+        residual_threshold: float = 0.05,
+    ) -> "DirichletResidualResult":
+        """
+        Apply closure with a latent dark-element residual category.
+
+        When major elements go undetected (e.g., S or P whose strongest lines
+        fall outside the spectrometer window), the standard ``sum(C_s) = 1``
+        closure inflates every detected concentration.  This method adds a
+        residual category ``gamma_residual`` so that
+        ``sum(C_detected) + gamma_residual = 1``.
+
+        Two estimation modes are supported:
+
+        * **simple** -- ``gamma_residual = max(0, 1 - sum(C_raw))`` when the
+          raw sum falls below ``1 - residual_threshold``; otherwise 0.
+        * **dirichlet** -- MAP estimate under a Dirichlet prior
+          ``Dir(alpha_1, ..., alpha_D, alpha_residual)`` where the prior on
+          the residual category controls how much mass it can absorb.
+
+        Parameters
+        ----------
+        intercepts : Dict[str, float]
+            Boltzmann plot intercepts ``q_s`` for each detected element.
+        partition_funcs : Dict[str, float]
+            Partition function values ``U_s(T)`` for each detected element.
+        abundance_multipliers : Dict[str, float], optional
+            Per-element Saha scaling (same semantics as ``apply_standard``).
+        mode : str
+            ``'simple'`` or ``'dirichlet'``.
+        alpha_residual : float
+            Dirichlet prior strength for the residual category (only used in
+            ``'dirichlet'`` mode).  Higher values allow more missing mass.
+            Default is 2.0 (mild preference for some residual).
+        alpha_detected : float
+            Dirichlet prior strength for each detected element (only used in
+            ``'dirichlet'`` mode).  Default is 1.0 (uniform / non-informative).
+        residual_threshold : float
+            In ``'simple'`` mode the residual is only activated when
+            ``1 - sum(C_raw) > residual_threshold``.
+
+        Returns
+        -------
+        DirichletResidualResult
+        """
+        # --- 1. Compute raw (un-normalized) concentrations ----------------
+        raw_concentrations: Dict[str, float] = {}
+        for element, q_s in intercepts.items():
+            if element not in partition_funcs:
+                logger.warning(
+                    "Missing partition function for %s in dirichlet closure",
+                    element,
+                )
+                continue
+            U_s = partition_funcs[element]
+            multiplier = _validated_abundance_multiplier(
+                abundance_multipliers, element
+            )
+            raw_concentrations[element] = multiplier * U_s * np.exp(q_s)
+
+        raw_sum = sum(raw_concentrations.values())
+        if raw_sum == 0:
+            logger.error("Total measured concentration is zero")
+            return DirichletResidualResult(
+                concentrations={},
+                residual_fraction=1.0,
+                raw_closure_sum=0.0,
+                closure_diagnostic=1.0,
+                mode=mode,
+                alpha_residual=alpha_residual,
+                experimental_factor=0.0,
+            )
+
+        closure_diagnostic = abs(raw_sum - 1.0)
+
+        # --- 2. Estimate residual fraction --------------------------------
+        if mode == "dirichlet":
+            n_detected = len(raw_concentrations)
+            sum_alpha_detected = n_detected * (alpha_detected - 1.0)
+            alpha_res_minus_one = max(alpha_residual - 1.0, 0.0)
+            denom = raw_sum + sum_alpha_detected + alpha_res_minus_one
+            if denom > 0:
+                residual = alpha_res_minus_one / denom
+            else:
+                residual = 0.0
+            residual = max(0.0, min(residual, 1.0))
+        else:
+            deficit = 1.0 - raw_sum
+            if deficit > residual_threshold:
+                residual = max(0.0, deficit)
+            else:
+                residual = 0.0
+
+        # --- 3. Normalize detected elements to (1 - residual) -------------
+        detected_budget = 1.0 - residual
+        concentrations = {
+            el: c / raw_sum * detected_budget
+            for el, c in raw_concentrations.items()
+        }
+
+        return DirichletResidualResult(
+            concentrations=concentrations,
+            residual_fraction=residual,
+            raw_closure_sum=raw_sum,
+            closure_diagnostic=closure_diagnostic,
+            mode=mode,
+            alpha_residual=alpha_residual,
+            experimental_factor=raw_sum,
         )
