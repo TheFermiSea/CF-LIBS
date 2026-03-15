@@ -1,14 +1,127 @@
 """
 Closure equation implementation for CF-LIBS.
+
+Includes standard, matrix, oxide, and ILR (Isometric Log-Ratio) closure modes.
+The ILR transform maps compositions from the D-simplex to R^(D-1), enabling
+unconstrained optimization in a proper metric space.
+
+References
+----------
+Egozcue, J.J. et al. (2003). "Isometric Logratio Transformations for
+Compositional Data Analysis." Mathematical Geology 35(3), 279-300.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Dict, Optional
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("inversion.closure")
+
+
+class ClosureMode(Enum):
+    """Closure equation modes for CF-LIBS normalization."""
+
+    STANDARD = "standard"
+    MATRIX = "matrix"
+    OXIDE = "oxide"
+    ILR = "ilr"
+
+
+# ---------------------------------------------------------------------------
+# ILR (Isometric Log-Ratio) compositional transform functions
+# ---------------------------------------------------------------------------
+
+
+def _helmert_basis(D: int) -> np.ndarray:
+    """
+    Helmert sub-composition contrast matrix (D x D-1).
+
+    The columns form an orthonormal basis for the (D-1)-dimensional
+    hyperplane in CLR space, satisfying V^T V = I_{D-1}.
+
+    Parameters
+    ----------
+    D : int
+        Number of compositional parts (must be >= 2).
+
+    Returns
+    -------
+    np.ndarray
+        Contrast matrix of shape (D, D-1).
+    """
+    if D < 2:
+        raise ValueError("Helmert basis requires D >= 2")
+    V = np.zeros((D, D - 1))
+    for i in range(1, D):
+        V[:i, i - 1] = 1.0 / np.sqrt(i * (i + 1))
+        V[i, i - 1] = -i / np.sqrt(i * (i + 1))
+    return V
+
+
+def clr_transform(composition: np.ndarray) -> np.ndarray:
+    """
+    Centered log-ratio (CLR) transform.
+
+    Parameters
+    ----------
+    composition : np.ndarray
+        Composition vector(s) on the simplex, shape (D,) or (N, D).
+        Values must be positive.
+
+    Returns
+    -------
+    np.ndarray
+        CLR coordinates, same shape as input.
+    """
+    log_comp = np.log(np.clip(composition, 1e-10, None))
+    return log_comp - np.mean(log_comp, axis=-1, keepdims=True)
+
+
+def ilr_transform(composition: np.ndarray) -> np.ndarray:
+    """
+    Isometric log-ratio (ILR) transform using the Helmert basis.
+
+    Maps a D-part composition on the simplex to (D-1) real-valued
+    coordinates suitable for unconstrained optimization.
+
+    Parameters
+    ----------
+    composition : np.ndarray
+        Composition vector(s) on the simplex, shape (D,) or (N, D).
+
+    Returns
+    -------
+    np.ndarray
+        ILR coordinates, shape (D-1,) or (N, D-1).
+    """
+    clr = clr_transform(composition)
+    V = _helmert_basis(composition.shape[-1])
+    return clr @ V  # (D,) @ (D, D-1) -> (D-1,)
+
+
+def ilr_inverse(coords: np.ndarray, D: int) -> np.ndarray:
+    """
+    Inverse ILR transform: map from R^(D-1) back to the D-simplex.
+
+    Parameters
+    ----------
+    coords : np.ndarray
+        ILR coordinates, shape (D-1,) or (N, D-1).
+    D : int
+        Number of compositional parts.
+
+    Returns
+    -------
+    np.ndarray
+        Composition on the simplex (sums to 1), shape (D,) or (N, D).
+    """
+    V = _helmert_basis(D)
+    clr = coords @ V.T  # (D-1,) @ (D-1, D) -> (D,)
+    comp = np.exp(clr)
+    return comp / np.sum(comp, axis=-1, keepdims=True)
 
 
 def _validated_abundance_multiplier(
@@ -234,4 +347,79 @@ class ClosureEquation:
             experimental_factor=F,
             total_measured=total_oxide_rel,
             mode="oxide",
+        )
+
+    @staticmethod
+    def apply_ilr(
+        intercepts: Dict[str, float],
+        partition_funcs: Dict[str, float],
+        abundance_multipliers: Optional[Dict[str, float]] = None,
+    ) -> ClosureResult:
+        """
+        Apply ILR-based closure: compute concentrations via the simplex.
+
+        Instead of direct normalization (standard closure), this method:
+        1. Computes raw relative concentrations (U_s * exp(q_s)).
+        2. Normalizes to an initial simplex estimate.
+        3. Transforms to ILR space (unconstrained R^{D-1}).
+        4. Transforms back to the simplex, guaranteeing sum=1 and positivity
+           through the ILR inverse (exp + closure).
+
+        This is mathematically equivalent to standard closure for a single
+        pass, but provides the ILR infrastructure for downstream optimizers
+        that need to work in unconstrained coordinates (e.g., gradient-based
+        Boltzmann fitting or joint optimization in compositional space).
+
+        Parameters
+        ----------
+        intercepts : Dict[str, float]
+            Boltzmann plot intercepts q_s for each element.
+        partition_funcs : Dict[str, float]
+            Partition function values U_s(T) for each element.
+        abundance_multipliers : Dict[str, float], optional
+            Optional per-element scaling factors. Defaults to unity.
+
+        Returns
+        -------
+        ClosureResult
+            Concentrations on the simplex (sum=1, all positive).
+        """
+        # Build ordered element list and raw relative concentrations
+        elements = []
+        rel_values = []
+        total_measured = 0.0
+
+        for element, q_s in intercepts.items():
+            if element not in partition_funcs:
+                logger.warning(f"Missing partition function for {element} in ILR closure")
+                continue
+
+            U_s = partition_funcs[element]
+            multiplier = _validated_abundance_multiplier(abundance_multipliers, element)
+            rel_C = multiplier * U_s * np.exp(q_s)
+            elements.append(element)
+            rel_values.append(rel_C)
+            total_measured += rel_C
+
+        if total_measured == 0 or len(elements) < 2:
+            logger.error(
+                "ILR closure requires at least 2 elements with non-zero concentration"
+            )
+            return ClosureResult({}, 0.0, 0.0, "ilr")
+
+        # Normalize to simplex, then round-trip through ILR
+        raw = np.array(rel_values)
+        simplex = raw / np.sum(raw)
+        ilr_coords = ilr_transform(simplex)
+        final_simplex = ilr_inverse(ilr_coords, len(elements))
+
+        F = total_measured  # experimental factor matches standard definition
+
+        concentrations = {el: float(final_simplex[i]) for i, el in enumerate(elements)}
+
+        return ClosureResult(
+            concentrations=concentrations,
+            experimental_factor=F,
+            total_measured=total_measured,
+            mode="ilr",
         )
