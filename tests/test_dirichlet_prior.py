@@ -1,11 +1,11 @@
 """
-Tests for Dirichlet prior distribution in Bayesian CF-LIBS (CF-LIBS-drq).
+Tests for Dirichlet prior distribution in Bayesian CF-LIBS.
 
 Validates:
-1. Dirichlet prior parameterization in bayesian.py
+1. Dirichlet prior parameterization in cflibs/inversion/bayesian.py
 2. Domain-specific alpha presets (geological, metallurgical, uninformative)
 3. Stick-breaking transform for nested sampling
-4. create_concentration_prior() helper
+4. create_concentration_prior() helper (requires NumPyro)
 5. Sum-to-one constraint guaranteed by Dirichlet
 """
 
@@ -68,18 +68,19 @@ class TestPriorConfig:
 
 
 class TestCreateConcentrationPrior:
-    """Tests for the create_concentration_prior() helper."""
+    """Tests for the create_concentration_prior() helper (requires NumPyro)."""
 
     @pytest.mark.requires_bayesian
     def test_basic_dirichlet_creation(self):
+        pytest.importorskip("numpyro")
         from cflibs.inversion.bayesian import create_concentration_prior
 
         prior = create_concentration_prior(n_elements=3, alpha=1.0)
-        # Should be a Dirichlet distribution
         assert hasattr(prior, "sample")
 
     @pytest.mark.requires_bayesian
     def test_informative_prior_with_known_concentrations(self):
+        pytest.importorskip("numpyro")
         from cflibs.inversion.bayesian import create_concentration_prior
 
         prior = create_concentration_prior(
@@ -89,6 +90,7 @@ class TestCreateConcentrationPrior:
 
     @pytest.mark.requires_bayesian
     def test_sparse_alpha_produces_valid_prior(self):
+        pytest.importorskip("numpyro")
         from cflibs.inversion.bayesian import create_concentration_prior
 
         prior = create_concentration_prior(n_elements=5, alpha=0.5)

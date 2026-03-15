@@ -578,8 +578,9 @@ class PriorConfig:
     def uninformative(cls, **kwargs) -> "PriorConfig":
         """Maximally uninformative prior: uniform on simplex.
 
-        Dirichlet(1) = uniform distribution on the concentration simplex.
-        Use when no prior information about sample composition exists.
+        Symmetric Dirichlet with alpha=1 gives a uniform distribution on
+        the concentration simplex. Use when no prior information about
+        sample composition exists.
         """
         defaults = {"concentration_alpha": 1.0}
         defaults.update(kwargs)
