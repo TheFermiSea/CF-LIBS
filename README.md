@@ -12,7 +12,7 @@ CF‑LIBS is intended as a *foundation* for serious research and engineering wor
 
 > **Status**: Active development — Phase 3+ (Advanced Inversion & Uncertainty). Core Phase 3 components (forward model, inversion pipeline, Bayesian inference, and manifold generation) are implemented and validated; remaining Phase 3 roadmap items are in progress. Current work focuses on Compositional Data Analysis (CoDa) for closure modernization, atomic database augmentation (STARK-B, VALD), and Mars PDS real-data validation.
 
-### Current Features
+## Current Features
 
 - **Forward model**: Single-zone LTE plasma → Saha-Boltzmann equilibrium → line emissivity → Gaussian/Doppler/resolving-power broadening → instrument convolution
 - **Inversion pipeline**: Iterative CF-LIBS solver with Boltzmann fitting, Saha correction, multi-element common-slope fit, closure equation, charge/pressure balance

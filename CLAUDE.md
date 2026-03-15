@@ -100,7 +100,7 @@ python scripts/generate_model_library.py submit --n-chunks 32 --output-dir outpu
 
 ### Advanced Inversion Modules
 
-The `cflibs/inversion/` package contains several advanced modules beyond the core solver:
+The `cflibs/inversion/` package contains several advanced modules beyond the core solver. The table below highlights higher-level analysis and advanced features. For core utilities like line detection, preprocessing, and Boltzmann fitting, see the full module list in cflibs/inversion/.
 
 | Module | Role |
 |--------|------|
