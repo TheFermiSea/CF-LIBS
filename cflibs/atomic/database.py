@@ -89,6 +89,8 @@ class AtomicDatabase(AtomicDataSource):
             "stark_alpha": "REAL",
             "stark_shift": "REAL",
             "is_resonance": "INTEGER",
+            "aki_uncertainty": "REAL",
+            "accuracy_grade": "TEXT",
         }
 
         for col, dtype in required_line_cols.items():
@@ -158,6 +160,16 @@ class AtomicDatabase(AtomicDataSource):
         if cursor.fetchone()[0] == 0:
             logger.info("Populating partition_functions with NIST Irwin coefficients...")
             self._populate_partition_functions(cursor)
+
+        # 7. Backfill aki_uncertainty from accuracy_grade or heuristic if empty
+        cursor.execute("SELECT COUNT(*) FROM lines WHERE aki_uncertainty IS NOT NULL")
+        n_with_unc = cursor.fetchone()[0]
+        if n_with_unc == 0:
+            cursor.execute("SELECT COUNT(*) FROM lines WHERE aki IS NOT NULL")
+            n_lines = cursor.fetchone()[0]
+            if n_lines > 0:
+                logger.info("Backfilling aki_uncertainty with NIST-style heuristic...")
+                self._populate_aki_uncertainties(cursor)
 
         conn.commit()
 
@@ -391,6 +403,76 @@ class AtomicDatabase(AtomicDataSource):
             )
         logger.info("Populated %d partition function coefficient sets", len(nist_coefficients))
 
+    # NIST accuracy grade → fractional uncertainty mapping.
+    # Reference: NIST ASD documentation, Kramida et al.
+    # Grade AAA: ≤0.3%, AA: ≤1%, A: ≤3%, B: ≤10%, C: ≤25%, D: ≤50%, E: >50%
+    NIST_GRADE_UNCERTAINTY = {
+        "AAA": 0.003,
+        "AA": 0.01,
+        "A+": 0.02,
+        "A": 0.03,
+        "B+": 0.07,
+        "B": 0.10,
+        "C+": 0.18,
+        "C": 0.25,
+        "D+": 0.40,
+        "D": 0.50,
+        "E": 0.50,
+    }
+
+    @staticmethod
+    def _populate_aki_uncertainties(cursor: sqlite3.Cursor):
+        """Assign aki_uncertainty using heuristic based on relative intensity.
+
+        Since our database was generated from NIST ASD without explicit accuracy
+        grades, we assign uncertainty estimates based on line properties:
+        - Lines with high relative intensity (>100) and from well-studied
+          elements get lower uncertainty (~5-10%, grade B)
+        - Lines with low relative intensity get higher uncertainty (~25%, grade C)
+        - Lines with no relative intensity get 50% uncertainty (grade D)
+
+        When explicit NIST accuracy grades are available (via future ingestion),
+        those should override these heuristics.
+        """
+        # Heuristic: assign based on relative intensity as a proxy for data quality
+        # rel_int > 100 → well-measured lines (B grade, 10%)
+        cursor.execute(
+            "UPDATE lines SET aki_uncertainty = 0.10, accuracy_grade = 'B' "
+            "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int > 100"
+        )
+        n_b = cursor.rowcount
+
+        # rel_int 10-100 → moderate quality (C grade, 25%)
+        cursor.execute(
+            "UPDATE lines SET aki_uncertainty = 0.25, accuracy_grade = 'C' "
+            "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int > 10 "
+            "AND aki_uncertainty IS NULL"
+        )
+        n_c = cursor.rowcount
+
+        # rel_int 1-10 → weaker lines (D grade, 50%)
+        cursor.execute(
+            "UPDATE lines SET aki_uncertainty = 0.50, accuracy_grade = 'D' "
+            "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int >= 1 "
+            "AND aki_uncertainty IS NULL"
+        )
+        n_d = cursor.rowcount
+
+        # Everything else: worst case (E grade, 50%)
+        cursor.execute(
+            "UPDATE lines SET aki_uncertainty = 0.50, accuracy_grade = 'E' "
+            "WHERE aki IS NOT NULL AND aki_uncertainty IS NULL"
+        )
+        n_e = cursor.rowcount
+
+        logger.info(
+            "Assigned aki_uncertainty: B=%d, C=%d, D=%d, E=%d lines",
+            n_b,
+            n_c,
+            n_d,
+            n_e,
+        )
+
     @cached_transitions
     def get_transitions(
         self,
@@ -480,6 +562,17 @@ class AtomicDatabase(AtomicDataSource):
                 else False
             )
 
+            aki_uncertainty = (
+                float(row["aki_uncertainty"])
+                if "aki_uncertainty" in row and pd.notna(row.get("aki_uncertainty"))
+                else None
+            )
+            accuracy_grade = (
+                str(row["accuracy_grade"])
+                if "accuracy_grade" in row and pd.notna(row.get("accuracy_grade"))
+                else None
+            )
+
             trans = Transition(
                 element=row["element"],
                 ionization_stage=int(row["sp_num"]),
@@ -496,6 +589,8 @@ class AtomicDatabase(AtomicDataSource):
                 stark_alpha=stark_alpha,
                 stark_shift=stark_shift,
                 is_resonance=is_resonance,
+                aki_uncertainty=aki_uncertainty,
+                accuracy_grade=accuracy_grade,
             )
             transitions.append(trans)
 
