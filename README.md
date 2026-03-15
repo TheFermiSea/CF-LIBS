@@ -10,7 +10,7 @@ CF‑LIBS is intended as a *foundation* for serious research and engineering wor
 - Synthetic spectral generation and forward modeling
 - Bayesian and deterministic inversion of LIBS signals
 
-> **Status**: Active development — Phase 3+ (Advanced Inversion & Uncertainty). The core forward model, inversion pipeline, Bayesian inference, and manifold generation are implemented and validated. Current work focuses on Compositional Data Analysis (CoDa) for closure modernization, atomic database augmentation (STARK-B, VALD), and Mars PDS real-data validation.
+> **Status**: Active development — Phase 3+ (Advanced Inversion & Uncertainty). Core Phase 3 components (forward model, inversion pipeline, Bayesian inference, and manifold generation) are implemented and validated; remaining Phase 3 roadmap items are in progress. Current work focuses on Compositional Data Analysis (CoDa) for closure modernization, atomic database augmentation (STARK-B, VALD), and Mars PDS real-data validation.
 
 ### Current Features
 
