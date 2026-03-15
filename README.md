@@ -10,7 +10,7 @@ CF‑LIBS is intended as a *foundation* for serious research and engineering wor
 - Synthetic spectral generation and forward modeling
 - Bayesian and deterministic inversion of LIBS signals
 
-> **Status**: Active development — Phase 3+ (Advanced Inversion & Uncertainty). Core Phase 3 components (forward model, inversion pipeline, Bayesian inference, and manifold generation) are implemented and validated; remaining Phase 3 roadmap items are in progress. Current work focuses on Compositional Data Analysis (CoDa) for closure modernization, atomic database augmentation (STARK-B, VALD), and Mars PDS real-data validation.
+> **Status**: Active development — Phase 3 (Advanced Inversion & Uncertainty). Phases 0-2 are complete. Core Phase 3 components (forward model, inversion pipeline, Bayesian inference, manifold generation) are implemented; multi-zone models and sensitivity analysis are still in progress. Current work focuses on Compositional Data Analysis (CoDa) for closure modernization, atomic database augmentation (STARK-B, VALD), and Mars PDS real-data validation.
 
 ## Current Features
 
@@ -443,9 +443,9 @@ Key numerical decisions will focus on:
 
 ---
 
-## Usage Examples (Planned API)
+## Usage Examples
 
-> Note: These are *design sketches* of the intended API. Actual function and class names may evolve.
+> Note: These examples illustrate the core API. Class and function names shown here are implemented; see `cflibs/` for the full public interface.
 
 ### Forward Model: Single‑Zone LTE Plasma
 
@@ -513,7 +513,7 @@ print("species densities:", result.species)
 
 ## Development Roadmap
 
-This section is a maintained roadmap that tracks the **stepwise path** from the initial scaffold to a **full CF‑LIBS physics and inversion engine**.
+This section tracks the **stepwise path** to a **full CF‑LIBS physics and inversion engine**. Phases 0-2 are complete; Phase 3 is in progress.
 
 ### Phase 0 – Scaffold & Core Utilities
 
