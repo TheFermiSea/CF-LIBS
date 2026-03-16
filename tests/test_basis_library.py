@@ -6,7 +6,13 @@ import tempfile
 import numpy as np
 import pytest
 
-from cflibs.manifold.basis_library import BasisLibrary, BasisLibraryConfig, BasisLibraryGenerator
+h5py = pytest.importorskip("h5py")
+
+from cflibs.manifold.basis_library import (  # noqa: E402
+    BasisLibrary,
+    BasisLibraryConfig,
+    BasisLibraryGenerator,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -258,3 +264,27 @@ class TestBasisLibrary:
             assert basis.shape == (lib.n_elements, lib.n_pixels)
             basis2 = lib.get_basis_matrix_interp(1e9, 1e30)
             assert basis2.shape == (lib.n_elements, lib.n_pixels)
+
+    def test_single_point_grid_interp_fallback(self, temp_db, h5_path):
+        # Use valid ranges but only 1 step per axis so that the grid
+        # contains a single (T, ne) point, exercising the fallback path
+        # in get_basis_matrix_interp().
+        cfg = BasisLibraryConfig(
+            db_path=temp_db,
+            output_path=h5_path,
+            wavelength_range=(370.0, 380.0),
+            pixels=512,
+            temperature_range=(4000.0, 12000.0),
+            temperature_steps=1,
+            density_range=(1e15, 5e17),
+            density_steps=1,
+            ionization_stages=(1, 2),
+            instrument_fwhm_nm=0.05,
+        )
+        BasisLibraryGenerator(cfg).generate()
+
+        with BasisLibrary(h5_path) as lib:
+            # Single-point grid: interp should fall back to nearest
+            interp = lib.get_basis_matrix_interp(8000.0, 1e16)
+            nearest = lib.get_basis_matrix(8000.0, 1e16)
+            np.testing.assert_array_equal(interp, nearest)

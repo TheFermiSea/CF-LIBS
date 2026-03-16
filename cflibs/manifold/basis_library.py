@@ -10,8 +10,14 @@ measured spectrum can be decomposed as a linear combination of basis vectors.
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
-import h5py
 import numpy as np
+
+try:
+    import h5py
+
+    HAS_H5PY = True
+except ImportError:
+    HAS_H5PY = False
 
 from cflibs.atomic.database import AtomicDatabase
 from cflibs.core.constants import KB_EV
@@ -35,6 +41,9 @@ class BasisLibraryConfig:
     density_steps: int = 20
     ionization_stages: Tuple[int, ...] = (1, 2)
     instrument_fwhm_nm: float = 0.05
+    # Total density used for ionization balance.  Only affects intermediate
+    # magnitudes; final spectra are area-normalised so the value cancels.
+    total_density_cm3: float = 1.0
 
     def validate(self) -> None:
         """Validate configuration ranges."""
@@ -63,6 +72,10 @@ class BasisLibraryConfig:
             raise ValueError(f"density_steps ({self.density_steps}) must be positive")
         if self.instrument_fwhm_nm <= 0:
             raise ValueError(f"instrument_fwhm_nm ({self.instrument_fwhm_nm}) must be positive")
+        if not self.ionization_stages:
+            raise ValueError("ionization_stages must be non-empty")
+        if any(s < 1 for s in self.ionization_stages):
+            raise ValueError("ionization_stages must contain positive integers")
 
 
 class BasisLibraryGenerator:
@@ -72,6 +85,106 @@ class BasisLibraryGenerator:
         self.config = config
         self.atomic_db = AtomicDatabase(config.db_path)
         self.solver = SahaBoltzmannSolver(self.atomic_db)
+
+    @staticmethod
+    def _build_grids(
+        cfg: BasisLibraryConfig,
+    ) -> Tuple[np.ndarray, float, np.ndarray]:
+        """Build wavelength grid, Gaussian sigma, and parameter grid.
+
+        Returns
+        -------
+        wl_grid : ndarray of shape (pixels,)
+        sigma : float
+        params : ndarray of shape (n_grid, 2)
+        """
+        wl_min, wl_max = cfg.wavelength_range
+        wl_grid = np.linspace(wl_min, wl_max, cfg.pixels)
+
+        T_grid = np.linspace(*cfg.temperature_range, cfg.temperature_steps)
+        ne_grid = np.geomspace(*cfg.density_range, cfg.density_steps)
+
+        n_grid = cfg.temperature_steps * cfg.density_steps
+        params = np.empty((n_grid, 2), dtype=np.float64)
+        idx = 0
+        for T_K in T_grid:
+            for ne in ne_grid:
+                params[idx, 0] = T_K
+                params[idx, 1] = ne
+                idx += 1
+
+        sigma = cfg.instrument_fwhm_nm / 2.3548200450309493  # FWHM -> sigma
+        return wl_grid, sigma, params
+
+    def _compute_element_spectra(
+        self,
+        element: str,
+        wl_grid: np.ndarray,
+        sigma: float,
+        params: np.ndarray,
+    ) -> np.ndarray:
+        """Compute area-normalised spectra for *element* at every grid point.
+
+        Returns
+        -------
+        ndarray of shape (n_grid, n_pix)
+        """
+        cfg = self.config
+        wl_min, wl_max = cfg.wavelength_range
+        n_grid = params.shape[0]
+        n_pix = len(wl_grid)
+
+        transitions = []
+        for stage in cfg.ionization_stages:
+            transitions.extend(
+                self.atomic_db.get_transitions(
+                    element,
+                    ionization_stage=stage,
+                    wavelength_min=wl_min,
+                    wavelength_max=wl_max,
+                )
+            )
+
+        out = np.zeros((n_grid, n_pix), dtype=np.float64)
+        if not transitions:
+            logger.debug("No transitions for %s in %.1f-%.1f nm", element, wl_min, wl_max)
+            return out
+
+        for grid_idx in range(n_grid):
+            T_K = params[grid_idx, 0]
+            ne = params[grid_idx, 1]
+            T_eV = T_K * KB_EV
+
+            stage_densities = self.solver.solve_ionization_balance(
+                element, T_eV, ne, total_density_cm3=cfg.total_density_cm3
+            )
+
+            spectrum = np.zeros(n_pix, dtype=np.float64)
+
+            for trans in transitions:
+                stage_density = stage_densities.get(trans.ionization_stage, 0.0)
+                if stage_density <= 0.0:
+                    continue
+
+                U = self.solver.calculate_partition_function(element, trans.ionization_stage, T_eV)
+                if U <= 0.0:
+                    continue
+
+                n_k = stage_density * (trans.g_k / U) * np.exp(-trans.E_k_ev / T_eV)
+
+                # Emissivity ∝ A_ki · n_k / λ.  The 1/λ factor is kept because
+                # it varies per line and does not cancel in area normalization.
+                eps = trans.A_ki * n_k / trans.wavelength_nm
+
+                spectrum += eps * np.exp(-0.5 * ((wl_grid - trans.wavelength_nm) / sigma) ** 2)
+
+            area = np.sum(spectrum)
+            if area > 1e-100:
+                spectrum /= area
+
+            out[grid_idx, :] = spectrum
+
+        return out
 
     def generate(self, progress_callback: Optional[Callable] = None) -> str:
         """Generate basis library and save to HDF5.
@@ -86,95 +199,21 @@ class BasisLibraryGenerator:
         str
             Path to the generated HDF5 file.
         """
+        if not HAS_H5PY:
+            raise ImportError("h5py is required for basis library generation")
+
         cfg = self.config
         cfg.validate()
 
+        wl_grid, sigma, params = self._build_grids(cfg)
         elements = self.atomic_db.get_available_elements()
-        wl_min, wl_max = cfg.wavelength_range
-        wl_grid = np.linspace(wl_min, wl_max, cfg.pixels)
-
-        T_min, T_max = cfg.temperature_range
-        T_grid = np.linspace(T_min, T_max, cfg.temperature_steps)
-
-        ne_min, ne_max = cfg.density_range
-        ne_grid = np.geomspace(ne_min, ne_max, cfg.density_steps)
-
-        # Build all (T, ne) combinations
-        n_grid = cfg.temperature_steps * cfg.density_steps
-        params = np.empty((n_grid, 2), dtype=np.float64)
-        idx = 0
-        for T_K in T_grid:
-            for ne in ne_grid:
-                params[idx, 0] = T_K
-                params[idx, 1] = ne
-                idx += 1
-
-        sigma = cfg.instrument_fwhm_nm / 2.3548200450309493  # FWHM -> sigma
-
         n_el = len(elements)
-        spectra = np.zeros((n_el, n_grid, cfg.pixels), dtype=np.float64)
+        n_grid = params.shape[0]
+        spectra = np.zeros((n_el, n_grid, cfg.pixels), dtype=np.float32)
 
         for el_idx, element in enumerate(elements):
             logger.info("Generating basis for %s (%d/%d)", element, el_idx + 1, n_el)
-
-            # Gather transitions for all requested ionization stages
-            transitions = []
-            for stage in cfg.ionization_stages:
-                transitions.extend(
-                    self.atomic_db.get_transitions(
-                        element,
-                        ionization_stage=stage,
-                        wavelength_min=wl_min,
-                        wavelength_max=wl_max,
-                    )
-                )
-
-            if not transitions:
-                logger.debug("No transitions for %s in %.1f-%.1f nm", element, wl_min, wl_max)
-                if progress_callback is not None:
-                    progress_callback(el_idx + 1, n_el)
-                continue
-
-            for grid_idx in range(n_grid):
-                T_K = params[grid_idx, 0]
-                ne = params[grid_idx, 1]
-                T_eV = T_K * KB_EV
-
-                # Ionization balance
-                stage_densities = self.solver.solve_ionization_balance(
-                    element, T_eV, ne, total_density_cm3=1e15
-                )
-
-                spectrum = np.zeros(cfg.pixels, dtype=np.float64)
-
-                for trans in transitions:
-                    stage_density = stage_densities.get(trans.ionization_stage, 0.0)
-                    if stage_density <= 0.0:
-                        continue
-
-                    # Partition function for this ionization stage
-                    U = self.solver.calculate_partition_function(
-                        element, trans.ionization_stage, T_eV
-                    )
-                    if U <= 0.0:
-                        continue
-
-                    # Boltzmann population of upper level
-                    n_k = stage_density * (trans.g_k / U) * np.exp(-trans.E_k_ev / T_eV)
-
-                    # Emissivity (simplified; hc/4piλ constant drops out in normalization)
-                    eps = trans.A_ki * n_k
-
-                    # Render Gaussian onto wavelength grid
-                    spectrum += eps * np.exp(-0.5 * ((wl_grid - trans.wavelength_nm) / sigma) ** 2)
-
-                # Area-normalize
-                area = np.sum(spectrum)
-                if area > 1e-100:
-                    spectrum /= area
-
-                spectra[el_idx, grid_idx, :] = spectrum
-
+            spectra[el_idx, :, :] = self._compute_element_spectra(element, wl_grid, sigma, params)
             if progress_callback is not None:
                 progress_callback(el_idx + 1, n_el)
 
@@ -184,7 +223,6 @@ class BasisLibraryGenerator:
             f.create_dataset("spectra", data=spectra, compression="gzip", compression_opts=4)
             f.create_dataset("params", data=params)
             f.create_dataset("wavelength", data=wl_grid)
-            # Store elements as variable-length UTF-8 strings
             dt = h5py.string_dtype(encoding="utf-8")
             f.create_dataset("elements", data=np.array(elements, dtype=object), dtype=dt)
 
@@ -198,6 +236,8 @@ class BasisLibrary:
     """Loader for a pre-computed basis library stored in HDF5."""
 
     def __init__(self, path: str):
+        if not HAS_H5PY:
+            raise ImportError("h5py is required to load a basis library")
         self._f = h5py.File(path, "r")
         self._spectra = self._f["spectra"]  # lazy (n_el, n_grid, n_pix)
         self._params = self._f["params"][:]  # (n_grid, 2)
@@ -209,14 +249,22 @@ class BasisLibrary:
 
     def get_basis_matrix(self, T_K: float, ne_cm3: float) -> np.ndarray:
         """Return (n_elements, n_pixels) basis matrix at nearest grid point."""
+        if ne_cm3 <= 0:
+            raise ValueError(f"ne_cm3 must be positive, got {ne_cm3}")
+        grid_idx = self._nearest_grid_idx(T_K, ne_cm3)
+        return np.array(self._spectra[:, grid_idx, :])
+
+    def _nearest_grid_idx(self, T_K: float, ne_cm3: float) -> int:
+        """Return the index of the nearest grid point."""
         dists = (self._params[:, 0] - T_K) ** 2 / self._T_vals[-1] ** 2 + (
             np.log10(self._params[:, 1]) - np.log10(ne_cm3)
         ) ** 2 / np.log10(self._ne_vals[-1] / self._ne_vals[0]) ** 2
-        idx = int(np.argmin(dists))
-        return self._spectra[:, idx, :]
+        return int(np.argmin(dists))
 
     def get_basis_matrix_interp(self, T_K: float, ne_cm3: float) -> np.ndarray:
         """Bilinear interpolation in (T, log10(ne)) space."""
+        if len(self._T_vals) < 2 or len(self._ne_vals) < 2:
+            return self.get_basis_matrix(T_K, ne_cm3)
         T_K = np.clip(T_K, self._T_vals[0], self._T_vals[-1])
         ne_cm3 = np.clip(ne_cm3, self._ne_vals[0], self._ne_vals[-1])
 
@@ -258,9 +306,11 @@ class BasisLibrary:
         KeyError
             If *element* is not in the library.
         """
+        if ne_cm3 <= 0:
+            raise ValueError(f"ne_cm3 must be positive, got {ne_cm3}")
         idx = self._element_to_idx[element]
-        basis = self.get_basis_matrix(T_K, ne_cm3)
-        return basis[idx]
+        grid_idx = self._nearest_grid_idx(T_K, ne_cm3)
+        return np.array(self._spectra[idx, grid_idx, :])
 
     @property
     def elements(self) -> list:
