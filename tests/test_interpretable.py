@@ -323,7 +323,7 @@ class TestSpectralExplainer:
         wavelengths, spectrum = synthetic_spectrum
 
         explainer = SpectralExplainer(simple_model, wavelengths)
-        explanation = explainer.explain_lime(spectrum, n_samples=50)
+        explanation = explainer.explain_lime(spectrum, n_samples=200, kernel_width=1.0)
 
         assert explanation.method == "lime"
         assert len(explanation.feature_importances) > 0
