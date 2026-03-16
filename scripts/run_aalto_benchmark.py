@@ -529,7 +529,7 @@ def main():
     # contaminant elements from false positive counts. In open-air LIBS,
     # N, O, H, Ar, Na, K, Ca are almost always present due to atmospheric
     # breakdown and surface contamination.
-    LIBS_CONTAMINANTS = {"N", "O", "H", "Ar", "Na", "K", "Ne", "F", "Cl", "He"}
+    LIBS_CONTAMINANTS = {"N", "O", "H", "Ar", "Na", "K", "Ca", "Ne", "F", "Cl", "He"}
 
     results_aware: Dict[str, ElementIDMetrics] = {}
     for method, m in results.items():
@@ -541,7 +541,7 @@ def main():
             expected = set(d["expected"])
             detected = set(d.get("detected", []))
             # Remove contaminants from FP count
-            genuine_detected = detected - LIBS_CONTAMINANTS | (detected & expected)
+            genuine_detected = (detected - LIBS_CONTAMINANTS) | (detected & expected)
             tp = len(genuine_detected & expected)
             fp = len(genuine_detected - expected)
             fn = len(expected - genuine_detected)

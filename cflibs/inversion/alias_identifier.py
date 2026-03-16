@@ -39,6 +39,13 @@ class ALIASIdentifier:
     6. Score computation (k_sim, k_rate, k_shift)
     7. Decision and confidence level calculation
 
+    Thread-safety
+    -------------
+    ``identify()`` mutates instance state (``_effective_R``,
+    ``_global_wl_shift``, ``_estimated_T``), so a single instance is
+    **not** safe for concurrent calls. Create one instance per thread or
+    guard calls with an external lock.
+
     Parameters
     ----------
     atomic_db : AtomicDatabase
@@ -63,7 +70,20 @@ class ALIASIdentifier:
     elements : Optional[List[str]], optional
         List of elements to search for. If None, uses default common LIBS elements:
         ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"] (default: None)
+    max_screening_candidates : int, optional
+        Maximum number of candidates retained by fast screening (default: 20)
+    relative_cl_threshold : float, optional
+        CL must be >= max_CL * relative_cl_threshold to count as detected.
+        Set to 0 to disable the relative threshold (default: 0.1)
     """
+
+    # Temperature bounds for physics validation
+    _T_ESTIMATE_MIN_K = 3000.0
+    _T_ESTIMATE_MAX_K = 30000.0
+    # Consistency check uses a wider range because its purpose is only to
+    # flag grossly unphysical fits, not to narrow the estimate.
+    _T_CONSISTENCY_MIN_K = 3000.0
+    _T_CONSISTENCY_MAX_K = 50000.0
 
     # Crustal abundance in log10(ppm) — from CRC Handbook / USGS
     CRUSTAL_ABUNDANCE_LOG_PPM = {
@@ -120,6 +140,8 @@ class ALIASIdentifier:
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 20,
         reference_temperature: float = 10000.0,
+        max_screening_candidates: int = 20,
+        relative_cl_threshold: float = 0.1,
     ):
         self.atomic_db = atomic_db
         if not (np.isfinite(resolving_power) and resolving_power > 0):
@@ -135,6 +157,8 @@ class ALIASIdentifier:
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
+        self.max_screening_candidates = max_screening_candidates
+        self.relative_cl_threshold = relative_cl_threshold
 
         # Create Saha-Boltzmann solver
         self.solver = SahaBoltzmannSolver(atomic_db)
@@ -514,11 +538,12 @@ class ALIASIdentifier:
 
             all_element_ids.append(element_id)
 
-        # Apply relative threshold: element CL must be >= max_CL / 10
-        # This prevents spurious detections when one element dominates
-        if all_element_ids:
+        # Apply relative threshold: element CL must be >= max_CL * relative_cl_threshold
+        # This prevents spurious detections when one element dominates.
+        # Set self.relative_cl_threshold = 0 to disable.
+        if all_element_ids and self.relative_cl_threshold > 0:
             max_CL = max(e.confidence for e in all_element_ids)
-            relative_threshold = max_CL / 10.0
+            relative_threshold = max_CL * self.relative_cl_threshold
             for e in all_element_ids:
                 if e.confidence < relative_threshold:
                     e.detected = False
@@ -770,9 +795,11 @@ class ALIASIdentifier:
                 slope = result.slope
                 r_sq = result.rvalue**2
 
+                if abs(slope) < 1e-10:
+                    continue
                 if slope < 0 and r_sq > 0.3:
                     T_K = -1.0 / (slope * KB_EV)
-                    if 3000 < T_K < 30000:
+                    if self._T_ESTIMATE_MIN_K < T_K < self._T_ESTIMATE_MAX_K:
                         self._estimated_T = float(T_K)
                         return
             except (ValueError, ZeroDivisionError):
@@ -794,7 +821,7 @@ class ALIASIdentifier:
         Two-stage approach:
         1. For each element, compute a quick screening score based on how many
            of its top-10 lines match peaks, weighted by line strength.
-        2. Pass the top-N scoring elements (N = min(25, num_elements)).
+        2. Pass the top max_screening_candidates scoring elements.
 
         Always-test elements bypass screening.
 
@@ -853,11 +880,10 @@ class ALIASIdentifier:
                 score = matched_strength / total_strength
                 element_scores.append((element, score, n_matched))
 
-        # Sort by screening score, take top 20
+        # Sort by screening score, take top max_screening_candidates
         element_scores.sort(key=lambda x: x[1], reverse=True)
-        max_candidates = 20
         passed = list(self._always_test & set(all_elements))
-        for element, score, n_matched in element_scores[:max_candidates]:
+        for element, score, n_matched in element_scores[: self.max_screening_candidates]:
             if element not in passed:
                 passed.append(element)
 
@@ -875,11 +901,11 @@ class ALIASIdentifier:
         Boltzmann consistency check for matched lines.
 
         For elements with >=3 matched lines, fit ln(I*lambda/(g*A)) vs E_k.
-        Slope should give physical temperature (5000-25000K) with reasonable R^2.
+        Slope should give physical temperature (3000-50000K) with reasonable R^2.
 
         Returns a factor in [0.5, 1.0] to multiply into CL.
         """
-        matched_indices = np.where(matched_mask)[0]
+        matched_indices = np.nonzero(matched_mask)[0]
         if len(matched_indices) < 3:
             return 1.0  # Not enough lines to check, neutral
 
@@ -922,7 +948,7 @@ class ALIASIdentifier:
             return 0.5
 
         T_K = -1.0 / (slope * KB_EV)
-        if T_K < 3000 or T_K > 50000:
+        if T_K < self._T_CONSISTENCY_MIN_K or T_K > self._T_CONSISTENCY_MAX_K:
             # Unphysical temperature
             return 0.5
 
