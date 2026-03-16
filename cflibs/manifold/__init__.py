@@ -16,9 +16,10 @@ from cflibs.manifold.basis_library import BasisLibrary, BasisLibraryConfig, Basi
 # SpectralEmbedder is always available (only needs numpy + pca)
 from cflibs.manifold.vector_index import SpectralEmbedder
 
-# VectorIndex requires faiss (optional)
+# VectorIndex and BasisIndex require faiss (optional)
 try:
     from cflibs.manifold.vector_index import VectorIndex, VectorIndexConfig, HAS_FAISS  # noqa: F401
+    from cflibs.manifold.basis_index import BasisIndex  # noqa: F401
 
     HAS_VECTOR_INDEX = HAS_FAISS
 except ImportError:
@@ -36,4 +37,4 @@ __all__ = [
 ]
 
 if HAS_VECTOR_INDEX:
-    __all__.extend(["VectorIndex", "VectorIndexConfig"])
+    __all__.extend(["VectorIndex", "VectorIndexConfig", "BasisIndex"])
