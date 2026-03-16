@@ -169,7 +169,14 @@ class ALIASIdentifier:
         ElementIdentificationResult
             Complete identification result with detected/rejected elements
         """
-        # Step 1: Detect peaks
+        # Step 0: Baseline correction — ALL scoring uses corrected intensities
+        # so that cosine similarity, NNLS, and P_SNR measure peak heights above
+        # continuum rather than absolute intensity that is dominated by the
+        # Bremsstrahlung background.
+        baseline = estimate_baseline(wavelength, intensity)
+        corrected_intensity = np.maximum(intensity - baseline, 0.0)
+
+        # Step 1: Detect peaks (uses its own internal baseline correction)
         peaks = self._detect_peaks(wavelength, intensity)
 
         wl_min = np.min(wavelength)
@@ -191,7 +198,9 @@ class ALIASIdentifier:
             search_elements = self.elements
 
         # ── Phase 1: Independent scoring ──────────────────────────────
-        global_p_snr = self._compute_p_snr(intensity, peaks)
+        # Use corrected_intensity throughout scoring so continuum doesn't
+        # dominate cosine similarity and NNLS attribution.
+        global_p_snr = self._compute_p_snr(corrected_intensity, peaks)
         candidates: List[dict] = []
 
         for element in search_elements:
@@ -219,7 +228,7 @@ class ALIASIdentifier:
                 matched_mask,
                 matched_peak_idx,
                 wavelength_shifts,
-                intensity,
+                corrected_intensity,
                 peaks,
                 emissivity_threshold,
             )
@@ -236,7 +245,7 @@ class ALIASIdentifier:
                 k_rate,
                 k_shift,
                 N_expected,
-                intensity,
+                corrected_intensity,
                 peaks,
                 element=element,
                 P_maj=P_maj,
@@ -270,7 +279,7 @@ class ALIASIdentifier:
         #   P_local — local explanation score (what fraction of claimed
         #             peaks' intensity does this element actually explain?)
         if candidates and peaks:
-            peak_intensities_arr = np.array([intensity[p[0]] for p in peaks])
+            peak_intensities_arr = np.array([corrected_intensity[p[0]] for p in peaks])
             A = self._build_nnls_templates(candidates, peaks)
             P_mix_arr, P_local_arr, _ = self._compute_nnls_attribution(A, peak_intensities_arr)
             for i, cand in enumerate(candidates):
@@ -327,7 +336,7 @@ class ALIASIdentifier:
                     matched_mask,
                     matched_peak_idx,
                     wavelength_shifts,
-                    intensity,
+                    corrected_intensity,
                     peaks,
                     emissivity_threshold,
                 )
@@ -344,7 +353,7 @@ class ALIASIdentifier:
                     k_rate,
                     k_shift,
                     N_expected,
-                    intensity,
+                    corrected_intensity,
                     peaks,
                     element=element,
                     P_maj=P_maj,
@@ -387,7 +396,7 @@ class ALIASIdentifier:
                 fused_lines,
                 matched_mask,
                 matched_peak_idx,
-                intensity,
+                corrected_intensity,
                 peaks,
             )
 
@@ -420,7 +429,7 @@ class ALIASIdentifier:
                             wavelength_th_nm=line_data["wavelength_nm"],
                             element=element,
                             ionization_stage=trans.ionization_stage,
-                            intensity_exp=intensity[peaks[pidx][0]],
+                            intensity_exp=corrected_intensity[peaks[pidx][0]],
                             emissivity_th=line_data["avg_emissivity"],
                             transition=trans,
                             correlation=k_sim,

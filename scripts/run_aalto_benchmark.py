@@ -273,7 +273,7 @@ def run_element_identification(
         if method == "alias":
             from cflibs.inversion.alias_identifier import ALIASIdentifier
 
-            identifier = ALIASIdentifier(db)
+            identifier = ALIASIdentifier(db, resolving_power=2000.0)
             result = identifier.identify(wavelength, intensity)
             if result and result.detected_elements:
                 return {d.element for d in result.detected_elements}
@@ -314,7 +314,7 @@ def run_element_identification_full(
         if method == "alias":
             from cflibs.inversion.alias_identifier import ALIASIdentifier
 
-            identifier = ALIASIdentifier(db)
+            identifier = ALIASIdentifier(db, resolving_power=2000.0)
             result = identifier.identify(wavelength, intensity)
         elif method == "comb":
             from cflibs.inversion.comb_identifier import CombIdentifier
