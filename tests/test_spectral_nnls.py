@@ -10,7 +10,7 @@ h5py = pytest.importorskip("h5py")
 from cflibs.inversion.spectral_nnls_identifier import SpectralNNLSIdentifier  # noqa: E402
 from cflibs.inversion.element_id import ElementIdentificationResult  # noqa: E402
 
-pytestmark = [pytest.mark.requires_db]
+pytestmark = [pytest.mark.requires_db, pytest.mark.integration]
 
 
 # ---------------------------------------------------------------------------
@@ -19,9 +19,8 @@ pytestmark = [pytest.mark.requires_db]
 
 
 @pytest.fixture(scope="module")
-def small_basis_library(request):
+def small_basis_library(tmp_path_factory):
     """Generate a small basis library for testing (module-scoped for speed)."""
-    import tempfile
     from pathlib import Path
 
     from cflibs.manifold.basis_library import (
@@ -30,15 +29,25 @@ def small_basis_library(request):
         BasisLibraryGenerator,
     )
 
-    # Use the real DB path from conftest
-    db_path = "ASD_da/libs_production.db"
-    if not Path(db_path).exists():
-        pytest.skip("Database not found")
+    # Search multiple candidate locations (mirrors conftest.py pattern)
+    candidates = [
+        Path("libs_production.db"),
+        Path("ASD_da/libs_production.db"),
+        Path(__file__).parent.parent / "libs_production.db",
+        Path(__file__).parent.parent / "ASD_da" / "libs_production.db",
+    ]
+    db_path = None
+    for p in candidates:
+        if p.exists():
+            db_path = str(p)
+            break
+    if db_path is None:
+        pytest.skip("Production database not found")
 
-    tmp_dir = tempfile.mkdtemp()
+    tmp_dir = tmp_path_factory.mktemp("basis_lib")
     cfg = BasisLibraryConfig(
         db_path=db_path,
-        output_path=str(Path(tmp_dir) / "test_basis.h5"),
+        output_path=str(tmp_dir / "test_basis.h5"),
         wavelength_range=(370.0, 380.0),
         pixels=256,
         temperature_range=(6000.0, 10000.0),
@@ -71,11 +80,8 @@ def _make_synthetic_spectrum(basis_library, elements_fracs, T_K=8000.0, ne=5e16,
     wl = basis_library.wavelength
     spectrum = np.zeros(len(wl))
     for el, frac in elements_fracs.items():
-        try:
-            el_spec = basis_library.get_element_spectrum(el, T_K, ne)
-            spectrum += frac * el_spec
-        except KeyError:
-            pass
+        el_spec = basis_library.get_element_spectrum(el, T_K, ne)
+        spectrum += frac * el_spec
     # Add noise
     rng = np.random.RandomState(42)
     spectrum += noise * rng.normal(size=len(spectrum))
@@ -162,6 +168,16 @@ class TestSpectralNNLSIdentifier:
             fallback_T_K=8000.0,
             fallback_ne_cm3=5e16,
         )
+        # Verify _build_augmented_matrix produces no continuum rows
+        basis_matrix = small_basis_library.get_basis_matrix_interp(8000.0, 5e16)
+        lib_wl = small_basis_library.wavelength
+        A = ident._build_augmented_matrix(basis_matrix, lib_wl)
+        n_elements = len(small_basis_library.elements)
+        assert (
+            A.shape[0] == n_elements
+        ), f"Expected {n_elements} rows (no continuum), got {A.shape[0]}"
+
+        # Also verify end-to-end still works
         wl, spec = _make_synthetic_spectrum(small_basis_library, {"Fe": 1.0})
         result = ident.identify(wl, spec)
         assert isinstance(result, ElementIdentificationResult)
