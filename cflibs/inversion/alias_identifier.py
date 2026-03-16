@@ -115,10 +115,10 @@ class ALIASIdentifier:
         T_steps: int = 7,
         n_e_steps: int = 3,
         intensity_threshold_factor: float = 3.0,
-        detection_threshold: float = 0.03,
+        detection_threshold: float = 0.01,
         chance_window_scale: float = 0.4,
         elements: Optional[List[str]] = None,
-        max_lines_per_element: int = 50,
+        max_lines_per_element: int = 20,
         reference_temperature: float = 10000.0,
     ):
         self.atomic_db = atomic_db
@@ -883,10 +883,23 @@ class ALIASIdentifier:
         above_50 = detection_rates > 0.5
         if np.any(above_50):
             # Return lowest threshold with >50% detection
-            return thresholds[np.where(above_50)[0][0]]
+            candidate = thresholds[np.where(above_50)[0][0]]
         else:
-            # No threshold meets criterion, return minimum
-            return min_log
+            candidate = min_log
+
+        # Additional constraint: never count more than max_lines_per_element
+        # above-threshold lines.  For elements with hundreds of DB lines (Fe,
+        # V, Ti), a low threshold counts dozens of weak lines that are below
+        # noise.  Raise the threshold until the above-threshold count is
+        # manageable, so N_expected reflects only realistically detectable
+        # lines rather than the full database catalogue.
+        emiss_sorted = np.sort(emissivities)[::-1]
+        if len(emiss_sorted) > self.max_lines_per_element:
+            # Threshold = emissivity of the (max_lines)th strongest line
+            floor = np.log10(max(emiss_sorted[self.max_lines_per_element - 1], 1e-100))
+            candidate = max(candidate, floor)
+
+        return candidate
 
     def _compute_scores(
         self,
@@ -1470,9 +1483,17 @@ class ALIASIdentifier:
         # k_det formula — uses N_matched (paper: N_X = matched count)
         # for the blend weighting.  Single-line elements (N_X=1) naturally
         # reduce to k_rate × k_shift via the blend formula.
+        #
+        # Modified from original: blend P_cov (emissivity-weighted coverage)
+        # into k_det so that elements with many weak undetected lines are
+        # not excessively penalized.  P_cov weights by emissivity, so missing
+        # a weak line (emissivity 1% of total) only reduces P_cov by 1%.
         if N_matched > 0:
             N_X = N_matched
-            k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+            k_det_raw = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+            # Blend: use geometric mean of raw k_det and P_cov to soften
+            # the penalty for many unmatched weak lines
+            k_det = math.sqrt(k_det_raw * max(P_cov, 0.01))
         else:
             k_det = 0.0
 

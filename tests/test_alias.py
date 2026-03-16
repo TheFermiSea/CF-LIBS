@@ -227,15 +227,16 @@ def test_max_lines_per_element_parameter(atomic_db):
     identifier = ALIASIdentifier(atomic_db, max_lines_per_element=5)
     assert identifier.max_lines_per_element == 5
 
-    # Default should be 50
+    # Default should be 20 (lowered from 50 to focus on strongest lines
+    # visible at typical plasma temperatures — see ALIAS scoring fix)
     identifier_default = ALIASIdentifier(atomic_db)
-    assert identifier_default.max_lines_per_element == 50
+    assert identifier_default.max_lines_per_element == 20
 
 
 def test_default_detection_threshold(atomic_db):
-    """Test that default detection_threshold is 0.03."""
+    """Test that default detection_threshold is 0.01."""
     identifier = ALIASIdentifier(atomic_db)
-    assert identifier.detection_threshold == 0.03
+    assert identifier.detection_threshold == 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -1182,9 +1183,11 @@ def test_CL_paper_formula(atomic_db):
         P_cov=P_cov,
     )
 
-    # Manually compute expected CL using paper formula
+    # Manually compute expected CL using modified formula:
+    # k_det = sqrt(k_det_raw * max(P_cov, 0.01))
     N_X = max(N_matched, 1)
-    expected_k_det = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+    k_det_raw = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
+    expected_k_det = math.sqrt(k_det_raw * max(P_cov, 0.01))
 
     # P_SNR from the spectrum
     peak_intensities_local = [intensity[p[0]] for p in peaks]
