@@ -7,7 +7,7 @@ name = "cflibs"
 version = "0.1.0"
 description = "Calibration-Free Laser-Induced Breakdown Spectroscopy library"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
     {name = "TheFermiSea"}
@@ -17,7 +17,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Physics",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -73,8 +72,7 @@ rust = ["cflibs-core"]
 ci = [
     "jax[cpu]>=0.4.26",
     "h5py>=3.8.0",
-    "zarr>=2.18.0; python_version < '3.11'",
-    "zarr>=3.1.5; python_version >= '3.11'",
+    "zarr>=3.1.5",
     "faiss-cpu>=1.7.0",
     "numpyro>=0.14.0",
     "arviz>=0.17.0",
