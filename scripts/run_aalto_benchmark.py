@@ -30,7 +30,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
@@ -141,7 +141,15 @@ MINERAL_COMPOSITIONS: Dict[str, Dict[str, Optional[float]]] = {
     # Topaz: Al2SiO4(F,OH)2
     "topaz": {"Al": None, "Si": None, "O": None},
     # Tourmaline: Na(Mg,Fe,Mn,Li)3Al6(BO3)3Si6O18(OH)4
-    "tourmaline": {"Na": None, "Mg": None, "Fe": None, "Al": None, "Si": None, "B": None, "O": None},
+    "tourmaline": {
+        "Na": None,
+        "Mg": None,
+        "Fe": None,
+        "Al": None,
+        "Si": None,
+        "B": None,
+        "O": None,
+    },
     # Tremolite: Ca2(Mg,Fe)5Si8O22(OH)2
     "tremolite": {"Ca": None, "Mg": None, "Fe": None, "Si": None, "O": None},
     # Wollastonite: CaSiO3
@@ -155,13 +163,75 @@ MINERAL_COMPOSITIONS: Dict[str, Dict[str, Optional[float]]] = {
 # Elements that LIBS can actually detect (excludes O, H, F, Cl which are
 # very difficult in LIBS due to high excitation energies or VUV lines)
 LIBS_DETECTABLE = {
-    "Li", "Be", "B", "C", "Na", "Mg", "Al", "Si", "P", "S", "K", "Ca",
-    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga",
-    "Ge", "As", "Se", "Br", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Ru",
-    "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "Ba", "La", "Ce",
-    "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb",
-    "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl",
-    "Pb", "Bi",
+    "Li",
+    "Be",
+    "B",
+    "C",
+    "Na",
+    "Mg",
+    "Al",
+    "Si",
+    "P",
+    "S",
+    "K",
+    "Ca",
+    "Sc",
+    "Ti",
+    "V",
+    "Cr",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Ga",
+    "Ge",
+    "As",
+    "Se",
+    "Br",
+    "Rb",
+    "Sr",
+    "Y",
+    "Zr",
+    "Nb",
+    "Mo",
+    "Ru",
+    "Rh",
+    "Pd",
+    "Ag",
+    "Cd",
+    "In",
+    "Sn",
+    "Sb",
+    "Te",
+    "Ba",
+    "La",
+    "Ce",
+    "Pr",
+    "Nd",
+    "Sm",
+    "Eu",
+    "Gd",
+    "Tb",
+    "Dy",
+    "Ho",
+    "Er",
+    "Tm",
+    "Yb",
+    "Lu",
+    "Hf",
+    "Ta",
+    "W",
+    "Re",
+    "Os",
+    "Ir",
+    "Pt",
+    "Au",
+    "Hg",
+    "Tl",
+    "Pb",
+    "Bi",
 }
 
 
@@ -170,6 +240,7 @@ def get_mineral_name(filename: str) -> str:
     name = filename.replace("_spectrum", "")
     # Strip trailing sample numbers/IDs
     import re
+
     match = re.match(r"([a-zA-Z]+)", name)
     return match.group(1).lower() if match else name.lower()
 
@@ -201,24 +272,27 @@ def run_element_identification(
     try:
         if method == "alias":
             from cflibs.inversion.alias_identifier import ALIASIdentifier
+
             identifier = ALIASIdentifier(db)
             result = identifier.identify(wavelength, intensity)
             if result and result.detected_elements:
-                return set(result.detected_elements)
+                return {d.element for d in result.detected_elements}
 
         elif method == "comb":
             from cflibs.inversion.comb_identifier import CombIdentifier
+
             identifier = CombIdentifier(db)
             result = identifier.identify(wavelength, intensity)
             if result and result.detected_elements:
-                return set(result.detected_elements)
+                return {d.element for d in result.detected_elements}
 
         elif method == "correlation":
             from cflibs.inversion.correlation_identifier import CorrelationIdentifier
+
             identifier = CorrelationIdentifier(db)
             result = identifier.identify(wavelength, intensity)
             if result and result.detected_elements:
-                return set(result.detected_elements)
+                return {d.element for d in result.detected_elements}
 
     except Exception as e:
         logger.debug("Identification failed with %s: %s", method, e)
@@ -239,14 +313,17 @@ def run_element_identification_full(
     try:
         if method == "alias":
             from cflibs.inversion.alias_identifier import ALIASIdentifier
+
             identifier = ALIASIdentifier(db)
             result = identifier.identify(wavelength, intensity)
         elif method == "comb":
             from cflibs.inversion.comb_identifier import CombIdentifier
+
             identifier = CombIdentifier(db)
             result = identifier.identify(wavelength, intensity)
         elif method == "correlation":
             from cflibs.inversion.correlation_identifier import CorrelationIdentifier
+
             identifier = CorrelationIdentifier(db)
             result = identifier.identify(wavelength, intensity)
         else:
@@ -273,6 +350,7 @@ def run_element_identification_full(
 @dataclass
 class ElementIDMetrics:
     """Metrics for element identification accuracy."""
+
     true_positives: int = 0
     false_positives: int = 0
     false_negatives: int = 0
@@ -313,21 +391,33 @@ def evaluate_element_id(
 
         metrics.n_spectra += 1
         detected = run_element_identification(
-            spec["wavelength"], spec["intensity"], db, method=method,
+            spec["wavelength"],
+            spec["intensity"],
+            db,
+            method=method,
         )
 
         # Also track top-scored elements regardless of threshold
         all_scored = run_element_identification_full(
-            spec["wavelength"], spec["intensity"], db, method=method,
+            spec["wavelength"],
+            spec["intensity"],
+            db,
+            method=method,
         )
 
         if not detected:
             metrics.false_negatives += len(expected)
-            metrics.details.append({
-                "label": spec["label"], "expected": sorted(expected),
-                "detected": [], "tp": 0, "fp": 0, "fn": len(expected),
-                "top_scored": all_scored[:10],
-            })
+            metrics.details.append(
+                {
+                    "label": spec["label"],
+                    "expected": sorted(expected),
+                    "detected": [],
+                    "tp": 0,
+                    "fp": 0,
+                    "fn": len(expected),
+                    "top_scored": all_scored[:10],
+                }
+            )
             continue
 
         metrics.n_succeeded += 1
@@ -338,15 +428,19 @@ def evaluate_element_id(
         metrics.false_positives += fp
         metrics.false_negatives += fn
 
-        metrics.details.append({
-            "label": spec["label"],
-            "expected": sorted(expected),
-            "detected": sorted(detected),
-            "tp": tp, "fp": fp, "fn": fn,
-            "missed": sorted(expected - detected),
-            "spurious": sorted(detected - expected),
-            "top_scored": all_scored[:10],
-        })
+        metrics.details.append(
+            {
+                "label": spec["label"],
+                "expected": sorted(expected),
+                "detected": sorted(detected),
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "missed": sorted(expected - detected),
+                "spurious": sorted(detected - expected),
+                "top_scored": all_scored[:10],
+            }
+        )
 
     metrics.elapsed_s = time.perf_counter() - start
     return metrics
@@ -379,14 +473,16 @@ def main():
         for f in sorted(el_dir.glob("*_spectrum.csv")):
             el = f.stem.replace("_spectrum", "")
             df = pd.read_csv(f)
-            spectra.append({
-                "wavelength": df.iloc[:, 0].values,
-                "intensity": df.iloc[:, 1].values,
-                "expected_elements": {el},
-                "label": f"pure_{el}",
-                "source": "pure_element",
-                "mineral_name": None,
-            })
+            spectra.append(
+                {
+                    "wavelength": df.iloc[:, 0].values,
+                    "intensity": df.iloc[:, 1].values,
+                    "expected_elements": {el},
+                    "label": f"pure_{el}",
+                    "source": "pure_element",
+                    "mineral_name": None,
+                }
+            )
         print(f"Loaded {len(spectra)} pure element spectra")
 
     # Minerals
@@ -399,14 +495,16 @@ def main():
             if not expected:
                 continue
             df = pd.read_csv(f)
-            spectra.append({
-                "wavelength": df.iloc[:, 0].values,
-                "intensity": df.iloc[:, 1].values,
-                "expected_elements": expected,
-                "label": f"mineral_{f.stem.replace('_spectrum', '')}",
-                "source": "mineral",
-                "mineral_name": mineral,
-            })
+            spectra.append(
+                {
+                    "wavelength": df.iloc[:, 0].values,
+                    "intensity": df.iloc[:, 1].values,
+                    "expected_elements": expected,
+                    "label": f"mineral_{f.stem.replace('_spectrum', '')}",
+                    "source": "mineral",
+                    "mineral_name": mineral,
+                }
+            )
             n_minerals += 1
         print(f"Loaded {n_minerals} mineral spectra")
 
@@ -433,8 +531,10 @@ def main():
     print(f"Spectra: {len(spectra)} (13 pure elements + {n_minerals} minerals)")
     print("=" * 80)
 
-    print(f"\n{'Method':<15s} {'Recall':>8s} {'Precision':>10s} {'F1':>8s} "
-          f"{'TP':>6s} {'FP':>6s} {'FN':>6s} {'Success':>8s} {'Time':>7s}")
+    print(
+        f"\n{'Method':<15s} {'Recall':>8s} {'Precision':>10s} {'F1':>8s} "
+        f"{'TP':>6s} {'FP':>6s} {'FN':>6s} {'Success':>8s} {'Time':>7s}"
+    )
     print("-" * 80)
     for method, m in results.items():
         print(
