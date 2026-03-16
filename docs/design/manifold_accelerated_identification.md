@@ -681,8 +681,78 @@ two-zone spectrum. Use only when single-zone residuals are poor (RSS/n > thresho
 | DWT wavelet denoising | Medium (recall for trace) | Low | Phase 3 |
 | CD-SB temperature validation | Medium (robustness) | Medium | Phase 5 |
 | Spectral entropy similarity | Medium (precision) | Medium | Phase 2 |
+| Statistical Interference Factor (SIF) | High (precision) | Medium | Phase 5 |
+| ROI-based shoulder detection | Medium (recall for trace) | Medium | Phase 3 |
+| Automated doublet-ratio SA correction | Medium (robustness) | Medium | Phase 4 |
 | BN+1 probabilistic model selection | High (precision) | High | Future |
 | Two-zone plasma model | Medium (accuracy) | High | Future |
+
+### 8.6 Additional Enhancements (from Follow-Up Review)
+
+**Statistical Interference Factor (SIF)**
+
+The SIF metric (Baudelet et al.) provides a quantitative measure of how much
+a specific emission line is interfered with by lines from other elements in
+the matrix. For each candidate line, SIF is computed as the ratio of the
+target element's predicted emissivity to the sum of all elements' emissivities
+at that wavelength:
+
+    SIF(λ) = ε_target(λ) / Σᵢ εᵢ(λ)
+
+Lines with SIF > 0.8 are "clean" (dominated by the target element) and should
+be prioritized for final element assignment. Lines with SIF < 0.3 are
+heavily interfered and should be downweighted or excluded from the Boltzmann
+plot and NNLS coefficient significance calculation.
+
+**Implementation:** After NNLS decomposition identifies candidate elements,
+compute SIF for each element's strongest lines using the basis spectra.
+Reweight the NNLS significance test to prioritize clean lines. This is
+critical for complex AM alloys (e.g., Inconel 718 where Ni/Cr/Fe/Nb lines
+heavily overlap).
+
+**ROI-Based Derivative Shoulder Detection**
+
+For achieving >95% recall on trace elements in dense alloy spectra, the
+pipeline needs to detect subtle peaks hidden in the wings of intense matrix
+lines. A derivative-based shoulder detection strategy:
+
+1. Compute 2nd derivative of the spectrum: d²I/dλ²
+2. Identify shoulders as local minima in d²I/dλ² that don't correspond
+   to resolved peaks but indicate inflection points
+3. Use detected shoulders to seed additional Voigt profile components in
+   the refinement step's forward model
+4. Re-run NNLS with the shoulder positions included as additional
+   constraints
+
+This is particularly important for detecting V (0.4%) in Ti6Al4V where
+V I 437.92nm sits on the wing of Ti I 438.19nm.
+
+**Implementation:** Add shoulder detection to the preprocessing pipeline.
+Feed shoulder positions into the refinement step as soft constraints
+(additional Voigt components with bounded amplitudes).
+
+**Automated Doublet-Ratio Self-Absorption Correction**
+
+For elements with known doublet transitions from the same multiplet (e.g.,
+Na D lines at 589.0/589.6nm, Ca II 393.4/396.8nm), the theoretical intensity
+ratio is fixed by quantum mechanics (g_k·A_ki ratios). Any deviation from
+this ratio directly quantifies the self-absorption level:
+
+    SA = (I_observed_ratio / I_theoretical_ratio)^(1/α)
+
+where α ≈ -0.54 is the self-absorption exponent. The true optically-thin
+intensity can then be reconstructed:
+
+    I_corrected = I_observed / SA
+
+This is automated and calibration-free — no external references needed.
+The corrected intensities should be fed back into the NNLS decomposition
+and Boltzmann plot to improve both identification accuracy and T estimation.
+
+**Implementation:** Build a lookup table of known doublet/multiplet pairs
+from the NIST database. During the refinement step, check each detected
+element's doublet ratios and apply SA correction where deviations > 10%
+are found.
 
 ---
 
