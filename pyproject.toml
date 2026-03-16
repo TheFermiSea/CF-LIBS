@@ -73,7 +73,8 @@ rust = ["cflibs-core"]
 ci = [
     "jax[cpu]>=0.4.26",
     "h5py>=3.8.0",
-    "zarr>=3.1.5",
+    "zarr>=2.18.0; python_version < '3.11'",
+    "zarr>=3.1.5; python_version >= '3.11'",
     "faiss-cpu>=1.7.0",
     "numpyro>=0.14.0",
     "arviz>=0.17.0",
