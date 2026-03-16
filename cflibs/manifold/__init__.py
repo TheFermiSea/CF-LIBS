@@ -11,6 +11,7 @@ generated from first principles using JAX for GPU acceleration.
 from cflibs.manifold.generator import ManifoldGenerator
 from cflibs.manifold.config import ManifoldConfig
 from cflibs.manifold.loader import ManifoldLoader
+from cflibs.manifold.basis_library import BasisLibrary, BasisLibraryConfig, BasisLibraryGenerator
 
 # SpectralEmbedder is always available (only needs numpy + pca)
 from cflibs.manifold.vector_index import SpectralEmbedder
@@ -27,6 +28,9 @@ __all__ = [
     "ManifoldGenerator",
     "ManifoldConfig",
     "ManifoldLoader",
+    "BasisLibrary",
+    "BasisLibraryConfig",
+    "BasisLibraryGenerator",
     "SpectralEmbedder",
     "HAS_VECTOR_INDEX",
 ]
