@@ -531,7 +531,162 @@ Measure end-to-end latency per spectrum on:
 
 ---
 
-## 8. References
+## 8. Planned Enhancements (from Gemini Deep Research Synthesis)
+
+The following enhancements were identified by cross-referencing the Gemini Deep
+Research report (71 websites surveyed, March 2026) with the academic literature
+from Semantic Scholar. They are ordered by expected impact and feasibility.
+
+### 8.1 Enhanced Signal Conditioning
+
+**Multi-scale Wavelet Denoising (DWT with db5 filter)**
+
+The current preprocessing uses SNIP baseline subtraction and MAD noise
+estimation. For single-shot AM process monitoring where SNR is often low,
+integrating Discrete Wavelet Transform (DWT) denoising with a 'db5' mother
+wavelet would separate high-frequency stochastic noise from sharp atomic
+transitions before the NNLS decomposition step. This is particularly important
+for detecting trace alloying elements (e.g., V at 0.4% in Ti6Al4V) whose
+lines may be buried in shot noise.
+
+**Implementation:** `pywt.wavedec()` → threshold detail coefficients →
+`pywt.waverec()`. Add as optional preprocessing step before NNLS.
+
+**Adaptive Atmospheric Masking**
+
+Since atmospheric contaminants (Na, O, K, N, H, Ar) are the dominant source
+of false positives (accounting for ~55% of all FPs in the Aalto benchmark),
+the preprocessing step should include a dynamic spectral mask. For each known
+persistent line (P-line) of atmospheric species from the NIST database, mask
+a ±δλ window around that wavelength before running NNLS. This prevents
+atmospheric emission from being attributed to sample elements.
+
+**Implementation:** Build a static mask array from NIST atmospheric P-lines
+at the instrument's wavelength grid. Apply as `observed *= mask` before NNLS.
+The mask width should scale with the effective resolving power.
+
+### 8.2 Physics-Informed Validation Upgrades
+
+**Saha-Boltzmann Cross-Validation**
+
+The current Boltzmann consistency check (R² > 0.90 on ln(Iλ/gA) vs Eₖ)
+only validates within a single ionization stage. A stronger constraint is
+Saha-Boltzmann cross-validation: for elements where both stage I and II lines
+are detected, verify that the Saha equation relates their populations at the
+fitted (T, nₑ). If the predicted T from atomic lines differs significantly
+from T predicted by ionic lines, the identification is physically inconsistent.
+
+For fs/ps-LIBS where we expect only stages I and II, this is a powerful
+discriminator — the ratio n_II/n_I must be consistent with:
+
+    n_II/n_I = (2.41×10¹⁵ / nₑ) · T^1.5 · (U_II/U_I) · exp(-IP/kT)
+
+Elements passing both Boltzmann linearity AND Saha consistency get a
+confidence boost; those failing either get penalized. This replaces the
+single R² check with a more physically grounded two-stage validation.
+
+**Column Density Saha-Boltzmann (CD-SB) Plots**
+
+For elements prone to self-absorption (Fe resonance lines are common in AM
+alloys), the standard Boltzmann plot fails because self-absorbed line
+intensities are artificially suppressed [Zhang et al. 2022, Frontiers of
+Physics]. The CD-SB method bypasses the optically thin requirement by tracking
+ground-state columnar densities rather than upper-state intensities. It plots:
+
+    y_p = ln(n_I^i · l / g_I^i)  vs  x_p = E_I^i  (lower energy level)
+
+for neutral lines, and includes an ionization correction term for ionic lines.
+This yields accurate T even when resonance lines are saturated, and is
+particularly valuable at later gate delays when ion recombination depletes
+ionic emission [Zhang et al. 2022].
+
+**Implementation:** Add CD-SB as an alternative T validation method in the
+model selection step, falling back to it when the standard Saha-Boltzmann
+R² < 0.90 (indicating potential self-absorption).
+
+### 8.3 Advanced Retrieval and Similarity Metrics
+
+**Spectral Entropy Similarity**
+
+Research from the Gemini report indicates that spectral entropy similarity
+outperforms over 40 alternative similarity metrics (including cosine and dot
+product) for library matching tasks. It is particularly robust against noise
+artifacts that generate false matches. The metric normalizes intensity arrays
+to sum to 0.5, then computes the information entropy of the combined
+distribution, mathematically penalizing matches that rely on stochastic noise.
+
+**Implementation:** Replace or augment the PCA + L2 distance in the FAISS
+retrieval step with entropy similarity scoring. Can be computed in the
+refinement step after FAISS provides initial candidates.
+
+**NIST Accuracy Grade Weighting**
+
+Not all NIST transition probabilities (A_ki values) are equally reliable. NIST
+assigns accuracy grades from AA (≤1% uncertainty) to E (>50% uncertainty).
+The basis library should weight lines by their NIST accuracy grade so that
+the L-BFGS-B optimizer prioritizes high-confidence transitions:
+
+    w_line = {AA: 1.0, A+: 0.95, A: 0.9, B+: 0.8, B: 0.7, C+: 0.5, C: 0.3, D+: 0.2, D: 0.1, E: 0.05}
+
+This reduces the influence of poorly-known transition probabilities on both
+the NNLS decomposition and the refinement step.
+
+**Implementation:** Add accuracy_grade column to the atomic database query.
+Apply weights in the forward model's emissivity calculation.
+
+### 8.4 Probabilistic Refinement
+
+**Bayesian Network Expansion (BN+1)**
+
+Instead of deterministic BIC backward elimination, model the conditional
+dependencies between emission lines using a Directed Acyclic Graph (DAG).
+Each emission transition is a node; edges encode the Boltzmann/Saha
+relationships between lines of the same element. A candidate element is only
+"accepted" if the inclusion of its full network of lines significantly
+improves the posterior likelihood of the overall model.
+
+This is more powerful than BIC because it considers the joint probability of
+ALL lines of an element, not just the aggregate residual. A spurious element
+with 2 coincidental matches but 5 missing expected lines would be rejected
+even if the 2 matches slightly improve χ².
+
+**Implementation:** Use `PyMC` or `numpyro` for probabilistic modeling.
+The BN+1 test compares P(data | n elements) vs P(data | n+1 elements)
+using Bayes factors.
+
+**Two-Zone Plasma Model**
+
+The design document acknowledges the risk of LTE departure in fs-LIBS.
+A two-zone model (hot core + cool periphery) better captures the spatial
+gradients in real laser plasmas:
+
+    S(λ) = S_core(λ; T_core, nₑ_core) · [1 - exp(-τ_core)]
+         + S_shell(λ; T_shell, nₑ_shell) · [1 - exp(-τ_shell)]
+
+This adds 4 parameters (T_shell, nₑ_shell, R_core, R_shell) but
+significantly improves relative concentration estimates for elements whose
+emission originates from different plasma zones. The OPSIAL software
+demonstrated that allowing T_exc ≠ T_i improved ChemCam fitting [Tan 2018].
+
+**Implementation:** Extend the JAX forward model to optionally compute a
+two-zone spectrum. Use only when single-zone residuals are poor (RSS/n > threshold).
+
+### 8.5 Enhancement Priority Matrix
+
+| Enhancement | Impact | Effort | Phase |
+|-------------|--------|--------|-------|
+| Adaptive atmospheric masking | High (precision) | Low | Phase 3 |
+| NIST accuracy grade weighting | High (precision) | Low | Phase 1 |
+| Saha-Boltzmann cross-validation | High (precision) | Medium | Phase 5 |
+| DWT wavelet denoising | Medium (recall for trace) | Low | Phase 3 |
+| CD-SB temperature validation | Medium (robustness) | Medium | Phase 5 |
+| Spectral entropy similarity | Medium (precision) | Medium | Phase 2 |
+| BN+1 probabilistic model selection | High (precision) | High | Future |
+| Two-zone plasma model | Medium (accuracy) | High | Future |
+
+---
+
+## 9. References
 
 ### Academic Literature
 1. Hermann J, Axente E, Pelascini F, Craciun V. "Analysis of Multi-elemental
@@ -556,7 +711,11 @@ Measure end-to-end latency per spectrum on:
 9. "Advanced Computational Strategies for Enhancing Precision and Recall in
    LIBS Pipelines" — Gemini Deep Research, March 2026. 71 websites surveyed.
    Key findings: PSO-arPLS baseline correction, Bayesian BN+1 model selection,
-   spectral entropy similarity, Boltzmann linearity filtering (R² > 0.95).
+   spectral entropy similarity, Boltzmann linearity filtering (R² > 0.95),
+   Saha-Boltzmann cross-validation for multi-stage consistency, CD-SB method
+   for self-absorption robustness, NIST accuracy grade weighting, adaptive
+   atmospheric masking, two-zone plasma model for spatial gradients, DWT
+   wavelet denoising for single-shot SNR improvement.
 
 ### Existing Codebase
 10. cflibs/manifold/ — ManifoldGenerator, SpectralEmbedder, VectorIndex
@@ -567,7 +726,7 @@ Measure end-to-end latency per spectrum on:
 
 ---
 
-## 9. Appendix: Sizing Calculations
+## 10. Appendix: Sizing Calculations
 
 ### A.1 Basis Library
 
