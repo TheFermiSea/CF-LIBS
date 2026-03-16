@@ -24,6 +24,7 @@ from cflibs.inversion.closure import (
     ilr_inverse,
 )
 from cflibs.inversion.solver import IterativeCFLIBSSolver, CFLIBSResult
+from cflibs.inversion.closed_form_solver import ClosedFormILRSolver, ClosedFormConfig
 from cflibs.inversion.quality import (
     QualityMetrics,
     QualityAssessor,
@@ -329,6 +330,8 @@ __all__ = [
     # Solver
     "IterativeCFLIBSSolver",
     "CFLIBSResult",
+    "ClosedFormILRSolver",
+    "ClosedFormConfig",
     # Quality metrics
     "QualityMetrics",
     "QualityAssessor",
