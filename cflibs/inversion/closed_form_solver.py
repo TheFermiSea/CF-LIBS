@@ -60,6 +60,8 @@ class ClosedFormILRSolver:
     ):
         self.atomic_db = atomic_db
         self.config = config or ClosedFormConfig()
+        if self.config.saha_passes not in (1, 2):
+            raise ValueError("saha_passes must be 1 or 2")
 
     # ------------------------------------------------------------------
     # Private helpers (partition functions, Saha)
@@ -80,7 +82,7 @@ class ClosedFormILRSolver:
 
     def _compute_saha_ratio(
         self,
-        element: str,
+        element: str,  # kept for API parity with IterativeCFLIBSSolver
         T_K: float,
         n_e_cm3: float,
         U_I: float,
@@ -140,7 +142,7 @@ class ClosedFormILRSolver:
                             A_ki=obs.A_ki,
                         )
                     )
-                else:
+                elif obs.ionization_stage == 1:
                     corrected[el].append(
                         LineObservation(
                             wavelength_nm=obs.wavelength_nm,
@@ -152,6 +154,12 @@ class ClosedFormILRSolver:
                             g_k=obs.g_k,
                             A_ki=obs.A_ki,
                         )
+                    )
+                else:
+                    logger.warning(
+                        "Ionization stage %d for %s not supported; skipping",
+                        obs.ionization_stage,
+                        el,
                     )
 
         return dict(corrected)
@@ -201,6 +209,11 @@ class ClosedFormILRSolver:
                     continue
                 y_unc = obs.y_uncertainty
                 if y_unc <= 0:
+                    logger.debug(
+                        "Non-positive uncertainty for %s at %.1f nm; using fallback 0.1",
+                        obs.element,
+                        obs.wavelength_nm,
+                    )
                     y_unc = 0.1
 
                 # Pre-adjust: y_adj = y + ln(U_s) + ln(M_s)
@@ -251,11 +264,20 @@ class ClosedFormILRSolver:
     @staticmethod
     def _extract_parameters(
         theta: np.ndarray, D: int, element_order: List[str]
-    ) -> Tuple[float, Dict[str, float]]:
-        """Extract T and compositions from regression parameters."""
+    ) -> Tuple[float, Dict[str, float], bool]:
+        """Extract T and compositions from regression parameters.
+
+        Returns
+        -------
+        tuple
+            (T_K, compositions, physical) where physical is False if the
+            fitted slope was non-negative (indicating a non-physical fit).
+        """
         m = theta[0]
+        physical = True
         if m >= 0:
             T_K = 50000.0
+            physical = False
             logger.warning("Non-negative slope; clamping T to 50000 K")
         else:
             T_K = -1.0 / (m * KB_EV)
@@ -267,7 +289,7 @@ class ClosedFormILRSolver:
         else:
             compositions = {element_order[0]: 1.0}
 
-        return T_K, compositions
+        return T_K, compositions, physical
 
     # ------------------------------------------------------------------
     # Public API
@@ -329,7 +351,7 @@ class ClosedFormILRSolver:
                 X1, y1, W1 = result_p1
                 theta1, _ = self._solve_wls(X1, y1, W1)
                 if theta1 is not None:
-                    T_pass1, _ = self._extract_parameters(
+                    T_pass1, _, _ = self._extract_parameters(
                         theta1, len(neutral_elements), neutral_elements
                     )
                     if 1000 < T_pass1 < 100000:
@@ -344,8 +366,9 @@ class ClosedFormILRSolver:
         W: Optional[np.ndarray] = None
         pf_I_all: Dict[str, float] = {}
         pf_II_all: Dict[str, float] = {}
+        converged = True
 
-        if self.config.saha_passes >= 2:
+        if self.config.saha_passes == 2:
             T_eval = T_K if self.config.partition_refine else initial_T_K
             pf_I_all = {el: self._evaluate_partition_function(el, 1, T_eval) for el in elements}
             pf_II_all = {el: self._evaluate_partition_function(el, 2, T_eval) for el in elements}
@@ -372,7 +395,9 @@ class ClosedFormILRSolver:
             if theta is None:
                 return self._empty_result()
 
-            T_K, compositions = self._extract_parameters(theta, D, elements)
+            T_K, compositions, physical = self._extract_parameters(theta, D, elements)
+            if not physical:
+                converged = False
 
         else:
             # Single-pass: use neutral-only results
@@ -391,19 +416,25 @@ class ClosedFormILRSolver:
             if theta is None:
                 return self._empty_result()
 
-            T_K, compositions = self._extract_parameters(theta, D, elements)
+            T_K, compositions, physical = self._extract_parameters(theta, D, elements)
+            if not physical:
+                converged = False
 
-        # ── Estimate n_e via pressure/charge balance ───────────────────
+        # ── Estimate n_e via pressure/charge balance (fixed-point) ─────
         if self.config.ne_mode == "pressure":
-            total_eps = 0.0
-            for el, C_s in compositions.items():
-                U_I = pf_I_all.get(el, 25.0)
-                U_II = pf_II_all.get(el, 15.0)
-                S = self._compute_saha_ratio(el, T_K, n_e, U_I, U_II, effective_ips[el])
-                total_eps += C_s * S / (1.0 + S)
-            avg_Z = total_eps
-            n_tot = self.config.pressure_pa / (KB * T_K * (1.0 + avg_Z))
-            n_e = avg_Z * n_tot * 1e-6  # cm^-3
+            for _ in range(20):
+                ne_prev = n_e
+                total_eps = 0.0
+                for el, C_s in compositions.items():
+                    U_I = pf_I_all.get(el, 25.0)
+                    U_II = pf_II_all.get(el, 15.0)
+                    S = self._compute_saha_ratio(el, T_K, n_e, U_I, U_II, effective_ips[el])
+                    total_eps += C_s * S / (1.0 + S)
+                avg_Z = total_eps
+                n_tot = self.config.pressure_pa / (KB * T_K * (1.0 + avg_Z))
+                n_e = avg_Z * n_tot * 1e-6  # cm^-3
+                if ne_prev > 0 and abs(n_e - ne_prev) / ne_prev < 1e-4:
+                    break
 
         # ── Uncertainties ──────────────────────────────────────────────
         T_uncertainty_K = 0.0
@@ -457,7 +488,7 @@ class ClosedFormILRSolver:
             concentrations=compositions,
             concentration_uncertainties=concentration_uncertainties,
             iterations=self.config.saha_passes,
-            converged=True,
+            converged=converged,
             quality_metrics=quality_metrics,
             electron_density_uncertainty_cm3=0.0,
             boltzmann_covariance=boltz_cov,
