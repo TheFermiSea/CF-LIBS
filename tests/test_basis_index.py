@@ -5,7 +5,10 @@ Tests for BasisIndex — FAISS-based index for plasma parameter estimation.
 import numpy as np
 import pytest
 
-from cflibs.manifold.basis_index import BasisIndex, _weighted_median
+pytest.importorskip("faiss", reason="faiss-cpu required for BasisIndex tests")
+h5py = pytest.importorskip("h5py", reason="h5py required for BasisIndex tests")
+
+from cflibs.manifold.basis_index import BasisIndex, _weighted_median  # noqa: E402
 
 pytestmark = [pytest.mark.requires_db]
 
