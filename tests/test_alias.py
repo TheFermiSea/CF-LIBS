@@ -475,7 +475,9 @@ def test_N_matched_in_k_det_blend(atomic_db):
     # N_X=1 → k_det = k_rate × k_shift (pure shift quality)
     assert k_det > 0.0, f"k_det should be nonzero (raw score): {k_det}"
     # Hard gate: N_matched=1 < 2 with N_expected=10 → CL=0.0
-    assert CL == 0.0, f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
+    assert CL == pytest.approx(
+        0.0, abs=1e-12
+    ), f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
 
 
 def test_P_ab_tiers(atomic_db):
@@ -1055,7 +1057,7 @@ def test_P_sig_overmatch_defensive(atomic_db):
     assert 0.0 <= P_sig_normal <= 1.0, f"Normal P_sig out of range: {P_sig_normal}"
 
 
-def test_k_sim_single_line_neutral(atomic_db):
+def test_k_sim_single_line_rejected(atomic_db):
     """Single matched line with N_expected>1 should get k_sim=0.0 and CL=0.0 (hard gate)."""
     from cflibs.atomic.structures import Transition
 
@@ -1098,7 +1100,7 @@ def test_k_sim_single_line_neutral(atomic_db):
     )
 
     # Single matched line → k_sim should be 0.0 (penalizing, not neutral)
-    assert k_sim == 0.0, f"Single-line k_sim should be 0.0: {k_sim}"
+    assert k_sim == pytest.approx(0.0, abs=1e-12), f"Single-line k_sim should be 0.0: {k_sim}"
     assert N_matched == 1
     assert N_expected == 3
 
@@ -1116,7 +1118,9 @@ def test_k_sim_single_line_neutral(atomic_db):
         P_cov=P_cov,
     )
     assert k_det > 0.0, f"k_det should be nonzero (raw score): {k_det}"
-    assert CL == 0.0, f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
+    assert CL == pytest.approx(
+        0.0, abs=1e-12
+    ), f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
 
 
 # ---------------------------------------------------------------------------

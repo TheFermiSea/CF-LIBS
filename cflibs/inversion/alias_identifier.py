@@ -71,7 +71,7 @@ class ALIASIdentifier:
         List of elements to search for. If None, uses default common LIBS elements:
         ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"] (default: None)
     max_screening_candidates : int, optional
-        Maximum number of candidates retained by fast screening (default: 20)
+        Maximum number of candidates retained by fast screening (default: 12)
     relative_cl_threshold : float, optional
         CL must be >= max_CL * relative_cl_threshold to count as detected.
         Set to 0 to disable the relative threshold (default: 0.1)
@@ -140,7 +140,7 @@ class ALIASIdentifier:
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 20,
         reference_temperature: float = 10000.0,
-        max_screening_candidates: int = 20,
+        max_screening_candidates: int = 12,
         relative_cl_threshold: float = 0.1,
     ):
         self.atomic_db = atomic_db
@@ -157,7 +157,7 @@ class ALIASIdentifier:
         self.elements = elements
         self.max_lines_per_element = max_lines_per_element
         self.reference_temperature = reference_temperature
-        self.max_screening_candidates = min(max_screening_candidates, 12)
+        self.max_screening_candidates = max_screening_candidates
         self.relative_cl_threshold = relative_cl_threshold
 
         # Create Saha-Boltzmann solver
@@ -734,9 +734,10 @@ class ALIASIdentifier:
         Estimate plasma temperature from Boltzmann slope of strong detected peaks.
 
         Uses Fe I lines preferentially (most common in LIBS). Falls back to any
-        transition metal with enough matched lines.
+        transition metal with enough matched lines, then a line-ratio method,
+        and finally ``self.reference_temperature`` if all methods fail.
 
-        Sets self._estimated_T (K), or None if estimation fails.
+        Always sets ``self._estimated_T`` (K) to a finite value.
         """
         if len(peaks) < 3:
             self._estimated_T = self.reference_temperature
@@ -937,7 +938,10 @@ class ALIASIdentifier:
                     matched_strength += strength
                     n_matched += 1
 
-            if n_matched >= 2 and total_strength > 0:
+            # Single-line exception: elements with ≤1 line in the window
+            # (e.g., Li I 670.8nm) need only 1 match to pass screening.
+            min_matches = 1 if len(top10) <= 1 else 2
+            if n_matched >= min_matches and total_strength > 0:
                 score = matched_strength / total_strength
                 if score >= 0.3:
                     element_scores.append((element, score, n_matched))
