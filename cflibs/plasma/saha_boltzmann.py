@@ -55,7 +55,7 @@ class SahaBoltzmannSolver(SolverStrategy):
             Defaults to Debye-Hückel if None.
         """
         self.atomic_db = atomic_db
-        self.ipd_model = ipd_model or DebyeHuckelIPD()
+        self.ipd_model = ipd_model if ipd_model is not None else DebyeHuckelIPD()
 
     def solve_ionization_balance(
         self, element: str, T_e_eV: float, n_e_cm3: float, total_density_cm3: float

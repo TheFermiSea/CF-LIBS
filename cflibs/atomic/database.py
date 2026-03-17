@@ -254,11 +254,6 @@ class AtomicDatabase(AtomicDataSource):
             )
         logger.info("Populated %d partition function coefficient sets", len(nist_coefficients))
 
-    # NIST accuracy grade → fractional uncertainty mapping.
-    # Reference: NIST ASD documentation, Kramida et al.
-    # Grade AAA: ≤0.3%, AA: ≤1%, A: ≤3%, B: ≤10%, C: ≤25%, D: ≤50%, E: >50%
-    from cflibs.atomic.reference_data import NIST_GRADE_UNCERTAINTY
-
     @staticmethod
     def _populate_aki_uncertainties(cursor: sqlite3.Cursor):
         """Assign aki_uncertainty using heuristic based on relative intensity.
@@ -273,33 +268,40 @@ class AtomicDatabase(AtomicDataSource):
         When explicit NIST accuracy grades are available (via future ingestion),
         those should override these heuristics.
         """
+        from cflibs.atomic.reference_data import NIST_GRADE_UNCERTAINTY
+
+        unc_b = NIST_GRADE_UNCERTAINTY["B"]
+        unc_c = NIST_GRADE_UNCERTAINTY["C"]
+        unc_d = NIST_GRADE_UNCERTAINTY["D"]
+        unc_e = NIST_GRADE_UNCERTAINTY["E"]
+
         # Heuristic: assign based on relative intensity as a proxy for data quality
-        # rel_int > 100 → well-measured lines (B grade, 10%)
+        # rel_int > 100 → well-measured lines (B grade)
         cursor.execute(
-            "UPDATE lines SET aki_uncertainty = 0.10, accuracy_grade = 'B' "
+            f"UPDATE lines SET aki_uncertainty = {unc_b}, accuracy_grade = 'B' "
             "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int > 100"
         )
         n_b = cursor.rowcount
 
-        # rel_int 10-100 → moderate quality (C grade, 25%)
+        # rel_int 10-100 → moderate quality (C grade)
         cursor.execute(
-            "UPDATE lines SET aki_uncertainty = 0.25, accuracy_grade = 'C' "
+            f"UPDATE lines SET aki_uncertainty = {unc_c}, accuracy_grade = 'C' "
             "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int > 10 "
             "AND aki_uncertainty IS NULL"
         )
         n_c = cursor.rowcount
 
-        # rel_int 1-10 → weaker lines (D grade, 50%)
+        # rel_int 1-10 → weaker lines (D grade)
         cursor.execute(
-            "UPDATE lines SET aki_uncertainty = 0.50, accuracy_grade = 'D' "
+            f"UPDATE lines SET aki_uncertainty = {unc_d}, accuracy_grade = 'D' "
             "WHERE aki IS NOT NULL AND rel_int IS NOT NULL AND rel_int >= 1 "
             "AND aki_uncertainty IS NULL"
         )
         n_d = cursor.rowcount
 
-        # Everything else: worst case (E grade, 50%)
+        # Everything else: worst case (E grade)
         cursor.execute(
-            "UPDATE lines SET aki_uncertainty = 0.50, accuracy_grade = 'E' "
+            f"UPDATE lines SET aki_uncertainty = {unc_e}, accuracy_grade = 'E' "
             "WHERE aki IS NOT NULL AND aki_uncertainty IS NULL"
         )
         n_e = cursor.rowcount
