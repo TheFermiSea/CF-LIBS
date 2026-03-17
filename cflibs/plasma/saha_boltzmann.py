@@ -3,7 +3,7 @@ Saha-Boltzmann solver for LTE plasma.
 """
 
 import threading
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 import numpy as np
 
 from cflibs.core.constants import C_LIGHT, E_CHARGE, EV_TO_K, J_TO_EV, KB, SAHA_CONST_CM3
@@ -245,7 +245,7 @@ class SahaBoltzmannSolver(SolverStrategy):
         ionization_stage: int,
         stage_density_cm3: float,
         T_e_eV: float,
-        n_e_cm3: float = None,
+        n_e_cm3: Optional[float] = None,
     ) -> Dict[Tuple[str, int, float], float]:
         """
         Solve Boltzmann distribution for level populations.
