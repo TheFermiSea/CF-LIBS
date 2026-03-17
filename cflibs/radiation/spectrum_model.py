@@ -15,7 +15,7 @@ from cflibs.radiation.profiles import (
     doppler_width,
 )
 from cflibs.instrument.convolution import apply_instrument_function
-from cflibs.core.constants import H_PLANCK, C_LIGHT, KB
+from cflibs.core.constants import H_PLANCK, C_LIGHT, KB, EV_TO_K
 from cflibs.core.logging_config import get_logger
 
 logger = get_logger("radiation.spectrum_model")
@@ -26,7 +26,7 @@ def planck_radiance(wavelength_nm: np.ndarray, T_eV: float) -> np.ndarray:
     Calculate spectral radiance of a blackbody in W m^-2 nm^-1 sr^-1.
     """
     wl_m = wavelength_nm * 1e-9
-    T_K = T_eV * 11604.5250061598
+    T_K = T_eV * EV_TO_K
 
     # B_lambda = (2hc^2 / lambda^5) / (exp(hc / (lambda k T)) - 1)
     # Units: W m^-3 sr^-1. To get W m^-2 nm^-1 sr^-1, multiply by 1e-9.

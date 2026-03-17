@@ -84,6 +84,16 @@ class SahaBoltzmannSolver(SolverStrategy):
         eff_ip_II = max(ip_II - delta_chi, 0.0) if ip_II is not None else None
         U_II = self.calculate_partition_function(element, 2, T_e_eV, max_energy_ev=eff_ip_II)
 
+        if U_I <= 0.0 or U_II <= 0.0:
+            logger.warning(
+                "Non-positive partition function for %s (U_I=%g, U_II=%g); "
+                "falling back to neutral-only.",
+                element,
+                U_I,
+                U_II,
+            )
+            return {1: total_density_cm3}
+
         S1 = (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-eff_ip_I / T_e_eV)
 
         # Solve the coupled system:
@@ -270,6 +280,17 @@ class SahaBoltzmannSolver(SolverStrategy):
         U = self.calculate_partition_function(
             element, ionization_stage, T_e_eV, max_energy_ev=max_energy_ev
         )
+
+        if U <= 0.0:
+            logger.warning(
+                "Non-positive partition function for %s stage %d at T_e_eV=%g; "
+                "returning empty level populations.",
+                element,
+                ionization_stage,
+                T_e_eV,
+            )
+            return {}
+
         levels = self.atomic_db.get_energy_levels(element, ionization_stage)
 
         populations = {}
