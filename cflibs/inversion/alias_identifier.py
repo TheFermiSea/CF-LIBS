@@ -329,6 +329,8 @@ class ALIASIdentifier:
         #   P_mix  — leave-one-out partial R^2 (global)
         #   P_local — local explanation score (what fraction of claimed
         #             peaks' intensity does this element actually explain?)
+        peak_intensities_arr = None
+        A = None
         if candidates and peaks:
             peak_intensities_arr = np.array([corrected_intensity[p[0]] for p in peaks])
             A = self._build_nnls_templates(candidates, peaks)
@@ -340,6 +342,47 @@ class ALIASIdentifier:
             for cand in candidates:
                 cand["P_mix"] = 1.0
                 cand["P_local"] = 1.0
+
+        # ── Phase 1.75: Iron-group pre-subtraction (ChemCam-style) ────
+        # At low RP, Fe/Mn/Cr/Ti create a dense pseudo-continuum that
+        # inflates other elements' NNLS ownership scores.  Subtract
+        # their predicted contribution from peak intensities and
+        # recompute P_local for non-iron-group elements so the gate
+        # discriminates on the residual, not the raw spectrum.
+        _IRON_GROUP = {"Fe", "Mn", "Cr", "Ti"}
+        if candidates and peaks and A is not None and self.resolving_power < 2000:
+            ig_indices = [i for i, c in enumerate(candidates) if c["element"] in _IRON_GROUP]
+            if ig_indices and peak_intensities_arr is not None:
+                ig_contribution = np.zeros_like(peak_intensities_arr)
+                c_nnls = np.zeros(len(candidates))
+                # Re-solve NNLS to get coefficients
+                try:
+                    from scipy.optimize import nnls as _nnls
+
+                    c_nnls, _ = _nnls(A, peak_intensities_arr)
+                except Exception:
+                    pass
+                for idx in ig_indices:
+                    ig_contribution += c_nnls[idx] * A[:, idx]
+
+                # Compute residual peak intensities
+                residual_peaks = np.maximum(peak_intensities_arr - ig_contribution, 0.0)
+                residual_total = float(np.sum(residual_peaks))
+
+                if residual_total > 0:
+                    # Recompute P_local for non-iron-group elements against residual
+                    for i, cand in enumerate(candidates):
+                        if cand["element"] in _IRON_GROUP:
+                            continue
+                        claimed = A[:, i] > 1e-6
+                        if not np.any(claimed):
+                            continue
+                        obs_residual = np.sum(residual_peaks[claimed])
+                        if obs_residual <= 0:
+                            cand["P_local"] = 0.0
+                            continue
+                        elem_contrib = np.sum(A[claimed, i] * c_nnls[i])
+                        cand["P_local"] = float(np.clip(elem_contrib / obs_residual, 0.0, 1.0))
 
         # ── Phase 2: Global peak competition ──────────────────────────
         # Only active at RP >= 2000 where peaks are narrow enough for
@@ -459,7 +502,15 @@ class ALIASIdentifier:
 
             # Hard rejection: negligible NNLS ownership means this element's
             # peaks are fully explained by other elements.
-            if P_local < 0.05:
+            # Adaptive threshold: line-rich elements (Fe, Ca, Mn) overlap
+            # heavily at low RP, driving P_local artificially low even for
+            # true positives.  Use a softer threshold for them.
+            # Strong multi-line evidence (high match rate + decent k_sim)
+            # can bypass P_local entirely — the element matched most of
+            # its lines with consistent intensities.
+            p_local_threshold = 0.01 if N_expected >= 10 else 0.05
+            high_match_evidence = N_expected >= 5 and N_matched >= 0.7 * N_expected and k_sim > 0.3
+            if P_local < p_local_threshold and not high_match_evidence:
                 CL = 0.0
 
             # Gate 2: P_mix — moderate gate, 0.2 floor
@@ -2034,10 +2085,21 @@ class ALIASIdentifier:
         # CL = k_det × P_SNR × P_maj × P_ab
         CL = k_det * P_SNR * P_maj * P_ab
 
-        # Fix 2: Hard gate — reject if too few lines matched.
-        # Exception: elements with N_expected <= 1 (e.g., H-alpha, Na D)
-        # can detect on a single matched line.
-        if N_matched < 2 and N_expected >= 2:
-            CL = 0.0
+        # Hard gate — reject if too few lines matched.
+        # At RP<1000, matching 2 lines by chance is trivial for elements
+        # with few expected lines (Na, K). Require enough matches to be
+        # statistically meaningful.
+        if N_expected <= 1:
+            # Single-line elements (H-alpha): 1 match is sufficient
+            pass
+        elif N_expected <= 4:
+            # Sparse elements (Na, K, Li): require ALL lines matched
+            # AND elevated CL to pass — chance matching 2/2 is too easy
+            if N_matched < N_expected:
+                CL = 0.0
+        else:
+            # Normal elements: require at least 3 matched lines
+            if N_matched < 3:
+                CL = 0.0
 
         return k_det, CL
