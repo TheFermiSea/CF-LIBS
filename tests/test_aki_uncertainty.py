@@ -159,9 +159,9 @@ def test_atomic_data_uncertainty_empty_transitions():
 
 def test_nist_grade_uncertainty_mapping():
     """NIST grade mapping constants are correct."""
-    from cflibs.atomic.database import AtomicDatabase
+    from cflibs.atomic.reference_data import NIST_GRADE_UNCERTAINTY
 
-    mapping = AtomicDatabase.NIST_GRADE_UNCERTAINTY
+    mapping = NIST_GRADE_UNCERTAINTY
     assert mapping["AAA"] == 0.003
     assert mapping["AA"] == 0.01
     assert mapping["A"] == 0.03
