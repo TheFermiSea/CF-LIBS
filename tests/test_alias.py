@@ -473,8 +473,11 @@ def test_N_matched_in_k_det_blend(atomic_db):
         P_cov=P_cov,
     )
     # N_X=1 → k_det = k_rate × k_shift (pure shift quality)
-    assert k_det > 0.0, f"k_det should be nonzero without gates: {k_det}"
-    assert CL > 0.0, f"CL should be nonzero without gates: {CL}"
+    assert k_det > 0.0, f"k_det should be nonzero (raw score): {k_det}"
+    # Hard gate: N_matched=1 < 2 with N_expected=10 → CL=0.0
+    assert CL == pytest.approx(
+        0.0, abs=1e-12
+    ), f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
 
 
 def test_P_ab_tiers(atomic_db):
@@ -1054,8 +1057,8 @@ def test_P_sig_overmatch_defensive(atomic_db):
     assert 0.0 <= P_sig_normal <= 1.0, f"Normal P_sig out of range: {P_sig_normal}"
 
 
-def test_k_sim_single_line_neutral(atomic_db):
-    """Single matched line should get k_sim=0.5 (neutral) and produce nonzero CL."""
+def test_k_sim_single_line_rejected(atomic_db):
+    """Single matched line with N_expected>1 should get k_sim=0.0 and CL=0.0 (hard gate)."""
     from cflibs.atomic.structures import Transition
 
     identifier = ALIASIdentifier(atomic_db, resolving_power=5000.0)
@@ -1096,13 +1099,12 @@ def test_k_sim_single_line_neutral(atomic_db):
         emissivity_threshold=-np.inf,
     )
 
-    # Single matched line → k_sim should be 0.5 (neutral), not 0
-    assert k_sim == 0.5, f"Single-line k_sim should be 0.5 (neutral): {k_sim}"
+    # Single matched line → k_sim should be 0.0 (penalizing, not neutral)
+    assert k_sim == pytest.approx(0.0, abs=1e-12), f"Single-line k_sim should be 0.0: {k_sim}"
     assert N_matched == 1
     assert N_expected == 3
 
-    # With gates removed, k_sim=0.5 should NOT be rejected.
-    # k_det = k_rate × k_shift (N_X=1 blend) → nonzero CL.
+    # Hard gate: N_matched=1 < 2 with N_expected=3 → CL=0.0
     k_det, CL = identifier._decide(
         k_sim,
         k_rate,
@@ -1115,8 +1117,10 @@ def test_k_sim_single_line_neutral(atomic_db):
         N_matched=N_matched,
         P_cov=P_cov,
     )
-    assert k_det > 0.0, f"k_det should be nonzero without k_sim gate: {k_det}"
-    assert CL > 0.0, f"CL should be nonzero without k_sim gate: {CL}"
+    assert k_det > 0.0, f"k_det should be nonzero (raw score): {k_det}"
+    assert CL == pytest.approx(
+        0.0, abs=1e-12
+    ), f"CL should be 0.0 due to hard gate (N_matched<2, N_expected>=2): {CL}"
 
 
 # ---------------------------------------------------------------------------
@@ -1184,10 +1188,11 @@ def test_CL_paper_formula(atomic_db):
     )
 
     # Manually compute expected CL using modified formula:
-    # k_det = sqrt(k_det_raw * max(P_cov, 0.01))
+    # k_det = sqrt(k_det_raw * max(P_cov, 0.01)) * N_penalty
     N_X = max(N_matched, 1)
     k_det_raw = k_rate * ((1.0 / N_X) * k_shift + ((N_X - 1.0) / N_X) * k_sim)
-    expected_k_det = math.sqrt(k_det_raw * max(P_cov, 0.01))
+    N_penalty = min(1.0, math.sqrt(N_expected / 5.0))
+    expected_k_det = math.sqrt(k_det_raw * max(P_cov, 0.01)) * N_penalty
 
     # P_SNR from the spectrum
     peak_intensities_local = [intensity[p[0]] for p in peaks]

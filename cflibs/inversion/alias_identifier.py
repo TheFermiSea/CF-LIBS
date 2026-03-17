@@ -71,7 +71,7 @@ class ALIASIdentifier:
         List of elements to search for. If None, uses default common LIBS elements:
         ["Fe", "H", "Cu", "Al", "Ti", "Ca", "Mg", "Si"] (default: None)
     max_screening_candidates : int, optional
-        Maximum number of candidates retained by fast screening (default: 20)
+        Maximum number of candidates retained by fast screening (default: 12)
     relative_cl_threshold : float, optional
         CL must be >= max_CL * relative_cl_threshold to count as detected.
         Set to 0 to disable the relative threshold (default: 0.1)
@@ -140,7 +140,7 @@ class ALIASIdentifier:
         elements: Optional[List[str]] = None,
         max_lines_per_element: int = 20,
         reference_temperature: float = 10000.0,
-        max_screening_candidates: int = 20,
+        max_screening_candidates: int = 12,
         relative_cl_threshold: float = 0.1,
     ):
         self.atomic_db = atomic_db
@@ -457,6 +457,11 @@ class ALIASIdentifier:
             # Gate 1: P_local — soft ramp with 0.25 floor
             CL *= float(np.clip(P_local + 0.25, 0.25, 1.0))
 
+            # Hard rejection: negligible NNLS ownership means this element's
+            # peaks are fully explained by other elements.
+            if P_local < 0.05:
+                CL = 0.0
+
             # Gate 2: P_mix — moderate gate, 0.2 floor
             # True minor elements have P_mix ~0.02-0.10, FPs have ~0.000-0.005
             CL *= float(np.clip(0.2 + 8.0 * P_mix, 0.2, 1.0))
@@ -528,7 +533,7 @@ class ALIASIdentifier:
                     "p_tail": p_tail,
                     "p_chance": p_chance,
                     "fill_factor": fill_factor,
-                    "N_penalty": 0.5 if N_expected == 2 else 1.0,
+                    "N_penalty": min(1.0, math.sqrt(N_expected / 5.0)) if N_expected > 0 else 0.0,
                     "boltzmann_factor": boltz_factor,
                     "effective_R": self._effective_R,
                     "global_wl_shift": self._global_wl_shift,
@@ -729,19 +734,20 @@ class ALIASIdentifier:
         Estimate plasma temperature from Boltzmann slope of strong detected peaks.
 
         Uses Fe I lines preferentially (most common in LIBS). Falls back to any
-        transition metal with enough matched lines.
+        transition metal with enough matched lines, then a line-ratio method,
+        and finally ``self.reference_temperature`` if all methods fail.
 
-        Sets self._estimated_T (K), or None if estimation fails.
+        Always sets ``self._estimated_T`` (K) to a finite value.
         """
         if len(peaks) < 3:
-            self._estimated_T = None
+            self._estimated_T = self.reference_temperature
             return
 
         peak_wls = np.array([p[1] for p in peaks])
         peak_intensities = np.array([corrected_intensity[p[0]] for p in peaks])
 
         # Try to match strong lines from Fe I, Ti I, Cr I, Ca I etc.
-        probe_elements = ["Fe", "Ti", "Cr", "Ca", "Mn", "Ni"]
+        probe_elements = ["Fe", "Ti", "Cr", "Ca", "Mn", "Ni", "V", "Cu", "Mg", "Si", "Al"]
         delta_lambda = 0.5 * (wl_min + wl_max) / max(self._effective_R or self.resolving_power, 500)
 
         for probe_el in probe_elements:
@@ -797,7 +803,7 @@ class ALIASIdentifier:
 
                 if abs(slope) < 1e-10:
                     continue
-                if slope < 0 and r_sq > 0.3:
+                if slope < 0 and r_sq > 0.2:
                     T_K = -1.0 / (slope * KB_EV)
                     if self._T_ESTIMATE_MIN_K < T_K < self._T_ESTIMATE_MAX_K:
                         self._estimated_T = float(T_K)
@@ -805,8 +811,64 @@ class ALIASIdentifier:
             except (ValueError, ZeroDivisionError):
                 continue
 
-        # Fallback: no T estimate
-        self._estimated_T = None
+        # Pass 2: Line-ratio fallback — estimate T from best 2-line pair
+        shift = self._global_wl_shift
+        for probe_el in probe_elements:
+            try:
+                transitions = self.atomic_db.get_transitions(
+                    probe_el, 1, wavelength_min=wl_min, wavelength_max=wl_max
+                )
+                if not transitions:
+                    continue
+            except (KeyError, ValueError, AttributeError):
+                continue
+
+            good_trans = [t for t in transitions if t.A_ki > 0 and t.g_k > 0 and t.E_k_ev > 0]
+            if len(good_trans) < 2:
+                continue
+
+            # Match to peaks
+            matched_pairs = []
+            for t in good_trans:
+                wl_shifted = t.wavelength_nm + shift
+                dists = np.abs(peak_wls - wl_shifted)
+                best_idx = int(np.argmin(dists))
+                if dists[best_idx] <= delta_lambda:
+                    I_obs = peak_intensities[best_idx]
+                    if I_obs > 0:
+                        matched_pairs.append((t, I_obs))
+
+            if len(matched_pairs) < 2:
+                continue
+
+            # Find pair with largest E_k separation
+            best_T_local = None
+            best_dE = 0.0
+            for i in range(len(matched_pairs)):
+                for j in range(i + 1, len(matched_pairs)):
+                    t1, I1 = matched_pairs[i]
+                    t2, I2 = matched_pairs[j]
+                    dE = abs(t1.E_k_ev - t2.E_k_ev)
+                    if dE < 0.5:
+                        continue
+                    numer = I2 * t2.wavelength_nm * t1.g_k * t1.A_ki
+                    denom = I1 * t1.wavelength_nm * t2.g_k * t2.A_ki
+                    if denom <= 0 or numer <= 0:
+                        continue
+                    ln_ratio = math.log(numer / denom)
+                    if abs(ln_ratio) < 1e-10:
+                        continue
+                    T_K = -(t2.E_k_ev - t1.E_k_ev) / (KB_EV * ln_ratio)
+                    if self._T_ESTIMATE_MIN_K < T_K < self._T_ESTIMATE_MAX_K and dE > best_dE:
+                        best_T_local = T_K
+                        best_dE = dE
+
+            if best_T_local is not None:
+                self._estimated_T = float(best_T_local)
+                return
+
+        # Final fallback: use reference temperature instead of None
+        self._estimated_T = self.reference_temperature
 
     def _fast_screening(
         self,
@@ -876,9 +938,13 @@ class ALIASIdentifier:
                     matched_strength += strength
                     n_matched += 1
 
-            if n_matched >= 1 and total_strength > 0:
+            # Single-line exception: elements with ≤1 line in the window
+            # (e.g., Li I 670.8nm) need only 1 match to pass screening.
+            min_matches = 1 if len(top10) <= 1 else 2
+            if n_matched >= min_matches and total_strength > 0:
                 score = matched_strength / total_strength
-                element_scores.append((element, score, n_matched))
+                if score >= 0.3:
+                    element_scores.append((element, score, n_matched))
 
         # Sort by screening score, take top max_screening_candidates
         element_scores.sort(key=lambda x: x[1], reverse=True)
@@ -907,7 +973,7 @@ class ALIASIdentifier:
         """
         matched_indices = np.nonzero(matched_mask)[0]
         if len(matched_indices) < 3:
-            return 1.0  # Not enough lines to check, neutral
+            return 0.5  # Penalize — not enough lines for Boltzmann check
 
         E_k_vals = []
         y_vals = []
@@ -926,7 +992,7 @@ class ALIASIdentifier:
             y_vals.append(y)
 
         if len(E_k_vals) < 3:
-            return 1.0
+            return 0.5
 
         E_k_arr = np.array(E_k_vals)
         y_arr = np.array(y_vals)
@@ -1018,7 +1084,10 @@ class ALIASIdentifier:
         if T_estimated is not None:
             T_grid = np.array([T_estimated])
         else:
-            T_grid = self.T_grid_K
+            # Always use a single reference T — averaging over the full
+            # grid dilutes the reference vector and makes cosine similarity
+            # meaningless.
+            T_grid = np.array([self.reference_temperature])
 
         # Precompute stage densities for all (T, n_e) grid points
         grid_stage_densities = {}
@@ -1486,9 +1555,9 @@ class ALIASIdentifier:
                 k_sim = 0.0
         else:
             # Single matched line: cosine similarity undefined.
-            # Use neutral value so penalty comes from k_rate and P_cov,
-            # not an outright rejection via the k_sim >= 0.15 gate.
-            k_sim = 0.5
+            # Set to 0.0 — single-line elements are penalized via k_det
+            # blend (N_X=1 means k_sim is not used) and the N_penalty.
+            k_sim = 0.0
 
         # Uniqueness penalty: many-to-one mapping lowers k_sim
         n_unique_peaks = len(unique_peak_set)
@@ -1758,7 +1827,7 @@ class ALIASIdentifier:
         """
         matched_indices = np.where(matched_mask)[0]
         if len(matched_indices) < 3:
-            return 0.5  # Too few pairs for meaningful correlation
+            return 0.1  # Penalize — too few lines for meaningful ratio check
 
         # Apply self-absorption damping to resonance lines so theoretical
         # log-ratios better match observed ratios for strong transitions.
@@ -1951,6 +2020,11 @@ class ALIASIdentifier:
         else:
             k_det = 0.0
 
+        # Fix 4: N_expected penalty — elements with few expected lines
+        # get scaled down to prevent 2/3 matches from scoring high.
+        N_penalty = min(1.0, math.sqrt(N_expected / 5.0)) if N_expected > 0 else 0.0
+        k_det *= N_penalty
+
         P_SNR = self._compute_p_snr(intensity, peaks)
 
         # P_ab — crustal abundance prior
@@ -1958,8 +2032,12 @@ class ALIASIdentifier:
 
         # Confidence level — paper formula (Noel et al. 2025):
         # CL = k_det × P_SNR × P_maj × P_ab
-        # P_cov, N_penalty, P_sig are stored in metadata for diagnostics
-        # but no longer multiply into CL.  NNLS P_mix is applied later.
         CL = k_det * P_SNR * P_maj * P_ab
+
+        # Fix 2: Hard gate — reject if too few lines matched.
+        # Exception: elements with N_expected <= 1 (e.g., H-alpha, Na D)
+        # can detect on a single matched line.
+        if N_matched < 2 and N_expected >= 2:
+            CL = 0.0
 
         return k_det, CL
