@@ -92,7 +92,7 @@ def test_doppler_width():
     # FWHM ~ 2.355 * 0.023 ~ 0.054 nm
 
     dw = doppler_width(500.0, 1.0, 1.0)
-    assert 0.04 < dw < 0.07
+    assert 0.03 < dw < 0.07
 
 
 def test_jax_import():

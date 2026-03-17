@@ -145,7 +145,7 @@ class SpectralNNLSIdentifier:
         observed_resampled = np.interp(lib_wl, wavelength, corrected, left=0.0, right=0.0)
 
         # Area-normalize on the library grid to match basis library convention
-        area = np.trapz(observed_resampled, lib_wl)
+        area = np.trapezoid(observed_resampled, lib_wl)
         if area > 1e-20:
             observed_resampled = observed_resampled / area
 

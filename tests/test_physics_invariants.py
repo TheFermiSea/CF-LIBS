@@ -80,9 +80,9 @@ class TestBoltzmannLineRatio:
 
 
 class TestPathLengthScaling:
-    """In optically thin approximation, I = emissivity * L."""
+    """With self-absorption, I(2L) < 2 * I(L) for optically thick lines, but approaches 2*I(L) for thin lines."""
 
-    def test_double_path_doubles_intensity(self, atomic_db):
+    def test_path_length_self_absorption(self, atomic_db):
         plasma = SingleZoneLTEPlasma(T_e=10000.0, n_e=1e17, species={"Fe": 1e16})
         instrument = InstrumentModel(resolution_fwhm_nm=0.05)
         common = dict(
@@ -95,13 +95,16 @@ class TestPathLengthScaling:
         )
         _, I1 = SpectrumModel(**common, path_length_m=0.01).compute_spectrum()
         _, I2 = SpectrumModel(**common, path_length_m=0.02).compute_spectrum()
-        np.testing.assert_allclose(
-            I2,
-            2.0 * I1,
-            rtol=1e-9,
-            atol=1e-300,
-            err_msg="Intensity should scale linearly with path length",
-        )
+        
+        # Intensity must be monotonically increasing with length
+        assert np.all(I2 >= I1)
+        # Intensity must be bounded by optically thin limit (2 * I1)
+        # We add small tolerance for floating point issues on zero regions
+        assert np.all(I2 <= 2.0 * I1 + 1e-12)
+        # Check that self-absorption is actually occurring on strong lines
+        # where I2 is noticeably less than 2*I1
+        strong_lines = I1 > 0.1 * np.max(I1)
+        assert np.any(I2[strong_lines] < 1.95 * I1[strong_lines]), "Self-absorption not observed"
 
 
 class TestPartitionFunction:

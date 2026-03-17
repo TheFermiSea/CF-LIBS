@@ -20,6 +20,23 @@ from cflibs.core.logging_config import get_logger
 logger = get_logger("radiation.spectrum_model")
 
 
+from cflibs.core.constants import H_PLANCK, C_LIGHT, KB
+
+def planck_radiance(wavelength_nm: np.ndarray, T_eV: float) -> np.ndarray:
+    """
+    Calculate spectral radiance of a blackbody in W m^-2 nm^-1 sr^-1.
+    """
+    wl_m = wavelength_nm * 1e-9
+    T_K = T_eV * 11604.5250061598
+    
+    # B_lambda = (2hc^2 / lambda^5) / (exp(hc / (lambda k T)) - 1)
+    # Units: W m^-3 sr^-1. To get W m^-2 nm^-1 sr^-1, multiply by 1e-9.
+    exponent = (H_PLANCK * C_LIGHT) / (wl_m * KB * T_K)
+    exponent = np.clip(exponent, None, 700.0) # avoid overflow
+    
+    B_m3 = (2.0 * H_PLANCK * C_LIGHT**2 / (wl_m**5)) / (np.exp(exponent) - 1.0)
+    return B_m3 * 1e-9
+
 class SpectrumModel:
     """
     Forward model for computing synthetic LIBS spectra.
@@ -225,8 +242,21 @@ class SpectrumModel:
             all_transitions, populations, self.wavelength, sigma_nm, use_jax=self.use_jax
         )
 
-        # 4. Convert to intensity (optically thin: I = ε * L)
-        intensity = emissivity * self.path_length_m
+        # 4. Convert to intensity
+        # Use uniform-slab radiative transfer equation to account for self-absorption:
+        # I(lambda) = B(lambda, T) * (1 - exp(-kappa(lambda) * L))
+        # From Kirchhoff's law (LTE): epsilon = kappa * B
+        # Therefore kappa = epsilon / B
+        
+        # Calculate Planck blackbody radiance
+        B_lambda = planck_radiance(self.wavelength, self.plasma.T_e_eV)
+        
+        # Calculate absorption coefficient (kappa)
+        # Add small epsilon to B_lambda to prevent division by zero
+        kappa = emissivity / (B_lambda + 1e-100)
+        
+        # Radiative transfer equation using expm1 for numerical stability at low kappa
+        intensity = B_lambda * (-np.expm1(-kappa * self.path_length_m))
 
         # 5. Apply instrument response
         if self.instrument.response_curve is not None:

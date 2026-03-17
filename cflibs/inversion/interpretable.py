@@ -914,8 +914,9 @@ class SpectralExplainer:
         # Compute distances from original
         distances = np.sqrt(np.sum((perturbed - spectrum_2d[0]) ** 2, axis=1))
 
-        # Kernel weights
-        weights = np.exp(-(distances**2) / (kernel_width**2))
+        # Kernel weights (normalize distances to prevent float underflow)
+        dist_norm = distances / (np.max(distances) + 1e-10)
+        weights = np.exp(-(dist_norm**2) / (kernel_width**2))
 
         # Fit weighted linear model
         ridge = Ridge(alpha=1.0)

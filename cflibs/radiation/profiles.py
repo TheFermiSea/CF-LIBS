@@ -208,12 +208,10 @@ def doppler_width(wavelength_nm: float, T_eV: float, mass_amu: float) -> float:
     # Doppler FWHM = lambda * sqrt(8kT ln2 / mc^2)
     # sigma = FWHM / 2.355
     # T_eV is energy in eV. Convert to Joules: T_eV * EV_TO_J
-    # sigma = lambda/c * sqrt(2 * E / m) ???
     # Standard Gaussian sigma for Doppler is lambda/c * sqrt(kT/m).
-    # Roadmap asked for sqrt(2kT/mc^2). This corresponds to v_most_probable.
-    # Let's use T_eV * EV_TO_J for kT.
-
-    sigma = wavelength_nm * np.sqrt(2 * (T_eV * EV_TO_J) / (mass_kg * C_LIGHT**2))
+    # Note: Removed the spurious factor of 2 that computed v_most_probable
+    # instead of the standard deviation of the Maxwell-Boltzmann distribution.
+    sigma = wavelength_nm * np.sqrt((T_eV * EV_TO_J) / (mass_kg * C_LIGHT**2))
     fwhm = 2.355 * sigma
 
     return fwhm
@@ -285,8 +283,14 @@ def voigt_profile(
         ratio = fL / fV
         eta = 1.36603 * ratio - 0.47719 * ratio**2 + 0.11116 * ratio**3
 
-        G = gaussian_profile(wavelength, center, sigma, amplitude)
-        L = lorentzian_profile(wavelength, center, gamma, amplitude)
+        # Convert the combined fV back into effective Gaussian and Lorentzian
+        # widths before passing them into the respective profile functions to
+        # avoid distorted shapes.
+        sigma_pV = fV / 2.35482
+        gamma_pV = fV / 2.0
+
+        G = gaussian_profile(wavelength, center, sigma_pV, amplitude)
+        L = lorentzian_profile(wavelength, center, gamma_pV, amplitude)
         return eta * L + (1 - eta) * G
 
 
@@ -744,9 +748,11 @@ if HAS_JAX:
         """
         mass_kg = mass_amu * M_PROTON
 
-        # sigma = lambda/c * sqrt(2 * kT / m)
+        # sigma = lambda/c * sqrt(kT / m)
         # T_eV * EV_TO_J gives energy in Joules
-        sigma = wavelength_nm * jnp.sqrt(2.0 * T_eV * EV_TO_J / (mass_kg * C_LIGHT**2))
+        # Note: Removed the spurious factor of 2 that computed v_most_probable
+        # instead of the standard deviation of the Maxwell-Boltzmann distribution.
+        sigma = wavelength_nm * jnp.sqrt(T_eV * EV_TO_J / (mass_kg * C_LIGHT**2))
         return sigma
 
     def _vmap_profile(

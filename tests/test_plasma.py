@@ -352,14 +352,24 @@ def test_three_stage_ionization_coupling(atomic_db):
     import numpy as np
     from cflibs.core.constants import SAHA_CONST_CM3
 
-    U_I = solver.calculate_partition_function("Fe", 1, T_eV)
-    U_II = solver.calculate_partition_function("Fe", 2, T_eV)
-    U_III = solver.calculate_partition_function("Fe", 3, T_eV)
     ip_I = atomic_db.get_ionization_potential("Fe", 1)
     ip_II = atomic_db.get_ionization_potential("Fe", 2)
 
-    S1 = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_eV)
-    S2 = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_III / U_II) * np.exp(-ip_II / T_eV)
+    from cflibs.plasma.saha_boltzmann import ionization_potential_lowering
+    from cflibs.core.constants import EV_TO_K
+    T_K = T_eV * EV_TO_K
+    delta_chi = ionization_potential_lowering(n_e, T_K)
+    eff_ip_I = max(ip_I - delta_chi, 0.0)
+    eff_ip_II = max(ip_II - delta_chi, 0.0)
+
+    U_I = solver.calculate_partition_function("Fe", 1, T_eV, max_energy_ev=eff_ip_I)
+    U_II = solver.calculate_partition_function("Fe", 2, T_eV, max_energy_ev=eff_ip_II)
+    ip_III = atomic_db.get_ionization_potential("Fe", 3)
+    eff_ip_III = max(ip_III - delta_chi, 0.0) if ip_III is not None else None
+    U_III = solver.calculate_partition_function("Fe", 3, T_eV, max_energy_ev=eff_ip_III)
+
+    S1 = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_II / U_I) * np.exp(-eff_ip_I / T_eV)
+    S2 = (SAHA_CONST_CM3 / n_e) * (T_eV**1.5) * (U_III / U_II) * np.exp(-eff_ip_II / T_eV)
 
     # Verify n_I = n_total / (1 + S1 + S1*S2)
     expected_n_I = n_total / (1.0 + S1 + S1 * S2)

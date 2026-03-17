@@ -33,11 +33,14 @@ def stark_hwhm(
     stark_w_ref: Optional[float],
     stark_alpha: Optional[float] = None,
     ref_T_K: float = 10000.0,
+    stark_A_ref: Optional[float] = None,
 ) -> float:
     """
     Calculate Stark Half-Width at Half-Maximum (HWHM).
+    Includes optional quasi-static ion-broadening correction based on Griem's theory.
 
-    w = w_ref * (n_e / 10^16) * (T / T_ref)^(-alpha)
+    w_electron = w_ref * (n_e / 10^16) * (T / T_ref)^(-alpha)
+    w_total = w_electron * (1 + 1.75 * A_ion * (1 - 0.75 * R_D))
 
     Parameters
     ----------
@@ -48,9 +51,11 @@ def stark_hwhm(
     stark_w_ref : float
         Stark width parameter (HWHM) at 10^16 cm^-3
     stark_alpha : float
-        Scaling exponent (default 0.5 if None)
+        Scaling exponent (default 0.5 if None, represents T^(-1/2))
     ref_T_K : float
         Reference temperature
+    stark_A_ref : float, optional
+        Ion-broadening parameter at 10^16 cm^-3
 
     Returns
     -------
@@ -65,8 +70,20 @@ def stark_hwhm(
     # Use max(T, 1000) to avoid division by zero or extreme scaling
     T_eff = max(T_K, 1000.0)
 
-    width = stark_w_ref * (n_e_cm3 / REF_NE) * (T_eff / ref_T_K) ** (-alpha)
-    return width
+    # Electron impact width
+    w_e = stark_w_ref * (n_e_cm3 / REF_NE) * (T_eff / ref_T_K) ** (-alpha)
+
+    if stark_A_ref is None or stark_A_ref <= 0:
+        return w_e
+
+    # Ion broadening correction
+    A_ion = stark_A_ref * (n_e_cm3 / REF_NE)**0.25
+    # For a typical LIBS plasma, the Debye shielding parameter R_D is ~0.5.
+    # A full calculation requires Debye length, but 0.5 is a common approximation.
+    R_D = 0.5
+    correction = 1.0 + 1.75 * A_ion * (1.0 - 0.75 * R_D)
+
+    return w_e * correction
 
 
 def stark_width(
@@ -75,9 +92,10 @@ def stark_width(
     stark_w_ref: Optional[float],
     stark_alpha: Optional[float] = None,
     ref_T_K: float = 10000.0,
+    stark_A_ref: Optional[float] = None,
 ) -> float:
     """Calculate Stark Full-Width at Half-Maximum (FWHM)."""
-    hwhm = stark_hwhm(n_e_cm3, T_K, stark_w_ref, stark_alpha, ref_T_K)
+    hwhm = stark_hwhm(n_e_cm3, T_K, stark_w_ref, stark_alpha, ref_T_K, stark_A_ref)
     return 2.0 * hwhm
 
 
@@ -205,10 +223,10 @@ if HAS_JAX:
 
     @jit
     def stark_hwhm_jax(
-        n_e_cm3: float, T_eV: float, stark_w_ref: float, stark_alpha: float
+        n_e_cm3: float, T_eV: float, stark_w_ref: float, stark_alpha: float, stark_A_ref: float = 0.0
     ) -> float:
         """
-        JAX-compatible Stark HWHM calculation.
+        JAX-compatible Stark HWHM calculation with ion broadening correction.
 
         Parameters
         ----------
@@ -220,6 +238,8 @@ if HAS_JAX:
             Ref HWHM at 1e16 cm^-3
         stark_alpha : float
             Scaling exponent
+        stark_A_ref : float
+            Ion-broadening parameter at 10^16 cm^-3
 
         Returns
         -------
@@ -232,11 +252,18 @@ if HAS_JAX:
         # Safe defaults
         w_ref = jnp.nan_to_num(stark_w_ref, nan=0.0)
         alpha = jnp.nan_to_num(stark_alpha, nan=0.5)
+        A_ref = jnp.nan_to_num(stark_A_ref, nan=0.0)
 
         factor_ne = n_e_cm3 / 1.0e16
         factor_T = jnp.power(jnp.maximum(T_eV, 0.1) / REF_T_EV, -alpha)
 
-        return w_ref * factor_ne * factor_T
+        w_e = w_ref * factor_ne * factor_T
+
+        A_ion = A_ref * jnp.power(factor_ne, 0.25)
+        R_D = 0.5
+        correction = 1.0 + 1.75 * A_ion * (1.0 - 0.75 * R_D)
+
+        return w_e * correction
 
     @jit
     def estimate_stark_parameter_jax(

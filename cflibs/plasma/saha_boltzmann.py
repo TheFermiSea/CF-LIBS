@@ -68,14 +68,23 @@ class SahaBoltzmannSolver(SolverStrategy):
             logger.warning(f"No ionization potential for {element} I, assuming neutral only")
             return {1: total_density_cm3}
 
+        # Calculate Ionization Potential Depression (IPD)
+        # In high-density LIBS plasmas, IPD lowers the effective ionization energy.
+        T_K = T_e_eV * EV_TO_K
+        delta_chi = ionization_potential_lowering(n_e_cm3, T_K)
+        
+        eff_ip_I = max(ip_I - delta_chi, 0.0)
+
         # Saha equation: n_{z+1} * n_e / n_z = const * T^1.5 * (U_{z+1}/U_z) * exp(-IP/kT)
         # For neutral to singly ionized:
         # n_II * n_e / n_I = SAHA_CONST * T^1.5 * (U_II/U_I) * exp(-IP_I/kT)
 
-        U_I = self.calculate_partition_function(element, 1, T_e_eV)
-        U_II = self.calculate_partition_function(element, 2, T_e_eV)
+        U_I = self.calculate_partition_function(element, 1, T_e_eV, max_energy_ev=eff_ip_I)
+        
+        eff_ip_II = max(ip_II - delta_chi, 0.0) if ip_II is not None else None
+        U_II = self.calculate_partition_function(element, 2, T_e_eV, max_energy_ev=eff_ip_II)
 
-        S1 = (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-ip_I / T_e_eV)
+        S1 = (SAHA_CONST_CM3 / n_e_cm3) * (T_e_eV**1.5) * (U_II / U_I) * np.exp(-eff_ip_I / T_e_eV)
 
         # Solve the coupled system:
         #   n_II / n_I = S1
@@ -88,12 +97,14 @@ class SahaBoltzmannSolver(SolverStrategy):
 
         S2 = 0.0
         if ip_II is not None:
-            U_III = self.calculate_partition_function(element, 3, T_e_eV)
+            ip_III = self.atomic_db.get_ionization_potential(element, 3)
+            eff_ip_III = max(ip_III - delta_chi, 0.0) if ip_III is not None else None
+            U_III = self.calculate_partition_function(element, 3, T_e_eV, max_energy_ev=eff_ip_III)
             S2 = (
                 (SAHA_CONST_CM3 / n_e_cm3)
                 * (T_e_eV**1.5)
                 * (U_III / U_II)
-                * np.exp(-ip_II / T_e_eV)
+                * np.exp(-eff_ip_II / T_e_eV)
             )
 
         denom = 1.0 + S1 + S1 * S2
@@ -219,7 +230,7 @@ class SahaBoltzmannSolver(SolverStrategy):
         return {stage: n / total for stage, n in stage_densities.items()}
 
     def solve_level_population(
-        self, element: str, ionization_stage: int, stage_density_cm3: float, T_e_eV: float
+        self, element: str, ionization_stage: int, stage_density_cm3: float, T_e_eV: float, n_e_cm3: float = None
     ) -> Dict[Tuple[str, int, float], float]:
         """
         Solve Boltzmann distribution for level populations.
@@ -234,17 +245,31 @@ class SahaBoltzmannSolver(SolverStrategy):
             Total density of this ionization stage in cm^-3
         T_e_eV : float
             Electron temperature in eV
+        n_e_cm3 : float, optional
+            Electron density in cm^-3 (used to compute IPD cutoff)
 
         Returns
         -------
         Dict[Tuple[str, int, float], float]
             Dictionary mapping (element, stage, energy_ev) to population density
         """
-        U = self.calculate_partition_function(element, ionization_stage, T_e_eV)
+        # Determine max energy based on IPD if electron density is provided
+        ip = self.atomic_db.get_ionization_potential(element, ionization_stage)
+        if n_e_cm3 is not None and ip is not None:
+            T_K = T_e_eV * EV_TO_K
+            delta_chi = ionization_potential_lowering(n_e_cm3, T_K)
+            max_energy_ev = max(ip - delta_chi, 0.0)
+        else:
+            max_energy_ev = ip * 0.98 if ip else 50.0
+
+        U = self.calculate_partition_function(element, ionization_stage, T_e_eV, max_energy_ev=max_energy_ev)
         levels = self.atomic_db.get_energy_levels(element, ionization_stage)
 
         populations = {}
         for level in levels:
+            # Exclude levels above the lowered IP as they merged into the continuum
+            if level.energy_ev > max_energy_ev:
+                continue
             # Boltzmann: n_i = n_total * (g_i / U) * exp(-E_i / kT)
             n_i = stage_density_cm3 * (level.g / U) * np.exp(-level.energy_ev / T_e_eV)
             key = (element, ionization_stage, level.energy_ev)
@@ -278,7 +303,7 @@ class SahaBoltzmannSolver(SolverStrategy):
             # Solve level populations for each stage
             for stage, stage_density in stage_densities.items():
                 if stage_density > 0:
-                    populations = self.solve_level_population(element, stage, stage_density, T_e_eV)
+                    populations = self.solve_level_population(element, stage, stage_density, T_e_eV, n_e_cm3)
                     all_populations.update(populations)
 
         logger.debug(f"Solved Saha-Boltzmann for {len(plasma.species)} species")
