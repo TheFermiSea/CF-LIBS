@@ -20,7 +20,9 @@ A critical prerequisite for CF-LIBS analysis is the identification of which elem
 
 The Mars LIBS instruments illustrate the state of the art. ChemCam and SuperCam employ multivariate regression (PLS, ICA) trained on libraries of hundreds of geological standards, achieving robust quantification of eight major elements [5], [7], [9]. However, these approaches require large calibration databases and are limited to the compositional space covered by the training set. A calibration-free identifier that works reliably at low RP would enable analysis of truly unknown samples.
 
-In this work, we evaluate five distinct algorithmic pathways for element identification on 74 mineral and elemental LIBS spectra at RP = 300–1100. Our goals are to determine which approach maximizes identification precision while maintaining adequate recall, and to establish quantitative performance baselines for future CF-LIBS pipeline design.
+Recent work has begun to address this gap. Jahoda *et al.* [25] benchmarked multi-method mineral classification using CNN for Raman and cosine similarity for LIBS on the RRUFF and NIST databases, finding that static LIBS peak-matching achieved only 6.44% mineral identification accuracy — a result that validates the fundamental limitations of template-based approaches without temperature adaptation. Zeng *et al.* [26] proposed a hybrid SVM + peak-seeking algorithm for metal element identification on simulated alloy LIBS spectra, achieving 74.5% accuracy for general elements — a significant improvement over standalone SVM (8%) but still below the threshold for reliable CF-LIBS analysis. For quantitative analysis, ensemble CNNs have achieved RMSE 54% lower than PLS on the ChemCam calibration dataset [27], while SVM-PLSR sub-models reduce RMSEP by 34.8–62.4% across eight oxides [28]. Janovszky *et al.* [29] demonstrated >92% mineral classification accuracy using random forests and LDA on granitoid rocks at RP ~1000. However, no published study systematically benchmarks element *identification* (as opposed to classification or quantification) at RP < 1000 with precision, recall, and F₁ metrics.
+
+In this work, we evaluate five distinct algorithmic pathways for element identification on 74 mineral and elemental LIBS spectra at RP = 300–1100. Our goals are to determine which approach maximizes identification precision while maintaining adequate recall, and to establish quantitative performance baselines that enable direct comparison with published methods across the resolving power spectrum.
 
 ---
 
@@ -215,7 +217,25 @@ MarSCoDe (RP ≈ 500–700) operates at resolving power comparable to our benchm
 
 Manganese and sodium represent the dominant failure mode across all algorithms. **Mn**: With > 500 transitions in 200–900 nm, any sample with ≥ 5 detected peaks will have Mn "matches" at RP < 1000. The false positive rate is determined by peak count, not Mn presence. **Na**: The D-lines (589.0/589.6 nm) are ubiquitous contaminants, and Na's sparse line list means a single chance match suffices for detection. Both elements require RP-dependent treatment: exclusion from blind search or contaminant flagging at RP < 1000.
 
-### D. Prospects for Machine Learning Enhancement
+### D. Comparison with Published Literature
+
+**TABLE VIII.** Our results in the context of published LIBS element identification and classification benchmarks.
+
+| Method | Dataset | RP | Metric | Value | Ref. |
+|--------|---------|-----|--------|-------|------|
+| Cosine similarity (NIST) | Synthetic minerals | varies | Mineral accuracy | 6.44% | [25] |
+| Hybrid SVM + peak-seeking | Simulated alloys (31 el) | N/A | General el. accuracy | 74.5% | [26] |
+| PLS sub-model | ChemCam (408 stds) | 2000–4000 | RMSEP (SiO₂) | ±5.30 wt% | [7] |
+| SVM-PLSR blended | ChemCam | 2000–4000 | RMSEP reduction | 34.8–62.4% | [28] |
+| ECNN end-to-end | ChemCam | 2000–4000 | RMSE vs. PLS | −54% | [27] |
+| CC-BCD CNN | MarSCoDe | 500–700 | Accuracy | 92.06% | [30] |
+| RF + LDA | Granitoid minerals | ~1000 | Classification acc. | >92% | [29] |
+| ALIAS peak-matching | Aalto (74 spectra) | 300–1100 | P / R / F₁ | 0.505 / 0.629 / 0.560 | This work |
+| **Hybrid NNLS+ALIAS (∩)** | **Aalto (74 spectra)** | **300–1100** | **P / R / F₁** | **0.604 / 0.713 / 0.654** | **This work** |
+
+Several key observations emerge from this comparison. First, our hybrid NNLS+ALIAS result (*P* = 0.604) represents the first published precision/recall benchmark for blind element identification at RP < 1000 — all prior work at comparable resolving powers reports either classification accuracy (which conflates true negatives) or quantitative RMSEP (which assumes elements are already known). Second, Zeng *et al.*'s hybrid SVM + peak-seeking approach [26] is the closest methodological analog to our work, but their 74.5% accuracy was achieved on *simulated* alloy spectra with known element counts, whereas our benchmark uses *real* mineral spectra with variable compositions. Third, the Jahoda *et al.* [25] finding that static cosine similarity achieves only 6.44% on minerals confirms that temperature-adaptive reference spectra (as used in our NNLS basis library) are essential for identification at any resolving power.
+
+### E. Prospects for Machine Learning Enhancement
 
 The per-element precision/recall trade-offs suggest that simple threshold rules (SNR, CL, concentration) are suboptimal decision boundaries. The hybrid identifier naturally produces a rich feature vector per element: NNLS coefficient, NNLS SNR, ALIAS confidence level, ALIAS match count, Boltzmann *R*², and spectral residual norm. These features could train an element-specific classifier (e.g., SVM, random forest, or gradient-boosted trees) to learn nonlinear decision boundaries that adapt to each element's spectral characteristics.
 
@@ -343,3 +363,15 @@ Basis library generation: 244 s for 76 elements × 300 grid points × 4096 pixel
 [23] K. Shameem, K. S. Choudhari, A. Bankapur *et al.*, "A hybrid LIBS-Raman system combined with chemometrics: An efficient tool for plastic identification and sorting," *Anal. Bioanal. Chem.*, vol. 409, pp. 3299–3308, 2017.
 
 [24] V. Palleschi, S. Legnaioli, F. Poggialini *et al.*, "Laser-induced breakdown spectroscopy," *Nature Reviews Methods Primers*, vol. 5, 2025.
+
+[25] P. Jahoda, I. Drozdovskiy, S. Payler, L. Turchi, L. Bessone, and F. Sauro, "Machine learning for recognizing minerals from multispectral data," *Analyst*, vol. 145, pp. 6726–6737, 2020. DOI: 10.1039/d0an01483d.
+
+[26] H. Zeng, Z. Zhang, and S. Liu, "A hybrid approach for metal element identification by using laser-induced breakdown spectroscopy data," in *Proc. SPIE ESIT 2022*, vol. 12505, p. 1250527, 2023. DOI: 10.1117/12.2664527.
+
+[27] Y. Yu and M. Yao, "When convolutional neural networks meet laser-induced breakdown spectroscopy: End-to-end quantitative analysis modeling of ChemCam spectral data," *Remote Sensing*, vol. 15, no. 13, p. 3422, 2023. DOI: 10.3390/rs15133422.
+
+[28] R. B. Anderson, S. M. Clegg, J. Frydenvang *et al.*, "Improved accuracy in quantitative laser-induced breakdown spectroscopy using sub-models," *Spectrochim. Acta Part B*, vol. 129, pp. 49–57, 2017. DOI: 10.1016/j.sab.2016.12.002.
+
+[29] P. Janovszky, K. Jancsek, D. J. Palásti *et al.*, "Classification of minerals and the assessment of lithium and beryllium content in granitoid rocks by laser-induced breakdown spectroscopy," *J. Anal. At. Spectrom.*, vol. 36, pp. 813–823, 2021. DOI: 10.1039/D1JA00032B.
+
+[30] S. Qu, J. Shen, L. Li *et al.*, "An inclusive library for quantitative analysis of the laser-induced breakdown spectra acquired by the Zhurong Mars rover," *Astrophys. J.*, 2025. DOI: 10.3847/1538-4357/ae14ef.
