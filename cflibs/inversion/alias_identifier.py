@@ -557,7 +557,13 @@ class ALIASIdentifier:
             if not nnls_sig and self.resolving_power < 2000:
                 CL = 0.0
 
-            detected = CL >= self.detection_threshold
+            # Adaptive detection threshold: elements with few expected
+            # lines have higher false-match rates at low RP and need a
+            # proportionally higher CL to be considered detected.
+            adaptive_dt = self.detection_threshold
+            if N_expected > 0 and N_expected < 10:
+                adaptive_dt *= min(3.0, math.sqrt(10.0 / N_expected))
+            detected = CL >= adaptive_dt
 
             # Create IdentifiedLine objects for matched lines
             # Reuse peak indices from matching to avoid re-selection outside window
