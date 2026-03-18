@@ -232,6 +232,34 @@ def _load_aalto_csv(path: str) -> Tuple[np.ndarray, np.ndarray]:
     return data[:, 0], data[:, 1]
 
 
+def _estimate_effective_rp(wavelength: np.ndarray, spectrum: np.ndarray) -> float:
+    """Estimate effective resolving power from isolated peak FWHM measurements."""
+    from scipy.signal import find_peaks
+
+    threshold = np.percentile(spectrum[spectrum > 0], 85) if np.any(spectrum > 0) else 0
+    peaks, _ = find_peaks(spectrum, height=threshold, distance=10, prominence=threshold * 0.3)
+    if len(peaks) < 3:
+        return 1000.0  # conservative fallback
+
+    fwhm_rps = []
+    for p in peaks:
+        half_max = spectrum[p] / 2
+        left = p
+        while left > 0 and spectrum[left] > half_max:
+            left -= 1
+        right = p
+        while right < len(spectrum) - 1 and spectrum[right] > half_max:
+            right += 1
+        fwhm = wavelength[right] - wavelength[left]
+        if 0.05 < fwhm < 3.0 and wavelength[p] > 0:
+            fwhm_rps.append(wavelength[p] / fwhm)
+
+    if len(fwhm_rps) < 3:
+        return 1000.0
+    # Use median to be robust to blended peaks
+    return float(np.clip(np.median(fwhm_rps), 300.0, 20000.0))
+
+
 def _select_aalto_cases(data_dir: Path) -> List[DatasetCase]:
     """Build benchmark cases from Aalto LIBS element and mineral spectra."""
     aalto_dir = data_dir / "aalto_libs"
@@ -258,7 +286,7 @@ def _select_aalto_cases(data_dir: Path) -> List[DatasetCase]:
                     path=csv_path,
                     elements=AALTO_SEARCH_ELEMENTS,
                     expected={element},
-                    resolving_power=600.0,
+                    resolving_power=_estimate_effective_rp(wl, sp),
                     wavelength=wl,
                     spectrum=sp,
                 )
@@ -294,7 +322,7 @@ def _select_aalto_cases(data_dir: Path) -> List[DatasetCase]:
                     path=csv_path,
                     elements=AALTO_SEARCH_ELEMENTS,
                     expected=expected,
-                    resolving_power=600.0,
+                    resolving_power=_estimate_effective_rp(wl, sp),
                     wavelength=wl,
                     spectrum=sp,
                 )
