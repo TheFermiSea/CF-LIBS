@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """
-Benchmark CF-LIBS against validated Aalto University LIBS spectral library.
+Legacy/reference benchmark against the Aalto University LIBS spectral library.
+
+This script is preserved for compatibility and ad hoc comparisons, but the
+unified benchmark runner is the current authoritative workflow for reporting.
 
 Uses 74 real LIBS spectra (13 pure elements + 61 minerals) from
 https://users.aalto.fi/~lainei1/pages/elements/
@@ -513,11 +516,18 @@ def evaluate_element_id(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Aalto LIBS benchmark")
+    parser = argparse.ArgumentParser(
+        description="Legacy/reference Aalto LIBS benchmark (superseded by the unified benchmark)."
+    )
     parser.add_argument("--db", default="libs_production.db")
     parser.add_argument("--data-dir", default="data/aalto_libs")
     parser.add_argument("--output-dir", default="output/aalto_benchmark")
     args = parser.parse_args()
+
+    print(
+        "NOTE: This is a legacy/reference benchmark script. "
+        "Use the unified benchmark runner for current reporting."
+    )
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

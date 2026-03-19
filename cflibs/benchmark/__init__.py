@@ -46,39 +46,16 @@ References
 - NIST Standard Reference Materials program
 """
 
-from cflibs.benchmark.dataset import (
-    BenchmarkSpectrum,
-    InstrumentalConditions,
-    SampleMetadata,
-    BenchmarkDataset,
-    DataSplit,
-)
+from importlib import import_module
 
-from cflibs.benchmark.metrics import (
-    BenchmarkMetrics,
-    EvaluationResult,
-    ElementMetrics,
-    MetricType,
-)
-
-from cflibs.benchmark.synthetic import (
-    SyntheticBenchmarkGenerator,
-    CompositionRange,
-    ConditionVariation,
-)
-from cflibs.benchmark.synthetic_corpus import (
-    CorpusRecipe,
-    PerturbationAxes,
-    build_synthetic_id_corpus,
-    default_axes,
-    default_recipes,
-)
-
-from cflibs.benchmark.loaders import (
-    load_benchmark,
-    save_benchmark,
-    BenchmarkFormat,
-)
+_LAZY_SYNTHETIC_EXPORTS = {"CalibrationOptions", "compute_binary_metrics", "run_synthetic_benchmark"}
+_LAZY_UNIFIED_EXPORTS = {
+    "UnifiedBenchmarkContext",
+    "UnifiedBenchmarkRunner",
+    "build_composition_workflow_registry",
+    "build_id_workflow_registry",
+    "load_default_datasets",
+}
 
 __all__ = [
     # Core data structures
@@ -101,6 +78,11 @@ __all__ = [
     "build_synthetic_id_corpus",
     "default_axes",
     "default_recipes",
+    "UnifiedBenchmarkContext",
+    "UnifiedBenchmarkRunner",
+    "build_composition_workflow_registry",
+    "build_id_workflow_registry",
+    "load_default_datasets",
     "CalibrationOptions",
     "compute_binary_metrics",
     "run_synthetic_benchmark",
@@ -110,13 +92,48 @@ __all__ = [
     "BenchmarkFormat",
 ]
 
+_MODULE_EXPORTS = {
+    "BenchmarkSpectrum": ("cflibs.benchmark.dataset", "BenchmarkSpectrum"),
+    "InstrumentalConditions": ("cflibs.benchmark.dataset", "InstrumentalConditions"),
+    "SampleMetadata": ("cflibs.benchmark.dataset", "SampleMetadata"),
+    "BenchmarkDataset": ("cflibs.benchmark.dataset", "BenchmarkDataset"),
+    "DataSplit": ("cflibs.benchmark.dataset", "DataSplit"),
+    "BenchmarkMetrics": ("cflibs.benchmark.metrics", "BenchmarkMetrics"),
+    "EvaluationResult": ("cflibs.benchmark.metrics", "EvaluationResult"),
+    "ElementMetrics": ("cflibs.benchmark.metrics", "ElementMetrics"),
+    "MetricType": ("cflibs.benchmark.metrics", "MetricType"),
+    "SyntheticBenchmarkGenerator": ("cflibs.benchmark.synthetic", "SyntheticBenchmarkGenerator"),
+    "CompositionRange": ("cflibs.benchmark.synthetic", "CompositionRange"),
+    "ConditionVariation": ("cflibs.benchmark.synthetic", "ConditionVariation"),
+    "CorpusRecipe": ("cflibs.benchmark.synthetic_corpus", "CorpusRecipe"),
+    "PerturbationAxes": ("cflibs.benchmark.synthetic_corpus", "PerturbationAxes"),
+    "build_synthetic_id_corpus": ("cflibs.benchmark.synthetic_corpus", "build_synthetic_id_corpus"),
+    "default_axes": ("cflibs.benchmark.synthetic_corpus", "default_axes"),
+    "default_recipes": ("cflibs.benchmark.synthetic_corpus", "default_recipes"),
+    "load_benchmark": ("cflibs.benchmark.loaders", "load_benchmark"),
+    "save_benchmark": ("cflibs.benchmark.loaders", "save_benchmark"),
+    "BenchmarkFormat": ("cflibs.benchmark.loaders", "BenchmarkFormat"),
+}
+
 
 def __getattr__(name: str):
-    """Lazy-load heavy synthetic benchmark evaluation helpers."""
-    if name in {"CalibrationOptions", "compute_binary_metrics", "run_synthetic_benchmark"}:
-        from cflibs.benchmark import synthetic_eval as _synthetic_eval
+    """Lazy-load benchmark exports so lightweight submodules remain importable."""
+    if name in _MODULE_EXPORTS:
+        module_name, attr_name = _MODULE_EXPORTS[name]
+        module = import_module(module_name)
+        value = getattr(module, attr_name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_SYNTHETIC_EXPORTS:
+        module = import_module("cflibs.benchmark.synthetic_eval")
 
-        value = getattr(_synthetic_eval, name)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_UNIFIED_EXPORTS:
+        module = import_module("cflibs.benchmark.unified")
+
+        value = getattr(module, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
