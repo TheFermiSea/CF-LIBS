@@ -68,7 +68,7 @@ For each element and grid point (*T*, *nₑ*), the ionization balance is solved 
 
 #### 1) ALIAS Peak-Matching (Baseline)
 
-The ALIAS algorithm [8] identifies elements by matching detected experimental peaks against theoretical line positions. For each candidate element, the algorithm: (i) detects peaks via second-derivative enhancement; (ii) auto-calibrates the wavelength axis; (iii) estimates plasma temperature from Boltzmann plot fitting; (iv) screens elements by strength-weighted match rate; and (v) scores each element by an independent confidence level (CL) combining match quality, Boltzmann consistency, and statistical significance against chance coincidence. An element is detected if its CL exceeds the detection threshold. Swept parameters: detection threshold ∈ {0.02, 0.03, 0.05}, intensity threshold factor ∈ {3.0, 3.5}, chance window scale ∈ {0.3, 0.4}.
+The ALIAS (Automatic Line Identification and Spectral Analysis) algorithm [8], [31] identifies elements by matching detected experimental peaks against theoretical line positions. For each candidate element, the algorithm: (i) detects peaks via second-derivative enhancement; (ii) auto-calibrates the wavelength axis; (iii) estimates plasma temperature from Boltzmann plot fitting; (iv) screens elements by strength-weighted match rate; and (v) scores each element by an independent confidence level (CL) combining match quality, Boltzmann consistency, and statistical significance against chance coincidence. An element is detected if its CL exceeds the detection threshold. Swept parameters: detection threshold ∈ {0.02, 0.03, 0.05}, intensity threshold factor ∈ {3.0, 3.5}, chance window scale ∈ {0.3, 0.4}.
 
 #### 2) Full-Spectrum NNLS Decomposition
 
@@ -235,7 +235,21 @@ Manganese and sodium represent the dominant failure mode across all algorithms. 
 
 Several key observations emerge from this comparison. First, our hybrid NNLS+ALIAS result (*P* = 0.604) represents the first published precision/recall benchmark for blind element identification at RP < 1000 — all prior work at comparable resolving powers reports either classification accuracy (which conflates true negatives) or quantitative RMSEP (which assumes elements are already known). Second, Zeng *et al.*'s hybrid SVM + peak-seeking approach [26] is the closest methodological analog to our work, but their 74.5% accuracy was achieved on *simulated* alloy spectra with known element counts, whereas our benchmark uses *real* mineral spectra with variable compositions. Third, the Jahoda *et al.* [25] finding that static cosine similarity achieves only 6.44% on minerals confirms that temperature-adaptive reference spectra (as used in our NNLS basis library) are essential for identification at any resolving power.
 
-### E. Prospects for Machine Learning Enhancement
+### E. Limitations and Planned Expansions
+
+Several limitations of this preliminary study must be acknowledged:
+
+**Statistical limitations**: All metrics reported here are single-pass point estimates without cross-validation or confidence intervals. With *N* = 74 spectra, some elements have only 1–3 positive examples (Mo: 1, Co: 1, Zr: 0 detected), rendering per-element precision estimates unreliable for rare elements. The planned HPC expansion addresses this by: (i) expanding to >1000 spectra from ChemCam PDS (408 standards, RP 2000–4000), SuperCam PDS (334 samples, RP 2500), MarSCoDe (322 samples, RP 500–700), and PTAL (102 samples); (ii) implementing LOOCV for the Aalto dataset (*N* = 74) and 5-fold stratified CV for larger datasets; (iii) computing bootstrap 95% CIs (10,000 resamples) for all metrics; (iv) applying McNemar pairwise tests and Friedman omnibus tests with Nemenyi post-hoc analysis for multi-algorithm comparison.
+
+**Basis library mismatch**: The current basis library uses a single FWHM = 0.5 nm, corresponding to RP ≈ 1000. For the lowest-RP spectra (RP ≈ 300, FWHM ≈ 1.7 nm), the basis spectra are over-resolved relative to the data, potentially biasing the NNLS decomposition. The HPC campaign generates basis libraries at 8 FWHM values (0.05–1.67 nm, RP 300–10000) and selects the resolution-matched library for each spectrum.
+
+**Self-absorption effects**: Resonance lines such as Na D (589.0/589.6 nm) and Ca II (393.4/396.8 nm) are likely optically thick in many mineral targets [17], [18]. Self-absorbed lines produce distorted profiles that deviate from the optically thin assumption underlying both ALIAS peak-matching and NNLS basis spectra. The persistent Na and Ca false-positive/false-negative patterns in our results are likely exacerbated by self-absorption effects not currently modeled.
+
+**Single-instrument scope**: All spectra originate from a single Aalto University spectrometer. Cross-instrument validation using MarSCoDe data (RP ≈ 500–700, comparable to Aalto) and ChemCam data (RP ≈ 2000–4000) is essential to demonstrate generalizability.
+
+**Downstream validation**: This study evaluates element *identification* in isolation. Whether improved identification precision translates to improved CF-LIBS *concentration* accuracy requires end-to-end validation through the Boltzmann plot and closure equation pipeline — planned as part of the HPC expansion.
+
+### F. Prospects for Machine Learning Enhancement
 
 The per-element precision/recall trade-offs suggest that simple threshold rules (SNR, CL, concentration) are suboptimal decision boundaries. The hybrid identifier naturally produces a rich feature vector per element: NNLS coefficient, NNLS SNR, ALIAS confidence level, ALIAS match count, Boltzmann *R*², and spectral residual norm. These features could train an element-specific classifier (e.g., SVM, random forest, or gradient-boosted trees) to learn nonlinear decision boundaries that adapt to each element's spectral characteristics.
 
@@ -375,3 +389,11 @@ Basis library generation: 244 s for 76 elements × 300 grid points × 4096 pixel
 [29] P. Janovszky, K. Jancsek, D. J. Palásti *et al.*, "Classification of minerals and the assessment of lithium and beryllium content in granitoid rocks by laser-induced breakdown spectroscopy," *J. Anal. At. Spectrom.*, vol. 36, pp. 813–823, 2021. DOI: 10.1039/D1JA00032B.
 
 [30] S. Qu, J. Shen, L. Li *et al.*, "An inclusive library for quantitative analysis of the laser-induced breakdown spectra acquired by the Zhurong Mars rover," *Astrophys. J.*, 2025. DOI: 10.3847/1538-4357/ae14ef.
+
+[31] J. Noël, S. Vishwakarma, and V. Palleschi, "ALIAS: Automatic Line Identification and Spectral Analysis," *Spectrochim. Acta Part B*, 2025.
+
+[32] Z. Gajarska, E. Képeš, P. Pořízka, and J. Kaiser, "Automated assignment of emission lines in spectroscopy of complex samples using the 'comb' algorithm," *J. Anal. At. Spectrom.*, vol. 39, pp. 1038–1050, 2024.
+
+[33] G. Amato, A. Cristoforetti, S. Legnaioli *et al.*, "An algorithm inspired by text retrieval for unassisted element identification from LIBS spectra," *J. Anal. At. Spectrom.*, 2010.
+
+[34] J. E. Haddad, L. Canioni, and B. Bousquet, "Good practices in LIBS analysis: Review and advices," *Spectrochim. Acta Part B*, vol. 101, pp. 171–182, 2014. DOI: 10.1016/j.sab.2014.08.039.
