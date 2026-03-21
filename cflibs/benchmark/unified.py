@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 import csv
 import importlib.util
 import json
+import sys
 import math
 import re
 import time
@@ -80,6 +81,7 @@ def _load_repo_script_module(module_name: str) -> Any:
         raise ImportError(f"Could not load helper module from {script_path}")
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     _SCRIPT_MODULE_CACHE[module_name] = module
     return module
