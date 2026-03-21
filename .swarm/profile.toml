@@ -1,0 +1,48 @@
+# CF-LIBS Language Profile for beefcake-loop
+# Defines quality gates, source extensions, and auto-fix commands
+# for the autonomous code improvement engine.
+
+language = "python"
+source_extensions = [".py", ".pyi"]
+package_manifest = "pyproject.toml"
+integration_files = ["pyproject.toml", "setup.py", "conftest.py", "__init__.py"]
+
+# Quality gates run in order. Blocking gates stop the pipeline on failure.
+
+[[gates]]
+name = "lint"
+command = "ruff"
+args = ["check", "cflibs/", "tests/"]
+blocking = true
+timeout_secs = 120
+
+[[gates]]
+name = "format"
+command = "black"
+args = ["--check", "cflibs/"]
+blocking = true
+timeout_secs = 120
+
+[[gates]]
+name = "typecheck"
+command = "mypy"
+args = ["cflibs/"]
+blocking = false    # advisory — mypy has incrementally-disabled error codes
+timeout_secs = 300
+
+[[gates]]
+name = "test"
+command = "pytest"
+args = ["tests/", "-x", "-q", "-m", "not slow and not requires_db"]
+blocking = true
+timeout_secs = 600
+
+# Auto-fix commands run before LLM delegation to handle trivial issues.
+
+[[auto_fix]]
+command = "black"
+args = ["cflibs/"]
+
+[[auto_fix]]
+command = "ruff"
+args = ["check", "--fix", "cflibs/"]
