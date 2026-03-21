@@ -48,6 +48,9 @@ JAX is forced to CPU in `conftest.py` with `jax_enable_x64=True`.
 cflibs generate-db
 cflibs forward examples/config_example.yaml --output spectrum.csv
 cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml
+cflibs analyze spectrum.csv --elements Fe,Cu --output result.json
+cflibs bayesian spectrum.csv --elements Fe,Cu --output posterior.json
+cflibs batch ./spectra --elements Fe,Cu --output-dir output/batch_results
 cflibs generate-manifold examples/manifold_config_example.yaml --progress
 ```
 
@@ -55,6 +58,9 @@ cflibs generate-manifold examples/manifold_config_example.yaml --progress
 
 ```bash
 python datagen_v2.py                              # generate atomic DB (hours-long)
+python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus
+python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1
+python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json
 python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000
 python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json
 python scripts/validate_real_data.py --datasets steel_245nm FeNi_380nm --no-plots
@@ -64,6 +70,12 @@ python scripts/generate_model_library.py consolidate --output-dir output/model_l
 python scripts/generate_model_library.py build-index --output-dir output/model_library
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
 ```
+
+## Code Search Workflow
+
+- Prefer semantic search with `colgrep` before regex-only search.
+- `colgrep "where inversion line selection happens" -k 20` for intent-level discovery.
+- `colgrep -e "add_parser(" -F "cli subcommands" cflibs/cli/main.py` to map CLI command registration quickly.
 
 ## Architecture
 
@@ -157,7 +169,7 @@ Short imperative summary (<=50 chars), optional body explaining what/why. Recent
 
    ```bash
    git pull --rebase
-   bd dolt push
+   bdh :force-sync  # only needed when you changed beads state; bdh mutations auto-sync
    git push
    git status  # MUST show "up to date with origin"
    ```

@@ -12,6 +12,7 @@
 - `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
 - `uv pip install -e ".[local]"` installs local dev extras (JAX CPU, hdf5, dev tools).
 - `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, hdf5, mpi4py).
+- `uv pip install -e ".[ci]"` installs CI-equivalent optional dependencies for full local test parity.
 - `pytest tests/ -v` runs the full test suite.
 - `pytest tests/ -v --benchmark-only` runs benchmark-only tests (used in CI performance workflow).
 - `JAX_PLATFORMS=cpu pytest tests/` forces CPU backend for tests.
@@ -35,6 +36,9 @@
 - `python datagen_v2.py` runs the database generator directly.
 - `cflibs forward examples/config_example.yaml --output spectrum.csv` generates a synthetic spectrum.
 - `cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml` runs inversion.
+- `cflibs analyze spectrum.csv --elements Fe,Cu --output result.json` runs end-to-end identification + inversion with sensible defaults.
+- `cflibs bayesian spectrum.csv --elements Fe,Cu --output posterior.json` runs Bayesian inversion (requires optional bayesian deps).
+- `cflibs batch ./spectra --elements Fe,Cu --output-dir output/batch_results` processes a directory of CSV spectra.
 - `cflibs generate-manifold examples/manifold_config_example.yaml --progress` builds a spectral manifold.
 
 ## Deployment Environment
@@ -58,6 +62,9 @@
 - `cflibs generate-manifold examples/manifold_config_example.yaml --progress` builds a spectral manifold.
 - `python datagen_v2.py` generates the atomic database (long-running).
 - `nohup python datagen_v2.py &` runs database generation in the background.
+- `python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus` builds deterministic synthetic identification corpora.
+- `python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1` benchmarks ALIAS/comb/correlation identifier paths.
+- `python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json` runs equation-level synthetic physics sanity checks.
 - `python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000` runs NIST parity validation.
 - `python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json` runs consolidated NIST cross-check reporting.
 - `python scripts/validate_real_data.py --datasets steel_245nm FeNi_380nm --no-plots` validates element ID pipelines against real datasets.
@@ -69,6 +76,11 @@
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy
   `manifold-generator.py` script is not MPI-aware and should not be launched via
   `mpirun` or `srun` unless explicit MPI support is added first.
+
+## Code Search
+- Prefer semantic search with `colgrep` for code discovery and refactors.
+- `colgrep "where inversion line selection happens" -k 20` explores intent-level matches.
+- `colgrep -e "add_parser(" -F "cli subcommands" cflibs/cli/main.py` combines literal prefilter + semantic ranking.
 
 ## Commit & Pull Request Guidelines
 - Commit messages: short imperative summary (<=50 chars) with optional body explaining what/why.
