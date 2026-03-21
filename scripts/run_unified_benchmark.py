@@ -9,13 +9,19 @@ composition workflows, and writes the benchmark artifacts to an output directory
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence
+
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+if TYPE_CHECKING:
+    from cflibs.benchmark.dataset import BenchmarkDataset, TruthType
 
 
 BASIS_REQUIRED_ID_WORKFLOWS = {
@@ -23,7 +29,6 @@ BASIS_REQUIRED_ID_WORKFLOWS = {
     "hybrid_union",
     "nnls_concentration_threshold",
     "spectral_nnls",
-    "voigt_alias",
 }
 
 
@@ -49,6 +54,68 @@ def _select_datasets(
     truth_types: Iterable[TruthType],
 ) -> list[BenchmarkDataset]:
     return [dataset for dataset in datasets.values() if _has_truth(dataset, truth_types)]
+
+
+def _validate_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if not args.db_path.exists():
+        parser.error(f"Atomic database not found: {args.db_path}")
+    if not args.data_dir.exists():
+        parser.error(f"Data directory not found: {args.data_dir}")
+    if args.synthetic_corpus is not None and not args.synthetic_corpus.exists():
+        parser.error(f"Synthetic corpus not found: {args.synthetic_corpus}")
+
+
+def _validate_basis_requirements(
+    parser: argparse.ArgumentParser,
+    id_workflows: Sequence[str],
+    basis_dir: Path,
+) -> None:
+    if not set(id_workflows) & BASIS_REQUIRED_ID_WORKFLOWS:
+        return
+    if not basis_dir.exists():
+        parser.error(
+            "Basis-driven identification workflows were selected, but the basis directory "
+            f"does not exist: {basis_dir}"
+        )
+    if not any(basis_dir.glob("basis_fwhm_*nm.h5")):
+        parser.error(
+            "Basis-driven identification workflows were selected, but no basis_fwhm_*.h5 "
+            f"files were found in {basis_dir}"
+        )
+
+
+def _run_identification_phase(
+    parser: argparse.ArgumentParser,
+    runner,
+    identification_datasets: Sequence[BenchmarkDataset],
+    id_workflows: Sequence[str],
+    max_outer_folds: int | None,
+):
+    if not identification_datasets:
+        parser.error("No identification-capable datasets were found in the selected data directory.")
+    return runner.run_identification(
+        identification_datasets,
+        workflow_names=id_workflows,
+        max_outer_folds=max_outer_folds,
+    )
+
+
+def _run_composition_phase(
+    parser: argparse.ArgumentParser,
+    runner,
+    composition_datasets: Sequence[BenchmarkDataset],
+    id_workflows: Sequence[str],
+    composition_workflows: Sequence[str],
+    max_outer_folds: int | None,
+):
+    if not composition_datasets:
+        parser.error("No composition-capable datasets were found in the selected data directory.")
+    return runner.run_composition(
+        composition_datasets,
+        id_workflow_names=id_workflows,
+        composition_workflow_names=composition_workflows,
+        max_outer_folds=max_outer_folds,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -122,12 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from cflibs.benchmark import UnifiedBenchmarkRunner, load_default_datasets
     from cflibs.benchmark.dataset import TruthType
 
-    if not args.db_path.exists():
-        parser.error(f"Atomic database not found: {args.db_path}")
-    if not args.data_dir.exists():
-        parser.error(f"Data directory not found: {args.data_dir}")
-    if args.synthetic_corpus is not None and not args.synthetic_corpus.exists():
-        parser.error(f"Synthetic corpus not found: {args.synthetic_corpus}")
+    _validate_paths(parser, args)
 
     runner = UnifiedBenchmarkRunner(
         db_path=args.db_path,
@@ -147,17 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if unknown_composition:
         parser.error(f"Unknown composition workflow(s): {', '.join(unknown_composition)}")
 
-    if set(id_workflows) & BASIS_REQUIRED_ID_WORKFLOWS:
-        if not args.basis_dir.exists():
-            parser.error(
-                "Basis-driven identification workflows were selected, but the basis directory "
-                f"does not exist: {args.basis_dir}"
-            )
-        if not any(args.basis_dir.glob("basis_fwhm_*nm.h5")):
-            parser.error(
-                "Basis-driven identification workflows were selected, but no basis_fwhm_*.h5 "
-                f"files were found in {args.basis_dir}"
-            )
+    _validate_basis_requirements(parser, id_workflows, args.basis_dir)
 
     datasets = load_default_datasets(args.data_dir, synthetic_corpus_path=args.synthetic_corpus)
     identification_datasets = _select_datasets(
@@ -175,22 +227,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     composition_selections = []
 
     if args.sections in {"all", "id"}:
-        if not identification_datasets:
-            parser.error("No identification-capable datasets were found in the selected data directory.")
-        id_records, id_selections = runner.run_identification(
+        id_records, id_selections = _run_identification_phase(
+            parser,
+            runner,
             identification_datasets,
-            workflow_names=id_workflows,
-            max_outer_folds=args.max_outer_folds,
+            id_workflows,
+            args.max_outer_folds,
         )
 
     if args.sections in {"all", "composition"}:
-        if not composition_datasets:
-            parser.error("No composition-capable datasets were found in the selected data directory.")
-        composition_records, composition_selections = runner.run_composition(
+        composition_records, composition_selections = _run_composition_phase(
+            parser,
+            runner,
             composition_datasets,
-            id_workflow_names=id_workflows,
-            composition_workflow_names=composition_workflows,
-            max_outer_folds=args.max_outer_folds,
+            id_workflows,
+            composition_workflows,
+            args.max_outer_folds,
         )
 
     outputs = runner.write_outputs(

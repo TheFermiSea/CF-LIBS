@@ -12,12 +12,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import csv
+import importlib.util
 import json
 import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -34,6 +35,9 @@ from cflibs.benchmark.dataset import (
 from cflibs.benchmark.loaders import load_benchmark
 from cflibs.benchmarks.metrics import aitchison_distance, per_element_error, rmse_composition
 from cflibs.core.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from cflibs.inversion.element_id import ElementIdentificationResult
 
 logger = get_logger("benchmark.unified")
 
@@ -57,29 +61,48 @@ RP_BUCKETS: List[Tuple[float, float, str, float]] = [
     (3000.0, float("inf"), "rp_ge_3000", 5000.0),
 ]
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SCRIPT_MODULE_CACHE: Dict[str, Any] = {}
+
+
+def _load_repo_script_module(module_name: str) -> Any:
+    if module_name in _SCRIPT_MODULE_CACHE:
+        return _SCRIPT_MODULE_CACHE[module_name]
+
+    script_path = _REPO_ROOT / "scripts" / f"{module_name}.py"
+    if not script_path.exists():
+        raise ImportError(
+            f"Unified benchmark helper '{module_name}' requires {script_path} to be present."
+        )
+
+    spec = importlib.util.spec_from_file_location(f"_cflibs_repo_scripts_{module_name}", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load helper module from {script_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _SCRIPT_MODULE_CACHE[module_name] = module
+    return module
+
 
 def _aalto_search_elements() -> List[str]:
-    from scripts.calibrate_alias import AALTO_SEARCH_ELEMENTS
-
-    return list(AALTO_SEARCH_ELEMENTS)
+    return list(_load_repo_script_module("calibrate_alias").AALTO_SEARCH_ELEMENTS)
 
 
 def _select_aalto_cases_lazy(data_dir: Path):
-    from scripts.calibrate_alias import _select_aalto_cases
-
-    return _select_aalto_cases(data_dir)
+    return _load_repo_script_module("calibrate_alias")._select_aalto_cases(data_dir)
 
 
 def _estimate_effective_rp_lazy(wavelength_nm: np.ndarray, intensity: np.ndarray) -> float:
-    from scripts.calibrate_alias import _estimate_effective_rp
-
-    return float(_estimate_effective_rp(wavelength_nm, intensity))
+    return float(
+        _load_repo_script_module("calibrate_alias")._estimate_effective_rp(
+            wavelength_nm, intensity
+        )
+    )
 
 
 def _load_real_spectra_lazy(data_dir: Path) -> List[Dict[str, Any]]:
-    from scripts.run_comprehensive_benchmark import load_real_spectra
-
-    return load_real_spectra(data_dir)
+    return _load_repo_script_module("run_comprehensive_benchmark").load_real_spectra(data_dir)
 
 
 def _run_boltzmann_pipeline_lazy(
@@ -89,9 +112,7 @@ def _run_boltzmann_pipeline_lazy(
     closure_mode: str,
     elements: Optional[List[str]] = None,
 ) -> Optional[Dict[str, float]]:
-    from scripts.run_comprehensive_benchmark import run_boltzmann_pipeline
-
-    return run_boltzmann_pipeline(
+    return _load_repo_script_module("run_comprehensive_benchmark").run_boltzmann_pipeline(
         spectrum,
         db=db,
         fit_method=fit_method,
@@ -105,9 +126,9 @@ def _pipeline_joint_softmax_lazy(
     intensity: np.ndarray,
     elements: List[str],
 ) -> Dict[str, Any]:
-    from scripts.run_experiments_advanced import _pipeline_joint_softmax
-
-    return _pipeline_joint_softmax(wavelength_nm, intensity, elements)
+    return _load_repo_script_module("run_experiments_advanced")._pipeline_joint_softmax(
+        wavelength_nm, intensity, elements
+    )
 
 
 def _pipeline_hybrid_manifold_lazy(
@@ -115,9 +136,9 @@ def _pipeline_hybrid_manifold_lazy(
     intensity: np.ndarray,
     elements: List[str],
 ) -> Dict[str, Any]:
-    from scripts.run_experiments_advanced import _pipeline_hybrid_manifold
-
-    return _pipeline_hybrid_manifold(wavelength_nm, intensity, elements)
+    return _load_repo_script_module("run_experiments_advanced")._pipeline_hybrid_manifold(
+        wavelength_nm, intensity, elements
+    )
 
 
 def _safe_ratio(num: float, den: float) -> float:
@@ -260,6 +281,61 @@ def load_aalto_id_dataset(data_dir: Path) -> BenchmarkDataset:
     )
 
 
+def _real_dataset_id(label: str, has_ground_truth: bool) -> str:
+    if label.startswith("AA1100_"):
+        return "aa1100_substrate"
+    if label.startswith("Ti6Al4V_"):
+        return "ti6al4v_substrate"
+    if label.startswith("20shot_"):
+        return "20shot_blind"
+    return "assay_substrates" if has_ground_truth else "blind_stress"
+
+
+def _build_real_benchmark_spectrum(record: Dict[str, Any]) -> BenchmarkSpectrum:
+    wavelength = np.asarray(record["wavelength"], dtype=float)
+    intensity = np.asarray(record["intensity"], dtype=float)
+    label = str(record["label"])
+    ground_truth = dict(record.get("ground_truth") or {})
+    source = str(record.get("source", "experimental"))
+    specimen_id = label.split("_shot")[0].split("_pos")[0]
+    group_id = specimen_id if ground_truth else label
+    rp_estimate = _estimate_effective_rp_lazy(wavelength, intensity)
+    resolution_nm = float(np.mean(wavelength) / max(rp_estimate, 1.0))
+    conditions = InstrumentalConditions(
+        laser_wavelength_nm=1064.0,
+        laser_energy_mj=0.0,
+        spectral_range_nm=(float(wavelength.min()), float(wavelength.max())),
+        spectral_resolution_nm=resolution_nm,
+        spectrometer_type="Scipp-HDF5",
+        detector_type="unknown",
+        atmosphere="air",
+        notes=f"Imported from {source}",
+    )
+    metadata = SampleMetadata(
+        sample_id=specimen_id,
+        sample_type=SampleType.CRM if ground_truth else SampleType.FIELD,
+        matrix_type=MatrixType.METAL_ALLOY,
+        provenance=f"Real substrate spectrum: {label}",
+    )
+    return BenchmarkSpectrum(
+        spectrum_id=label,
+        wavelength_nm=wavelength,
+        intensity=intensity,
+        true_composition=ground_truth,
+        conditions=conditions,
+        metadata=metadata,
+        dataset_id=_real_dataset_id(label, bool(ground_truth)),
+        group_id=group_id,
+        specimen_id=specimen_id,
+        instrument_id="scipp_substrate",
+        truth_type=TruthType.ASSAY if ground_truth else TruthType.BLIND,
+        rp_estimate=rp_estimate,
+        label_cardinality=len(_sorted_positive_elements(ground_truth)),
+        spectrum_kind="substrate_shot" if ground_truth else "blind_stress",
+        annotations={"source": source},
+    )
+
+
 def load_assay_and_blind_datasets(data_dir: Path) -> Dict[str, BenchmarkDataset]:
     """Load assay-backed substrate shots and blind stress spectra."""
     records = _load_real_spectra_lazy(data_dir)
@@ -267,59 +343,8 @@ def load_assay_and_blind_datasets(data_dir: Path) -> Dict[str, BenchmarkDataset]
     blind_spectra: List[BenchmarkSpectrum] = []
 
     for record in records:
-        wavelength = np.asarray(record["wavelength"], dtype=float)
-        intensity = np.asarray(record["intensity"], dtype=float)
-        label = str(record["label"])
-        ground_truth = dict(record.get("ground_truth") or {})
-        source = str(record.get("source", "experimental"))
-        specimen_id = label.split("_shot")[0].split("_pos")[0]
-        group_id = specimen_id if ground_truth else label
-        rp_estimate = _estimate_effective_rp_lazy(wavelength, intensity)
-        resolution_nm = float(np.mean(wavelength) / max(rp_estimate, 1.0))
-        conditions = InstrumentalConditions(
-            laser_wavelength_nm=1064.0,
-            laser_energy_mj=0.0,
-            spectral_range_nm=(float(wavelength.min()), float(wavelength.max())),
-            spectral_resolution_nm=resolution_nm,
-            spectrometer_type="Scipp-HDF5",
-            detector_type="unknown",
-            atmosphere="air",
-            notes=f"Imported from {source}",
-        )
-        metadata = SampleMetadata(
-            sample_id=specimen_id,
-            sample_type=SampleType.CRM if ground_truth else SampleType.FIELD,
-            matrix_type=MatrixType.METAL_ALLOY,
-            provenance=f"Real substrate spectrum: {label}",
-        )
-        truth_type = TruthType.ASSAY if ground_truth else TruthType.BLIND
-        spectrum_kind = "substrate_shot" if ground_truth else "blind_stress"
-        if label.startswith("AA1100_"):
-            dataset_id = "aa1100_substrate"
-        elif label.startswith("Ti6Al4V_"):
-            dataset_id = "ti6al4v_substrate"
-        elif label.startswith("20shot_"):
-            dataset_id = "20shot_blind"
-        else:
-            dataset_id = "assay_substrates" if ground_truth else "blind_stress"
-        spectrum = BenchmarkSpectrum(
-            spectrum_id=label,
-            wavelength_nm=wavelength,
-            intensity=intensity,
-            true_composition=ground_truth,
-            conditions=conditions,
-            metadata=metadata,
-            dataset_id=dataset_id,
-            group_id=group_id,
-            specimen_id=specimen_id,
-            instrument_id="scipp_substrate",
-            truth_type=truth_type,
-            rp_estimate=rp_estimate,
-            label_cardinality=len(_sorted_positive_elements(ground_truth)),
-            spectrum_kind=spectrum_kind,
-            annotations={"source": source},
-        )
-        if ground_truth:
+        spectrum = _build_real_benchmark_spectrum(record)
+        if spectrum.true_composition:
             assay_spectra.append(spectrum)
         else:
             blind_spectra.append(spectrum)
@@ -1300,7 +1325,7 @@ def tune_id_workflow(
                 tuning_split_id=tuning_split_id,
                 config_name=workflow.config_name(config),
             )
-            summary = summarize_id_records(records)["overall"]
+            summary = summarize_id_records(records)["overall"][workflow.name]
             fold_scores.append(float(summary["micro_f1"]))
             precisions.append(float(summary["micro_precision"]))
         score = float(np.mean(fold_scores)) if fold_scores else 0.0
@@ -1332,6 +1357,109 @@ def _coerce_composition_prediction(
     return concentrations
 
 
+def _compute_fractional_error(
+    observed_value: Optional[float],
+    predicted_value: Optional[float],
+) -> Optional[float]:
+    if not observed_value or not predicted_value:
+        return None
+    return abs(float(predicted_value) - float(observed_value)) / max(float(observed_value), 1e-12)
+
+
+def _build_composition_success_record(
+    spectrum: BenchmarkSpectrum,
+    id_workflow_name: str,
+    id_config_name: str,
+    composition_workflow_name: str,
+    composition_config_name: str,
+    outer_split_id: str,
+    tuning_split_id: Optional[str],
+    elapsed_seconds: float,
+    candidate_elements: Sequence[str],
+    concentrations: Dict[str, float],
+    prediction: Dict[str, Any],
+) -> CompositionEvaluationRecord:
+    true_comp = dict(spectrum.true_composition)
+    aitchison = float(aitchison_distance(true_comp, concentrations))
+    rmse = float(rmse_composition(true_comp, concentrations))
+    per_element = per_element_error(true_comp, concentrations)
+    return CompositionEvaluationRecord(
+        dataset_id=spectrum.dataset_id or "unknown",
+        spectrum_id=spectrum.spectrum_id,
+        group_id=spectrum.group_id,
+        specimen_id=spectrum.specimen_id,
+        instrument_id=spectrum.instrument_id,
+        truth_type=spectrum.truth_type.value,
+        rp_estimate=spectrum.rp_estimate,
+        label_cardinality=spectrum.label_cardinality,
+        spectrum_kind=spectrum.spectrum_kind,
+        id_workflow_name=id_workflow_name,
+        composition_workflow_name=composition_workflow_name,
+        outer_split_id=outer_split_id,
+        tuning_split_id=tuning_split_id,
+        id_config_name=id_config_name,
+        composition_config_name=composition_config_name,
+        elapsed_seconds=elapsed_seconds,
+        candidate_elements=list(candidate_elements),
+        true_composition=true_comp,
+        predicted_composition=concentrations,
+        aitchison=aitchison,
+        rmse=rmse,
+        temperature_error_frac=_compute_fractional_error(
+            spectrum.plasma_temperature_K, prediction.get("temperature_K")
+        ),
+        ne_error_frac=_compute_fractional_error(
+            spectrum.electron_density_cm3, prediction.get("electron_density_cm3")
+        ),
+        closure_residual=abs(sum(concentrations.values()) - 1.0),
+        error_tier=_composition_error_tier(aitchison),
+        per_element_absolute_error={element: float(errors[0]) for element, errors in per_element.items()},
+        per_element_relative_error={element: float(errors[1]) for element, errors in per_element.items()},
+        annotations={key: value for key, value in prediction.items() if key not in {"concentrations"}},
+    )
+
+
+def _build_composition_failure_record(
+    spectrum: BenchmarkSpectrum,
+    id_workflow_name: str,
+    id_config_name: str,
+    composition_workflow_name: str,
+    composition_config_name: str,
+    outer_split_id: str,
+    tuning_split_id: Optional[str],
+    elapsed_seconds: float,
+    failure_reason: str,
+) -> CompositionEvaluationRecord:
+    return CompositionEvaluationRecord(
+        dataset_id=spectrum.dataset_id or "unknown",
+        spectrum_id=spectrum.spectrum_id,
+        group_id=spectrum.group_id,
+        specimen_id=spectrum.specimen_id,
+        instrument_id=spectrum.instrument_id,
+        truth_type=spectrum.truth_type.value,
+        rp_estimate=spectrum.rp_estimate,
+        label_cardinality=spectrum.label_cardinality,
+        spectrum_kind=spectrum.spectrum_kind,
+        id_workflow_name=id_workflow_name,
+        composition_workflow_name=composition_workflow_name,
+        outer_split_id=outer_split_id,
+        tuning_split_id=tuning_split_id,
+        id_config_name=id_config_name,
+        composition_config_name=composition_config_name,
+        elapsed_seconds=elapsed_seconds,
+        candidate_elements=[],
+        true_composition=dict(spectrum.true_composition),
+        predicted_composition={},
+        aitchison=None,
+        rmse=None,
+        temperature_error_frac=None,
+        ne_error_frac=None,
+        closure_residual=None,
+        error_tier=None,
+        failure_reason=failure_reason,
+    )
+
+
 def evaluate_composition_workflow(
     spectra: Sequence[BenchmarkSpectrum],
     id_workflow_name: str,
@@ -1358,91 +1486,32 @@ def evaluate_composition_workflow(
             concentrations = _coerce_composition_prediction(prediction, candidate_elements)
             if not concentrations:
                 raise ValueError("Composition workflow returned no concentrations")
-
-            true_comp = dict(spectrum.true_composition)
-            aitchison = float(aitchison_distance(true_comp, concentrations))
-            rmse = float(rmse_composition(true_comp, concentrations))
-            per_element = per_element_error(true_comp, concentrations)
-            closure_residual = abs(sum(concentrations.values()) - 1.0)
-            temperature_error_frac = None
-            if spectrum.plasma_temperature_K and prediction.get("temperature_K"):
-                temperature_error_frac = abs(
-                    float(prediction["temperature_K"]) - float(spectrum.plasma_temperature_K)
-                ) / max(float(spectrum.plasma_temperature_K), 1e-12)
-            ne_error_frac = None
-            if spectrum.electron_density_cm3 and prediction.get("electron_density_cm3"):
-                ne_error_frac = abs(
-                    float(prediction["electron_density_cm3"]) - float(spectrum.electron_density_cm3)
-                ) / max(float(spectrum.electron_density_cm3), 1e-12)
-
             records.append(
-                CompositionEvaluationRecord(
-                    dataset_id=spectrum.dataset_id or "unknown",
-                    spectrum_id=spectrum.spectrum_id,
-                    group_id=spectrum.group_id,
-                    specimen_id=spectrum.specimen_id,
-                    instrument_id=spectrum.instrument_id,
-                    truth_type=spectrum.truth_type.value,
-                    rp_estimate=spectrum.rp_estimate,
-                    label_cardinality=spectrum.label_cardinality,
-                    spectrum_kind=spectrum.spectrum_kind,
+                _build_composition_success_record(
+                    spectrum=spectrum,
                     id_workflow_name=id_workflow_name,
+                    id_config_name=id_config_name,
                     composition_workflow_name=composition_workflow.name,
+                    composition_config_name=composition_config_name,
                     outer_split_id=outer_split_id,
                     tuning_split_id=tuning_split_id,
-                    id_config_name=id_config_name,
-                    composition_config_name=composition_config_name,
                     elapsed_seconds=time.perf_counter() - start,
-                    candidate_elements=list(candidate_elements),
-                    true_composition=true_comp,
-                    predicted_composition=concentrations,
-                    aitchison=aitchison,
-                    rmse=rmse,
-                    temperature_error_frac=temperature_error_frac,
-                    ne_error_frac=ne_error_frac,
-                    closure_residual=closure_residual,
-                    error_tier=_composition_error_tier(aitchison),
-                    per_element_absolute_error={
-                        element: float(errors[0]) for element, errors in per_element.items()
-                    },
-                    per_element_relative_error={
-                        element: float(errors[1]) for element, errors in per_element.items()
-                    },
-                    annotations={
-                        key: value
-                        for key, value in prediction.items()
-                        if key not in {"concentrations"}
-                    },
+                    candidate_elements=candidate_elements,
+                    concentrations=concentrations,
+                    prediction=prediction,
                 )
             )
         except Exception as exc:  # noqa: BLE001
             records.append(
-                CompositionEvaluationRecord(
-                    dataset_id=spectrum.dataset_id or "unknown",
-                    spectrum_id=spectrum.spectrum_id,
-                    group_id=spectrum.group_id,
-                    specimen_id=spectrum.specimen_id,
-                    instrument_id=spectrum.instrument_id,
-                    truth_type=spectrum.truth_type.value,
-                    rp_estimate=spectrum.rp_estimate,
-                    label_cardinality=spectrum.label_cardinality,
-                    spectrum_kind=spectrum.spectrum_kind,
+                _build_composition_failure_record(
+                    spectrum=spectrum,
                     id_workflow_name=id_workflow_name,
+                    id_config_name=id_config_name,
                     composition_workflow_name=composition_workflow.name,
+                    composition_config_name=composition_config_name,
                     outer_split_id=outer_split_id,
                     tuning_split_id=tuning_split_id,
-                    id_config_name=id_config_name,
-                    composition_config_name=composition_config_name,
                     elapsed_seconds=time.perf_counter() - start,
-                    candidate_elements=[],
-                    true_composition=dict(spectrum.true_composition),
-                    predicted_composition={},
-                    aitchison=None,
-                    rmse=None,
-                    temperature_error_frac=None,
-                    ne_error_frac=None,
-                    closure_residual=None,
-                    error_tier=None,
                     failure_reason=str(exc),
                 )
             )
@@ -1557,6 +1626,88 @@ def bootstrap_ci(
     )
 
 
+def _compute_workflow_aggregates(
+    workflow_records: Sequence[IDEvaluationRecord],
+) -> Dict[str, Any]:
+    tp = sum(record.tp for record in workflow_records)
+    fp = sum(record.fp for record in workflow_records)
+    fn = sum(record.fn for record in workflow_records)
+    tn = sum(record.tn for record in workflow_records)
+    micro_precision = _safe_ratio(tp, tp + fp)
+    micro_recall = _safe_ratio(tp, tp + fn)
+    return {
+        "n_spectra": len(workflow_records),
+        "micro_precision": micro_precision,
+        "micro_recall": micro_recall,
+        "micro_f1": _safe_ratio(2 * micro_precision * micro_recall, micro_precision + micro_recall),
+        "macro_precision": float(np.mean([record.precision for record in workflow_records])) if workflow_records else 0.0,
+        "macro_recall": float(np.mean([record.recall for record in workflow_records])) if workflow_records else 0.0,
+        "macro_f1": float(np.mean([record.f1 for record in workflow_records])) if workflow_records else 0.0,
+        "fpr": _safe_ratio(fp, fp + tn),
+        "exact_match_rate": float(np.mean([record.exact_match for record in workflow_records])) if workflow_records else 0.0,
+        "jaccard": float(np.mean([record.jaccard for record in workflow_records])) if workflow_records else 0.0,
+        "hamming_loss": float(np.mean([record.hamming_loss for record in workflow_records])) if workflow_records else 0.0,
+        "false_positives_per_spectrum": float(
+            np.mean([record.false_positives_per_spectrum for record in workflow_records])
+        )
+        if workflow_records
+        else 0.0,
+        "latency_mean_s": float(np.mean([record.elapsed_seconds for record in workflow_records])) if workflow_records else 0.0,
+        "latency_p95_s": float(np.percentile([record.elapsed_seconds for record in workflow_records], 95)) if workflow_records else 0.0,
+        "bootstrap_f1": bootstrap_ci([record.f1 for record in workflow_records]),
+        "bootstrap_precision": bootstrap_ci([record.precision for record in workflow_records]),
+    }
+
+
+def _compute_per_element_stats(
+    workflow_records: Sequence[IDEvaluationRecord],
+) -> Dict[str, Dict[str, float]]:
+    element_summary: Dict[str, Dict[str, float]] = {}
+    element_names = sorted(
+        {element for record in workflow_records for element in (record.true_elements + record.predicted_elements)}
+    )
+    for element in element_names:
+        el_tp = sum(
+            1 for record in workflow_records if element in record.true_elements and element in record.predicted_elements
+        )
+        el_fp = sum(
+            1 for record in workflow_records if element not in record.true_elements and element in record.predicted_elements
+        )
+        el_fn = sum(
+            1 for record in workflow_records if element in record.true_elements and element not in record.predicted_elements
+        )
+        support = sum(1 for record in workflow_records if element in record.true_elements)
+        element_summary[element] = {
+            "precision": _safe_ratio(el_tp, el_tp + el_fp),
+            "recall": _safe_ratio(el_tp, el_tp + el_fn),
+            "support": support,
+            "false_positives": el_fp,
+        }
+    return element_summary
+
+
+def _compute_id_stratified_buckets(
+    workflow_records: Sequence[IDEvaluationRecord],
+    field_names: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    stratified: Dict[str, Dict[str, Any]] = {}
+    for field_name in field_names:
+        buckets: Dict[str, List[IDEvaluationRecord]] = {}
+        for record in workflow_records:
+            key = _rp_bucket(record.rp_estimate) if field_name == "rp_bucket" else str(getattr(record, field_name))
+            buckets.setdefault(key, []).append(record)
+        stratified[field_name] = {
+            key: {
+                "micro_f1": float(np.mean([rec.f1 for rec in bucket_records])),
+                "micro_precision": float(np.mean([rec.precision for rec in bucket_records])),
+                "micro_recall": float(np.mean([rec.recall for rec in bucket_records])),
+                "n_spectra": len(bucket_records),
+            }
+            for key, bucket_records in buckets.items()
+        }
+    return stratified
+
+
 def summarize_id_records(records: Sequence[IDEvaluationRecord]) -> Dict[str, Any]:
     scored = [record for record in records if record.scored]
     by_workflow: Dict[str, List[IDEvaluationRecord]] = {}
@@ -1574,75 +1725,101 @@ def summarize_id_records(records: Sequence[IDEvaluationRecord]) -> Dict[str, Any
     }
 
     for workflow_name, workflow_records in by_workflow.items():
-        tp = sum(record.tp for record in workflow_records)
-        fp = sum(record.fp for record in workflow_records)
-        fn = sum(record.fn for record in workflow_records)
-        tn = sum(record.tn for record in workflow_records)
-        micro_precision = _safe_ratio(tp, tp + fp)
-        micro_recall = _safe_ratio(tp, tp + fn)
-        micro_f1 = _safe_ratio(2 * micro_precision * micro_recall, micro_precision + micro_recall)
-        macro_precision = float(np.mean([record.precision for record in workflow_records])) if workflow_records else 0.0
-        macro_recall = float(np.mean([record.recall for record in workflow_records])) if workflow_records else 0.0
-        macro_f1 = float(np.mean([record.f1 for record in workflow_records])) if workflow_records else 0.0
-        exact_match_rate = float(np.mean([record.exact_match for record in workflow_records])) if workflow_records else 0.0
-        jaccard = float(np.mean([record.jaccard for record in workflow_records])) if workflow_records else 0.0
-        hamming = float(np.mean([record.hamming_loss for record in workflow_records])) if workflow_records else 0.0
-        false_positives_per_spectrum = float(np.mean([record.false_positives_per_spectrum for record in workflow_records])) if workflow_records else 0.0
-        latency_mean = float(np.mean([record.elapsed_seconds for record in workflow_records])) if workflow_records else 0.0
-        latency_p95 = float(np.percentile([record.elapsed_seconds for record in workflow_records], 95)) if workflow_records else 0.0
-        overall[workflow_name] = {
-            "n_spectra": len(workflow_records),
-            "micro_precision": micro_precision,
-            "micro_recall": micro_recall,
-            "micro_f1": micro_f1,
-            "macro_precision": macro_precision,
-            "macro_recall": macro_recall,
-            "macro_f1": macro_f1,
-            "fpr": _safe_ratio(fp, fp + tn),
-            "exact_match_rate": exact_match_rate,
-            "jaccard": jaccard,
-            "hamming_loss": hamming,
-            "false_positives_per_spectrum": false_positives_per_spectrum,
-            "latency_mean_s": latency_mean,
-            "latency_p95_s": latency_p95,
-            "bootstrap_f1": bootstrap_ci([record.f1 for record in workflow_records]),
-            "bootstrap_precision": bootstrap_ci([record.precision for record in workflow_records]),
-        }
-
-        element_summary: Dict[str, Dict[str, float]] = {}
-        element_names = sorted({element for record in workflow_records for element in (record.true_elements + record.predicted_elements)})
-        for element in element_names:
-            el_tp = sum(1 for record in workflow_records if element in record.true_elements and element in record.predicted_elements)
-            el_fp = sum(1 for record in workflow_records if element not in record.true_elements and element in record.predicted_elements)
-            el_fn = sum(1 for record in workflow_records if element in record.true_elements and element not in record.predicted_elements)
-            support = sum(1 for record in workflow_records if element in record.true_elements)
-            element_summary[element] = {
-                "precision": _safe_ratio(el_tp, el_tp + el_fp),
-                "recall": _safe_ratio(el_tp, el_tp + el_fn),
-                "support": support,
-                "false_positives": el_fp,
-            }
-        per_element[workflow_name] = element_summary
-
-        for field_name in stratified:
-            buckets: Dict[str, List[IDEvaluationRecord]] = {}
-            for record in workflow_records:
-                if field_name == "rp_bucket":
-                    key = _rp_bucket(record.rp_estimate)
-                else:
-                    key = str(getattr(record, field_name))
-                buckets.setdefault(key, []).append(record)
-            stratified[field_name][workflow_name] = {
-                key: {
-                    "micro_f1": float(np.mean([rec.f1 for rec in bucket_records])),
-                    "micro_precision": float(np.mean([rec.precision for rec in bucket_records])),
-                    "micro_recall": float(np.mean([rec.recall for rec in bucket_records])),
-                    "n_spectra": len(bucket_records),
-                }
-                for key, bucket_records in buckets.items()
-            }
+        overall[workflow_name] = _compute_workflow_aggregates(workflow_records)
+        per_element[workflow_name] = _compute_per_element_stats(workflow_records)
+        workflow_buckets = _compute_id_stratified_buckets(workflow_records, stratified.keys())
+        for field_name, bucket_data in workflow_buckets.items():
+            stratified[field_name][workflow_name] = bucket_data
 
     return {"overall": overall, "per_element": per_element, "stratified": stratified}
+
+
+def _compute_composition_overall(
+    pair_records: Sequence[CompositionEvaluationRecord],
+) -> Dict[str, Any]:
+    aitchisons = [float(record.aitchison) for record in pair_records if record.aitchison is not None]
+    rmses = [float(record.rmse) for record in pair_records if record.rmse is not None]
+    closure_residuals = [float(record.closure_residual) for record in pair_records if record.closure_residual is not None]
+    temperature_errors = [
+        float(record.temperature_error_frac)
+        for record in pair_records
+        if record.temperature_error_frac is not None
+    ]
+    ne_errors = [float(record.ne_error_frac) for record in pair_records if record.ne_error_frac is not None]
+    tier_distribution: Dict[str, int] = {}
+    for record in pair_records:
+        if record.error_tier is not None:
+            tier_distribution[record.error_tier] = tier_distribution.get(record.error_tier, 0) + 1
+    return {
+        "n_spectra": len(pair_records),
+        "mean_aitchison": float(np.mean(aitchisons)) if aitchisons else float("inf"),
+        "median_aitchison": float(np.median(aitchisons)) if aitchisons else float("inf"),
+        "p95_aitchison": float(np.percentile(aitchisons, 95)) if aitchisons else float("inf"),
+        "mean_rmse": float(np.mean(rmses)) if rmses else float("inf"),
+        "mean_closure_residual": float(np.mean(closure_residuals)) if closure_residuals else float("inf"),
+        "mean_temperature_error_frac": float(np.mean(temperature_errors)) if temperature_errors else None,
+        "mean_ne_error_frac": float(np.mean(ne_errors)) if ne_errors else None,
+        "latency_mean_s": float(np.mean([record.elapsed_seconds for record in pair_records])) if pair_records else 0.0,
+        "latency_p95_s": float(np.percentile([record.elapsed_seconds for record in pair_records], 95)) if pair_records else 0.0,
+        "bootstrap_aitchison": bootstrap_ci(aitchisons),
+        "tier_distribution": tier_distribution,
+    }
+
+
+def _compute_composition_per_element(
+    pair_records: Sequence[CompositionEvaluationRecord],
+) -> Dict[str, Dict[str, float]]:
+    element_names = sorted(
+        {
+            element
+            for record in pair_records
+            for element in (
+                list(record.per_element_absolute_error.keys()) + list(record.per_element_relative_error.keys())
+            )
+        }
+    )
+    per_element: Dict[str, Dict[str, float]] = {}
+    for element in element_names:
+        abs_errors = [
+            record.per_element_absolute_error[element]
+            for record in pair_records
+            if element in record.per_element_absolute_error
+        ]
+        rel_errors = [
+            record.per_element_relative_error[element]
+            for record in pair_records
+            if element in record.per_element_relative_error
+            and np.isfinite(record.per_element_relative_error[element])
+        ]
+        per_element[element] = {
+            "mean_absolute_error": float(np.mean(abs_errors)) if abs_errors else float("nan"),
+            "mean_relative_error": float(np.mean(rel_errors)) if rel_errors else float("nan"),
+            "support": len(abs_errors),
+        }
+    return per_element
+
+
+def _compute_composition_stratified_buckets(
+    pair_records: Sequence[CompositionEvaluationRecord],
+    field_names: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    stratified: Dict[str, Dict[str, Any]] = {}
+    for field_name in field_names:
+        buckets: Dict[str, List[CompositionEvaluationRecord]] = {}
+        for record in pair_records:
+            bucket_key = _rp_bucket(record.rp_estimate) if field_name == "rp_bucket" else str(getattr(record, field_name))
+            buckets.setdefault(bucket_key, []).append(record)
+        stratified[field_name] = {
+            bucket_key: {
+                "mean_aitchison": float(
+                    np.mean([rec.aitchison for rec in bucket_records if rec.aitchison is not None])
+                ),
+                "mean_rmse": float(np.mean([rec.rmse for rec in bucket_records if rec.rmse is not None])),
+                "n_spectra": len(bucket_records),
+            }
+            for bucket_key, bucket_records in buckets.items()
+        }
+    return stratified
 
 
 def summarize_composition_records(records: Sequence[CompositionEvaluationRecord]) -> Dict[str, Any]:
@@ -1662,87 +1839,11 @@ def summarize_composition_records(records: Sequence[CompositionEvaluationRecord]
         "label_cardinality": {},
     }
     for key, pair_records in by_pair.items():
-        aitchisons = [float(record.aitchison) for record in pair_records if record.aitchison is not None]
-        rmses = [float(record.rmse) for record in pair_records if record.rmse is not None]
-        closure_residuals = [
-            float(record.closure_residual) for record in pair_records if record.closure_residual is not None
-        ]
-        temperature_errors = [
-            float(record.temperature_error_frac)
-            for record in pair_records
-            if record.temperature_error_frac is not None
-        ]
-        ne_errors = [
-            float(record.ne_error_frac) for record in pair_records if record.ne_error_frac is not None
-        ]
-        tier_distribution: Dict[str, int] = {}
-        for record in pair_records:
-            if record.error_tier is not None:
-                tier_distribution[record.error_tier] = tier_distribution.get(record.error_tier, 0) + 1
-        summary[key] = {
-            "n_spectra": len(pair_records),
-            "mean_aitchison": float(np.mean(aitchisons)) if aitchisons else float("inf"),
-            "median_aitchison": float(np.median(aitchisons)) if aitchisons else float("inf"),
-            "p95_aitchison": float(np.percentile(aitchisons, 95)) if aitchisons else float("inf"),
-            "mean_rmse": float(np.mean(rmses)) if rmses else float("inf"),
-            "mean_closure_residual": float(np.mean(closure_residuals)) if closure_residuals else float("inf"),
-            "mean_temperature_error_frac": float(np.mean(temperature_errors)) if temperature_errors else None,
-            "mean_ne_error_frac": float(np.mean(ne_errors)) if ne_errors else None,
-            "latency_mean_s": float(np.mean([record.elapsed_seconds for record in pair_records])) if pair_records else 0.0,
-            "latency_p95_s": float(np.percentile([record.elapsed_seconds for record in pair_records], 95)) if pair_records else 0.0,
-            "bootstrap_aitchison": bootstrap_ci(aitchisons),
-            "tier_distribution": tier_distribution,
-        }
-
-        element_names = sorted(
-            {
-                element
-                for record in pair_records
-                for element in (
-                    list(record.per_element_absolute_error.keys())
-                    + list(record.per_element_relative_error.keys())
-                )
-            }
-        )
-        per_element[key] = {}
-        for element in element_names:
-            abs_errors = [
-                record.per_element_absolute_error[element]
-                for record in pair_records
-                if element in record.per_element_absolute_error
-            ]
-            rel_errors = [
-                record.per_element_relative_error[element]
-                for record in pair_records
-                if element in record.per_element_relative_error
-                and np.isfinite(record.per_element_relative_error[element])
-            ]
-            per_element[key][element] = {
-                "mean_absolute_error": float(np.mean(abs_errors)) if abs_errors else float("nan"),
-                "mean_relative_error": float(np.mean(rel_errors)) if rel_errors else float("nan"),
-                "support": len(abs_errors),
-            }
-
-        for field_name in stratified:
-            buckets: Dict[str, List[CompositionEvaluationRecord]] = {}
-            for record in pair_records:
-                if field_name == "rp_bucket":
-                    bucket_key = _rp_bucket(record.rp_estimate)
-                else:
-                    bucket_key = str(getattr(record, field_name))
-                buckets.setdefault(bucket_key, []).append(record)
-            stratified[field_name][key] = {
-                bucket_key: {
-                    "mean_aitchison": float(
-                        np.mean([rec.aitchison for rec in bucket_records if rec.aitchison is not None])
-                    ),
-                    "mean_rmse": float(
-                        np.mean([rec.rmse for rec in bucket_records if rec.rmse is not None])
-                    ),
-                    "n_spectra": len(bucket_records),
-                }
-                for bucket_key, bucket_records in buckets.items()
-            }
+        summary[key] = _compute_composition_overall(pair_records)
+        per_element[key] = _compute_composition_per_element(pair_records)
+        pair_buckets = _compute_composition_stratified_buckets(pair_records, stratified.keys())
+        for field_name, bucket_data in pair_buckets.items():
+            stratified[field_name][key] = bucket_data
     return {"overall": summary, "per_element": per_element, "stratified": stratified}
 
 

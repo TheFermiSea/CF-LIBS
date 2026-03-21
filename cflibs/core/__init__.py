@@ -51,25 +51,30 @@ _MODULE_EXPORTS = {
     "logging_config": "cflibs.core.logging_config",
 }
 
+_ATTRIBUTE_EXPORT_GROUPS = {
+    "cflibs.core.platform_config": ["configure_jax", "AcceleratorBackend"],
+    "cflibs.core.cache": [
+        "LRUCache",
+        "cached_partition_function",
+        "cached_transitions",
+        "cached_ionization",
+        "get_cache_stats",
+        "clear_all_caches",
+    ],
+    "cflibs.core.abc": [
+        "AtomicDataSource",
+        "SolverStrategy",
+        "PlasmaModel",
+        "InstrumentModelInterface",
+    ],
+    "cflibs.core.factory": ["SolverFactory", "PlasmaModelFactory", "InstrumentFactory"],
+    "cflibs.core.pool": ["DatabaseConnectionPool", "get_pool", "close_all_pools"],
+}
+
 _ATTRIBUTE_EXPORTS = {
-    "configure_jax": ("cflibs.core.platform_config", "configure_jax"),
-    "AcceleratorBackend": ("cflibs.core.platform_config", "AcceleratorBackend"),
-    "LRUCache": ("cflibs.core.cache", "LRUCache"),
-    "cached_partition_function": ("cflibs.core.cache", "cached_partition_function"),
-    "cached_transitions": ("cflibs.core.cache", "cached_transitions"),
-    "cached_ionization": ("cflibs.core.cache", "cached_ionization"),
-    "get_cache_stats": ("cflibs.core.cache", "get_cache_stats"),
-    "clear_all_caches": ("cflibs.core.cache", "clear_all_caches"),
-    "AtomicDataSource": ("cflibs.core.abc", "AtomicDataSource"),
-    "SolverStrategy": ("cflibs.core.abc", "SolverStrategy"),
-    "PlasmaModel": ("cflibs.core.abc", "PlasmaModel"),
-    "InstrumentModelInterface": ("cflibs.core.abc", "InstrumentModelInterface"),
-    "SolverFactory": ("cflibs.core.factory", "SolverFactory"),
-    "PlasmaModelFactory": ("cflibs.core.factory", "PlasmaModelFactory"),
-    "InstrumentFactory": ("cflibs.core.factory", "InstrumentFactory"),
-    "DatabaseConnectionPool": ("cflibs.core.pool", "DatabaseConnectionPool"),
-    "get_pool": ("cflibs.core.pool", "get_pool"),
-    "close_all_pools": ("cflibs.core.pool", "close_all_pools"),
+    attr_name: (module_name, attr_name)
+    for module_name, attr_names in _ATTRIBUTE_EXPORT_GROUPS.items()
+    for attr_name in attr_names
 }
 
 

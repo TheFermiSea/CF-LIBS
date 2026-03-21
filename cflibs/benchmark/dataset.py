@@ -19,7 +19,7 @@ References
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from cflibs.core.logging_config import get_logger
@@ -847,13 +847,93 @@ class BenchmarkDataset:
 
     def _resolve_field_value(self, spectrum: BenchmarkSpectrum, field_name: str) -> Any:
         """Resolve dotted attribute paths on spectrum objects."""
+        def _invalid_field_error(part: str) -> ValueError:
+            return ValueError(
+                "Unknown metadata field "
+                f"'{field_name}' while resolving '{part}' for spectrum '{spectrum.spectrum_id}'"
+            )
+
         value: Any = spectrum
         for part in field_name.split("."):
-            if isinstance(value, dict):
-                value = value.get(part)
-            else:
-                value = getattr(value, part)
+            try:
+                if isinstance(value, dict):
+                    if part not in value:
+                        raise _invalid_field_error(part)
+                    value = value[part]
+                else:
+                    value = getattr(value, part)
+            except AttributeError as exc:
+                raise _invalid_field_error(part) from exc
         return value
+
+    def _assign_groups_to_folds(
+        self,
+        groups: Dict[str, List[str]],
+        group_keys: Sequence[str],
+        strata: Dict[str, str],
+        n_folds: int,
+        rng: np.random.Generator,
+        stratify_by: Optional[str],
+    ) -> List[List[str]]:
+        folds: List[List[str]] = [[] for _ in range(n_folds)]
+        fold_sizes = [0] * n_folds
+
+        if stratify_by is None:
+            keys = list(group_keys)
+            rng.shuffle(keys)
+            for idx, key in enumerate(keys):
+                fold_idx = idx % n_folds
+                folds[fold_idx].append(key)
+                fold_sizes[fold_idx] += len(groups[key])
+            return folds
+
+        grouped_keys: Dict[str, List[str]] = {}
+        for key, stratum in strata.items():
+            grouped_keys.setdefault(stratum, []).append(key)
+
+        for keys in grouped_keys.values():
+            rng.shuffle(keys)
+            keys.sort(key=lambda key: len(groups[key]), reverse=True)
+            for key in keys:
+                fold_idx = min(range(n_folds), key=lambda idx: (fold_sizes[idx], len(folds[idx])))
+                folds[fold_idx].append(key)
+                fold_sizes[fold_idx] += len(groups[key])
+        return folds
+
+    def _build_group_fold_split(
+        self,
+        fold_idx: int,
+        test_group_keys: Sequence[str],
+        groups: Dict[str, List[str]],
+        name_prefix: str,
+        group_by: str,
+        stratify_by: Optional[str],
+        random_seed: int,
+        n_folds: int,
+    ) -> DataSplit:
+        test_ids: List[str] = []
+        train_ids: List[str] = []
+        test_group_set = set(test_group_keys)
+        for key, spectrum_ids in groups.items():
+            if key in test_group_set:
+                test_ids.extend(spectrum_ids)
+            else:
+                train_ids.extend(spectrum_ids)
+        split = DataSplit(
+            name=f"{name_prefix}_{fold_idx + 1}",
+            train_ids=train_ids,
+            test_ids=test_ids,
+            description=f"Grouped fold {fold_idx + 1}/{n_folds} by {group_by}",
+            random_seed=random_seed,
+            metadata={
+                "group_by": group_by,
+                "stratify_by": stratify_by,
+                "fold_index": fold_idx,
+                "n_folds": n_folds,
+            },
+        )
+        self.splits[split.name] = split
+        return split
 
     def _group_spectrum_ids(self, group_by: str) -> Dict[str, List[str]]:
         """Group spectrum IDs by a metadata field."""
@@ -1013,53 +1093,22 @@ class BenchmarkDataset:
             )
 
         strata = self._group_strata(groups, stratify_by)
-        folds: List[List[str]] = [[] for _ in range(n_folds)]
-        fold_sizes = [0] * n_folds
-
-        if stratify_by is None:
-            keys = list(group_keys)
-            rng.shuffle(keys)
-            for idx, key in enumerate(keys):
-                fold_idx = idx % n_folds
-                folds[fold_idx].append(key)
-                fold_sizes[fold_idx] += len(groups[key])
-        else:
-            grouped_keys: Dict[str, List[str]] = {}
-            for key, stratum in strata.items():
-                grouped_keys.setdefault(stratum, []).append(key)
-            for keys in grouped_keys.values():
-                rng.shuffle(keys)
-                keys.sort(key=lambda key: len(groups[key]), reverse=True)
-                for key in keys:
-                    fold_idx = min(range(n_folds), key=lambda idx: (fold_sizes[idx], len(folds[idx])))
-                    folds[fold_idx].append(key)
-                    fold_sizes[fold_idx] += len(groups[key])
+        folds = self._assign_groups_to_folds(groups, group_keys, strata, n_folds, rng, stratify_by)
 
         splits: List[DataSplit] = []
         for fold_idx, test_group_keys in enumerate(folds):
-            test_ids: List[str] = []
-            train_ids: List[str] = []
-            test_group_set = set(test_group_keys)
-            for key, spectrum_ids in groups.items():
-                if key in test_group_set:
-                    test_ids.extend(spectrum_ids)
-                else:
-                    train_ids.extend(spectrum_ids)
-            split = DataSplit(
-                name=f"{name_prefix}_{fold_idx + 1}",
-                train_ids=train_ids,
-                test_ids=test_ids,
-                description=f"Grouped fold {fold_idx + 1}/{n_folds} by {group_by}",
-                random_seed=random_seed,
-                metadata={
-                    "group_by": group_by,
-                    "stratify_by": stratify_by,
-                    "fold_index": fold_idx,
-                    "n_folds": n_folds,
-                },
+            splits.append(
+                self._build_group_fold_split(
+                    fold_idx,
+                    test_group_keys,
+                    groups,
+                    name_prefix,
+                    group_by,
+                    stratify_by,
+                    random_seed,
+                    n_folds,
+                )
             )
-            self.splits[split.name] = split
-            splits.append(split)
 
         return splits
 

@@ -44,8 +44,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from cflibs.atomic.database import AtomicDatabase
-from cflibs.core.logging_config import get_logger
+from cflibs.atomic.database import AtomicDatabase  # noqa: E402
+from cflibs.core.logging_config import get_logger  # noqa: E402
 
 logger = get_logger("aalto_benchmark")
 
