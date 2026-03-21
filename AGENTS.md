@@ -103,7 +103,7 @@
 
    ```bash
    git pull --rebase
-   bash ./scripts/bdh :force-sync  # only needed when you changed beads state; bdh mutations auto-sync
+   bash ./scripts/bdh :force-sync  # only needed after bead-state changes such as claim/complete/update actions or index/schema migrations; bdh mutations otherwise auto-sync
    git push
    git status  # MUST show "up to date with origin"
    ```

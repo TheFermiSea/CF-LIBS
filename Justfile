@@ -1,20 +1,22 @@
 default:
     @just --list
 
+uv_cache := "${TMPDIR:-/tmp}/cflibs-uv-cache"
+
 setup:
-    mkdir -p "${TMPDIR:-/tmp}/cflibs-uv-cache"
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv venv .venv --python 3.12
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv pip install --python .venv/bin/python -e ".[dev]"
+    mkdir -p "{{uv_cache}}"
+    UV_CACHE_DIR="{{uv_cache}}" uv venv .venv --python 3.12
+    UV_CACHE_DIR="{{uv_cache}}" uv pip install --python .venv/bin/python -e ".[dev]"
 
 setup-codex:
-    mkdir -p "${TMPDIR:-/tmp}/cflibs-uv-cache"
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv venv .venv --python 3.12
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv pip install --python .venv/bin/python -e ".[dev,jax-cpu,hdf5]"
+    mkdir -p "{{uv_cache}}"
+    UV_CACHE_DIR="{{uv_cache}}" uv venv .venv --python 3.12
+    UV_CACHE_DIR="{{uv_cache}}" uv pip install --python .venv/bin/python -e ".[dev,jax-cpu,hdf5]"
 
 setup-ci:
-    mkdir -p "${TMPDIR:-/tmp}/cflibs-uv-cache"
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv venv .venv --python 3.12
-    UV_CACHE_DIR="${TMPDIR:-/tmp}/cflibs-uv-cache" uv pip install --python .venv/bin/python -e ".[dev,ci]"
+    mkdir -p "{{uv_cache}}"
+    UV_CACHE_DIR="{{uv_cache}}" uv venv .venv --python 3.12
+    UV_CACHE_DIR="{{uv_cache}}" uv pip install --python .venv/bin/python -e ".[dev,ci]"
 
 fmt:
     .venv/bin/black cflibs tests

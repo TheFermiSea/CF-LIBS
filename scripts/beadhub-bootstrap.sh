@@ -128,7 +128,14 @@ fi
 
 existing_alias=""
 if [[ -f "$beadhub_file" && ! ( "$force" -eq 1 && "$is_codex_worktree" -eq 1 ) ]]; then
-    existing_alias=$(awk -F': ' '/^alias: / {gsub(/^"|"$/, "", $2); print $2; exit}' "$beadhub_file" || true)
+    alias_parse_stderr=$(mktemp)
+    if ! existing_alias=$(awk -F': ' '/^alias: / {gsub(/^"|"$/, "", $2); print $2; exit}' "$beadhub_file" 2>"$alias_parse_stderr"); then
+        err "failed to parse alias from $beadhub_file: $(cat "$alias_parse_stderr")"
+        existing_alias=""
+    elif [[ -z "$existing_alias" ]]; then
+        log "No existing alias found in $beadhub_file; deriving a new alias."
+    fi
+    rm -f "$alias_parse_stderr"
 fi
 
 alias_value=${BEADHUB_ALIAS:-$existing_alias}
@@ -197,10 +204,15 @@ human_name = os.environ["HUMAN_NAME"]
 role = os.environ["ROLE"]
 repo_origin = os.environ["REPO_ORIGIN"]
 
-server_key = urlparse(server_url).netloc or server_url.replace("http://", "").replace("https://", "")
-account_name = f"acct-{server_key.replace(':', '-')}__{response['project_slug']}__{response['alias']}"
+server_name = urlparse(server_url).netloc or server_url.replace("http://", "").replace("https://", "")
+server_key = server_name.replace(":", "-")
+account_name = f"acct-{server_key}__{response['project_slug']}__{response['alias']}"
 
-def yaml_value(value: str | None) -> str:
+def yaml_key(value):
+    return json.dumps(str(value))
+
+
+def yaml_value(value):
     if value is None:
         return '""'
     return json.dumps(str(value))
@@ -223,10 +235,10 @@ beadhub_lines = [
 
 aw_lines = [
     "servers:",
-    f"  {server_key}:",
+    f"  {yaml_key(server_key)}:",
     f"    url: {yaml_value(server_url)}",
     "accounts:",
-    f"  {account_name}:",
+    f"  {yaml_key(account_name)}:",
     f"    server: {yaml_value(server_key)}",
     f"    api_key: {yaml_value(response['api_key'])}",
     f"    default_project: {yaml_value(response['project_slug'])}",
@@ -242,7 +254,7 @@ aw_lines = [
 aw_context_lines = [
     f"default_account: {yaml_value(account_name)}",
     "server_accounts:",
-    f"  {server_key}: {yaml_value(account_name)}",
+    f"  {yaml_key(server_key)}: {yaml_value(account_name)}",
     "",
 ]
 
