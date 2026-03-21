@@ -1327,7 +1327,10 @@ def tune_id_workflow(
                 tuning_split_id=tuning_split_id,
                 config_name=workflow.config_name(config),
             )
-            summary = summarize_id_records(records)["overall"][workflow.name]
+            overall = summarize_id_records(records)["overall"]
+            if workflow.name not in overall:
+                continue
+            summary = overall[workflow.name]
             fold_scores.append(float(summary["micro_f1"]))
             precisions.append(float(summary["micro_precision"]))
         score = float(np.mean(fold_scores)) if fold_scores else 0.0
