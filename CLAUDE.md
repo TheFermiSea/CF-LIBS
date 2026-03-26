@@ -13,6 +13,7 @@ uv venv --python 3.12
 pip install -e ".[dev]"
 uv pip install -e ".[local]"    # Apple Silicon: JAX Metal, h5py, zarr, dev tools
 uv pip install -e ".[cluster]"  # NVIDIA GPU: JAX CUDA, h5py, mpi4py
+just setup-ci                    # dev + CI extras in local .venv
 ```
 
 ## Quality Gates
@@ -23,6 +24,7 @@ black --check cflibs/
 mypy cflibs/
 pytest tests/ -v
 JAX_PLATFORMS=cpu pytest tests/    # force CPU backend
+just check                          # lint + mypy + fast test slice
 ```
 
 ## Swarm Quality-Gate Workflow (`.swarm/profile.toml`)
@@ -33,7 +35,7 @@ For beefcake-loop parity, run gates in this order:
 ruff check cflibs/ tests/
 black --check cflibs/
 mypy cflibs/                                  # advisory/non-blocking in swarm profile
-pytest tests/ -x -q -m "not slow and not requires_db"
+pytest tests/ -x -q -m "not slow and not requires_db and not requires_jax"
 ```
 
 Auto-fix sequence configured in `.swarm/profile.toml`:
@@ -54,6 +56,11 @@ pytest -m "unit"                                # unit tests only
 pytest -m "integration"                         # integration tests only
 pytest tests/ -v --benchmark-only               # benchmarks only
 pytest tests/ --cov=cflibs --cov-report=html    # coverage report
+just test-fast                                  # fast CPU-only slice
+just test-unit                                  # unit-only slice
+just benchmark                                  # benchmark-only slice
+just test-rust                                  # Rust tests (cflibs-core)
+just test-rust-nextest                          # Rust tests via nextest
 ```
 
 Test markers: `requires_db`, `requires_jax`, `requires_bayesian`, `requires_uncertainty`, `requires_rust`, `slow`, `unit`, `integration`, `physics`, `nist_parity`.
@@ -87,7 +94,17 @@ python scripts/generate_model_library.py chunk --chunk-id 0 --n-chunks 8 --outpu
 python scripts/generate_model_library.py consolidate --output-dir output/model_library
 python scripts/generate_model_library.py build-index --output-dir output/model_library
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
+python scripts/run_unified_benchmark.py
+python scripts/hpc/generate_synthetic_benchmark.py submit
+python scripts/hpc/generate_basis_libraries.py --submit --n-jobs 8 --max-elements 8
+python scripts/hpc/run_benchmark_sweep.py submit
+python scripts/hpc/submit_full_campaign.py --dry-run
+python scripts/hpc/train_ml_classifier.py
+python scripts/hpc/analyze_benchmark_results.py
 ```
+
+TODO: Confirm exact runtime flags for `scripts/run_aalto_benchmark.py` and
+`scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
 
 ## Code Search Workflow
 

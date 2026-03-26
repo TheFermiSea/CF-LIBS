@@ -10,8 +10,13 @@
 ## Build, Test, and Development Commands
 - `just setup` creates a Python 3.12 `uv` environment with the baseline dev toolchain.
 - `just setup-codex` creates a Python 3.12 `uv` environment with Codex-friendly local extras (`dev`, `jax-cpu`, `hdf5`).
+- `just setup-ci` creates a Python 3.12 `uv` environment with CI extras (`dev`, `ci`).
 - `just check` runs the stable local quality gate (`ruff check`, `mypy`, fast pytest).
 - `just test-fast` runs a CPU-only fast pytest slice that skips DB, Bayesian, Rust, JAX, and slow tests.
+- `just test-unit` runs unit tests while skipping DB, Rust, and JAX markers.
+- `just benchmark` runs benchmark-only tests.
+- `just test-rust` runs Rust unit/integration tests for `cflibs-core`.
+- `just test-rust-nextest` runs `cargo nextest` for `cflibs-core`.
 - `just typecheck-ty` runs `ty` in exploratory mode; it is not yet a required gate.
 - `uv venv --python 3.12` creates a virtual environment with `uv`.
 - `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
@@ -76,6 +81,14 @@
 - `python scripts/generate_model_library.py consolidate --output-dir output/model_library` merges chunk outputs into one library.
 - `python scripts/generate_model_library.py build-index --output-dir output/model_library` builds FAISS search index for the library.
 - `python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library` emits/submits SLURM array jobs for cluster generation.
+- `python scripts/run_unified_benchmark.py` runs the unified benchmark workflow end-to-end.
+- `python scripts/hpc/generate_synthetic_benchmark.py submit` submits synthetic benchmark generation jobs.
+- `python scripts/hpc/generate_basis_libraries.py --submit --n-jobs 8 --max-elements 8` submits basis-library generation jobs.
+- `python scripts/hpc/run_benchmark_sweep.py submit` submits benchmark sweep jobs.
+- `python scripts/hpc/submit_full_campaign.py --dry-run` previews full campaign submission.
+- `python scripts/hpc/train_ml_classifier.py` trains the benchmark ML classifier.
+- `python scripts/hpc/analyze_benchmark_results.py` analyzes benchmark outputs and produces reports.
+- TODO: Validate exact invocations for `scripts/run_aalto_benchmark.py` and `scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy
   `manifold-generator.py` script is not MPI-aware and should not be launched via
   `mpirun` or `srun` unless explicit MPI support is added first.
@@ -103,7 +116,6 @@
 
    ```bash
    git pull --rebase
-   bash ./scripts/bdh :force-sync  # only needed after bead-state changes such as claim/complete/update actions or index/schema migrations; bdh mutations otherwise auto-sync
    git push
    git status  # MUST show "up to date with origin"
    ```
