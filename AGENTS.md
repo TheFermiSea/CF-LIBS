@@ -73,6 +73,9 @@
 - `cflibs generate-manifold examples/manifold_config_example.yaml --progress` builds a spectral manifold.
 - `python datagen_v2.py` generates the atomic database (long-running).
 - `nohup python datagen_v2.py &` runs database generation in the background.
+- `python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus` builds the synthetic element-ID corpus.
+- `python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1` benchmarks element identification on synthetic spectra.
+- `python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json` audits synthetic benchmark physics consistency.
 - `python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000` runs NIST parity validation.
 - `python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json` runs consolidated NIST cross-check reporting.
 - `python scripts/validate_real_data.py --datasets steel_245nm FeNi_380nm --no-plots` validates element ID pipelines against real datasets.
@@ -82,11 +85,12 @@
 - `python scripts/generate_model_library.py build-index --output-dir output/model_library` builds FAISS search index for the library.
 - `python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library` emits/submits SLURM array jobs for cluster generation.
 - `python scripts/run_unified_benchmark.py` runs the unified benchmark workflow end-to-end.
-- `python scripts/hpc/generate_synthetic_benchmark.py submit` submits synthetic benchmark generation jobs.
-- `python scripts/hpc/generate_basis_libraries.py --submit --n-jobs 8 --max-elements 8` submits basis-library generation jobs.
-- `python scripts/hpc/run_benchmark_sweep.py submit` submits benchmark sweep jobs.
+- `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.
+- `python scripts/hpc/generate_basis_libraries.py --submit --output-dir output/hpc_benchmark/basis_libraries` submits basis-library generation jobs.
+- `python scripts/hpc/run_benchmark_sweep.py submit --synthetic-dir output/hpc_benchmark/synthetic_corpus --basis-dir output/hpc_benchmark/basis_libraries --output-dir output/hpc_benchmark/fine_sweep` submits benchmark sweep jobs.
+- `python scripts/hpc/run_benchmark_sweep.py collect --output-dir output/hpc_benchmark/fine_sweep` aggregates per-chunk sweep outputs.
 - `python scripts/hpc/submit_full_campaign.py --dry-run` previews full campaign submission.
-- `python scripts/hpc/train_ml_classifier.py` trains the benchmark ML classifier.
+- `python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_sweep --output-dir output/hpc_benchmark/ml_models` trains the benchmark ML classifier.
 - `python scripts/hpc/analyze_benchmark_results.py` analyzes benchmark outputs and produces reports.
 - TODO: Validate exact invocations for `scripts/run_aalto_benchmark.py` and `scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy

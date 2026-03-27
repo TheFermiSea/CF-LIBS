@@ -95,11 +95,12 @@ python scripts/generate_model_library.py consolidate --output-dir output/model_l
 python scripts/generate_model_library.py build-index --output-dir output/model_library
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
 python scripts/run_unified_benchmark.py
-python scripts/hpc/generate_synthetic_benchmark.py submit
-python scripts/hpc/generate_basis_libraries.py --submit --n-jobs 8 --max-elements 8
-python scripts/hpc/run_benchmark_sweep.py submit
+python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
+python scripts/hpc/generate_basis_libraries.py --submit --output-dir output/hpc_benchmark/basis_libraries
+python scripts/hpc/run_benchmark_sweep.py submit --synthetic-dir output/hpc_benchmark/synthetic_corpus --basis-dir output/hpc_benchmark/basis_libraries --output-dir output/hpc_benchmark/fine_sweep
+python scripts/hpc/run_benchmark_sweep.py collect --output-dir output/hpc_benchmark/fine_sweep
 python scripts/hpc/submit_full_campaign.py --dry-run
-python scripts/hpc/train_ml_classifier.py
+python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_sweep --output-dir output/hpc_benchmark/ml_models
 python scripts/hpc/analyze_benchmark_results.py
 ```
 
@@ -218,16 +219,17 @@ Short imperative summary (<=50 chars), optional body explaining what/why. Recent
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
-## Beads Workflow (Native `bd`)
+## BeadHub Workflow (`bash ./scripts/bdh`)
 
-- Use native `bd` commands for issue tracking and session context.
+- Use the repo wrapper `bash ./scripts/bdh` (not raw `bd`/`bdh`) so identity and local auth are consistent per worktree.
 - Session start:
-  - `bd prime`
-  - `bd memories`
-  - `bd ready`
-- Task execution:
-  - `bd show <BEAD_ID>`
-  - `bd comments <BEAD_ID>`
-  - `bd update <BEAD_ID> --status in_progress`
-  - `bd comment <BEAD_ID> "Completed X, working on Y"`
-  - `bd update <BEAD_ID> --status inreview`
+  - `bash ./scripts/bdh :policy`
+  - `bash ./scripts/bdh :status`
+  - `bash ./scripts/bdh ready`
+- If this worktree has not been bootstrapped yet, run:
+  - `bash ./scripts/beadhub-bootstrap.sh`
+- Coordination commands:
+  - `bash ./scripts/bdh :aweb mail list`
+  - `bash ./scripts/bdh :aweb mail send <alias> "message"`
+  - `bash ./scripts/bdh :aweb chat pending`
+  - `bash ./scripts/bdh :aweb chat send-and-wait <alias> "question" --start-conversation`
