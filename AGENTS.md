@@ -12,8 +12,16 @@
 - `just setup-codex` creates a Python 3.12 `uv` environment with Codex-friendly local extras (`dev`, `jax-cpu`, `hdf5`).
 - `just setup-ci` creates a Python 3.12 `uv` environment with CI extras (`dev`, `ci`).
 - `just check` runs the stable local quality gate (`ruff check`, `mypy`, fast pytest).
+- `just fmt` formats Python code with Black.
+- `just fmt-check` checks Black formatting without modifying files.
+- `just fmt-ruff` formats Python code with Ruff formatter (evaluation path).
+- `just fmt-ruff-check` checks Ruff formatter compatibility without modifying files.
+- `just lint` runs Ruff lint checks.
+- `just lint-fix` auto-fixes Ruff lint findings where possible.
+- `just typecheck` runs mypy for `cflibs/`.
 - `just test-fast` runs a CPU-only fast pytest slice that skips DB, Bayesian, Rust, JAX, and slow tests.
 - `just test-unit` runs unit tests while skipping DB, Rust, and JAX markers.
+- `just test` runs the full Python pytest suite.
 - `just benchmark` runs benchmark-only tests.
 - `just test-rust` runs Rust unit/integration tests for `cflibs-core`.
 - `just test-rust-nextest` runs `cargo nextest` for `cflibs-core`.
@@ -85,14 +93,21 @@
 - `python scripts/generate_model_library.py build-index --output-dir output/model_library` builds FAISS search index for the library.
 - `python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library` emits/submits SLURM array jobs for cluster generation.
 - `python scripts/run_unified_benchmark.py` runs the unified benchmark workflow end-to-end.
+- `python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1` runs a quick ID-only smoke benchmark.
+- `python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run` previews NIST reference-spectrum fixture fetches.
+- `python -m scripts.generate_real_data_report` writes `output/validation/real_data_confirmation_report.json`.
 - `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.
+- `python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus` generates one synthetic benchmark chunk locally.
+- `python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus` consolidates synthetic benchmark chunks.
 - `python scripts/hpc/generate_basis_libraries.py --submit --output-dir output/hpc_benchmark/basis_libraries` submits basis-library generation jobs.
 - `python scripts/hpc/run_benchmark_sweep.py submit --synthetic-dir output/hpc_benchmark/synthetic_corpus --basis-dir output/hpc_benchmark/basis_libraries --output-dir output/hpc_benchmark/fine_sweep` submits benchmark sweep jobs.
+- `python scripts/hpc/run_benchmark_sweep.py worker --chunk-path <path> --basis-dir output/hpc_benchmark/basis_libraries --pathway alias --output-dir output/hpc_benchmark/fine_sweep` runs one sweep worker locally for debugging.
 - `python scripts/hpc/run_benchmark_sweep.py collect --output-dir output/hpc_benchmark/fine_sweep` aggregates per-chunk sweep outputs.
 - `python scripts/hpc/submit_full_campaign.py --dry-run` previews full campaign submission.
 - `python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_sweep --output-dir output/hpc_benchmark/ml_models` trains the benchmark ML classifier.
 - `python scripts/hpc/analyze_benchmark_results.py` analyzes benchmark outputs and produces reports.
 - TODO: Validate exact invocations for `scripts/run_aalto_benchmark.py` and `scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
+- TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` after installing optional plotting dependencies (`matplotlib`).
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy
   `manifold-generator.py` script is not MPI-aware and should not be launched via
   `mpirun` or `srun` unless explicit MPI support is added first.

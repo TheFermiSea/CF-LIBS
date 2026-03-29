@@ -11,6 +11,8 @@ CF-LIBS is a physics-based Calibration-Free Laser-Induced Breakdown Spectroscopy
 ```bash
 uv venv --python 3.12
 pip install -e ".[dev]"
+just setup                        # uv venv + dev deps in .venv
+just setup-codex                  # uv venv + dev + jax-cpu + hdf5
 uv pip install -e ".[local]"    # Apple Silicon: JAX Metal, h5py, zarr, dev tools
 uv pip install -e ".[cluster]"  # NVIDIA GPU: JAX CUDA, h5py, mpi4py
 just setup-ci                    # dev + CI extras in local .venv
@@ -25,6 +27,11 @@ mypy cflibs/
 pytest tests/ -v
 JAX_PLATFORMS=cpu pytest tests/    # force CPU backend
 just check                          # lint + mypy + fast test slice
+just fmt                            # black format pass
+just fmt-check                      # black format check
+just fmt-ruff-check                 # evaluate ruff formatter compatibility
+just lint-fix                       # apply ruff auto-fixes
+just typecheck-ty                   # advisory ty typecheck
 ```
 
 ## Swarm Quality-Gate Workflow (`.swarm/profile.toml`)
@@ -86,18 +93,24 @@ python datagen_v2.py                              # generate atomic DB (hours-lo
 python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus
 python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1
 python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json
+python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run
 python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000
 python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json
 python scripts/validate_real_data.py --datasets steel_245nm FeNi_380nm --no-plots
+python -m scripts.generate_real_data_report
 python scripts/calibrate_alias.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/calibration
 python scripts/generate_model_library.py chunk --chunk-id 0 --n-chunks 8 --output-dir output/model_library
 python scripts/generate_model_library.py consolidate --output-dir output/model_library
 python scripts/generate_model_library.py build-index --output-dir output/model_library
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
 python scripts/run_unified_benchmark.py
+python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1
 python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
+python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus
+python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_basis_libraries.py --submit --output-dir output/hpc_benchmark/basis_libraries
 python scripts/hpc/run_benchmark_sweep.py submit --synthetic-dir output/hpc_benchmark/synthetic_corpus --basis-dir output/hpc_benchmark/basis_libraries --output-dir output/hpc_benchmark/fine_sweep
+python scripts/hpc/run_benchmark_sweep.py worker --chunk-path <path> --basis-dir output/hpc_benchmark/basis_libraries --pathway alias --output-dir output/hpc_benchmark/fine_sweep
 python scripts/hpc/run_benchmark_sweep.py collect --output-dir output/hpc_benchmark/fine_sweep
 python scripts/hpc/submit_full_campaign.py --dry-run
 python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_sweep --output-dir output/hpc_benchmark/ml_models
@@ -106,6 +119,7 @@ python scripts/hpc/analyze_benchmark_results.py
 
 TODO: Confirm exact runtime flags for `scripts/run_aalto_benchmark.py` and
 `scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
+TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` after installing optional plotting dependencies (`matplotlib`).
 
 ## Code Search Workflow
 
