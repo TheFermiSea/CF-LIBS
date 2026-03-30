@@ -55,6 +55,9 @@
 - `python datagen_v2.py` runs the database generator directly.
 - `cflibs forward examples/config_example.yaml --output spectrum.csv` generates a synthetic spectrum.
 - `cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml` runs inversion.
+- `cflibs analyze spectrum.csv --elements Fe,Cu --format json` runs end-to-end analysis with JSON output.
+- `cflibs bayesian spectrum.csv --elements Fe,Cu --output posterior.nc` runs Bayesian inversion and writes an ArviZ NetCDF trace.
+- `cflibs batch ./spectra --elements Fe,Cu --output batch_results.json` processes a directory of spectra in batch mode.
 - `cflibs generate-manifold examples/manifold_config_example.yaml --progress` builds a spectral manifold.
 
 ## Deployment Environment
@@ -94,6 +97,11 @@
 - `python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library` emits/submits SLURM array jobs for cluster generation.
 - `python scripts/run_unified_benchmark.py` runs the unified benchmark workflow end-to-end.
 - `python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1` runs a quick ID-only smoke benchmark.
+- `python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments` runs baseline benchmark experiments.
+- `python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments` runs advanced benchmark experiments.
+- `python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json` analyzes threshold operating points and recommendations.
+- `python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json` analyzes calibration-shift robustness from benchmark outputs.
+- `python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation` generates ALIAS gate-breakdown and suppression-waterfall diagnostics.
 - `python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run` previews NIST reference-spectrum fixture fetches.
 - `python -m scripts.generate_real_data_report` writes `output/validation/real_data_confirmation_report.json`.
 - `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.

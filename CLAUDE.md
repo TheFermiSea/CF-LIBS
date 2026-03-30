@@ -80,9 +80,9 @@ JAX is forced to CPU in `conftest.py` with `jax_enable_x64=True`.
 cflibs generate-db
 cflibs forward examples/config_example.yaml --output spectrum.csv
 cflibs invert spectrum.csv --elements Fe Cu --config examples/inversion_config_example.yaml
-cflibs analyze spectrum.csv --elements Fe,Cu --output result.json
-cflibs bayesian spectrum.csv --elements Fe,Cu --output posterior.json
-cflibs batch ./spectra --elements Fe,Cu --output-dir output/batch_results
+cflibs analyze spectrum.csv --elements Fe,Cu --format json
+cflibs bayesian spectrum.csv --elements Fe,Cu --output posterior.nc
+cflibs batch ./spectra --elements Fe,Cu --output output/batch_results.json
 cflibs generate-manifold examples/manifold_config_example.yaml --progress
 ```
 
@@ -105,6 +105,11 @@ python scripts/generate_model_library.py build-index --output-dir output/model_l
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
 python scripts/run_unified_benchmark.py
 python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1
+python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments
+python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments
+python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json
+python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json
+python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation
 python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus
