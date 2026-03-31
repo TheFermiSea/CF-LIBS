@@ -28,7 +28,7 @@
 - `just typecheck-ty` runs `ty` in exploratory mode; it is not yet a required gate.
 - `uv venv --python 3.12` creates a virtual environment with `uv`.
 - `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
-- `uv pip install -e ".[local]"` installs local dev extras (JAX CPU, hdf5, dev tools).
+- `uv pip install -e ".[local]"` installs local dev extras (Apple Silicon: JAX Metal; others: JAX CPU, plus hdf5/benchmark/dev tools).
 - `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, hdf5, mpi4py).
 - `pytest tests/ -v` runs the full test suite.
 - `pytest tests/ -v --benchmark-only` runs benchmark-only tests (used in CI performance workflow).
@@ -99,9 +99,14 @@
 - `python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1` runs a quick ID-only smoke benchmark.
 - `python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments` runs baseline benchmark experiments.
 - `python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments` runs advanced benchmark experiments.
+- `python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick` runs a quick unified element-ID benchmark on curated datasets.
+- `python scripts/generate_benchmark_figures.py` renders publication figures to `docs/reports/figures`.
 - `python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json` analyzes threshold operating points and recommendations.
 - `python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json` analyzes calibration-shift robustness from benchmark outputs.
 - `python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation` generates ALIAS gate-breakdown and suppression-waterfall diagnostics.
+- `python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --output-json output/validation/partition_fit_coeffs.json` fits Irwin partition-function polynomials from NIST fixtures and writes coefficients summary.
+- `python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db` checks CF-LIBS partition functions against NIST fixture values.
+- `python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run` expands partition-function coverage from DB energy levels (remove `--dry-run` to write DB updates).
 - `python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run` previews NIST reference-spectrum fixture fetches.
 - `python -m scripts.generate_real_data_report` writes `output/validation/real_data_confirmation_report.json`.
 - `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.

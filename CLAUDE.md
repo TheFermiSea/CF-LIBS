@@ -13,7 +13,7 @@ uv venv --python 3.12
 pip install -e ".[dev]"
 just setup                        # uv venv + dev deps in .venv
 just setup-codex                  # uv venv + dev + jax-cpu + hdf5
-uv pip install -e ".[local]"    # Apple Silicon: JAX Metal, h5py, zarr, dev tools
+uv pip install -e ".[local]"    # Apple Silicon: JAX Metal; others: JAX CPU (+ local benchmark/dev extras)
 uv pip install -e ".[cluster]"  # NVIDIA GPU: JAX CUDA, h5py, mpi4py
 just setup-ci                    # dev + CI extras in local .venv
 ```
@@ -29,6 +29,7 @@ JAX_PLATFORMS=cpu pytest tests/    # force CPU backend
 just check                          # lint + mypy + fast test slice
 just fmt                            # black format pass
 just fmt-check                      # black format check
+just fmt-ruff                       # ruff formatter pass (evaluation path)
 just fmt-ruff-check                 # evaluate ruff formatter compatibility
 just lint-fix                       # apply ruff auto-fixes
 just typecheck-ty                   # advisory ty typecheck
@@ -107,9 +108,14 @@ python scripts/run_unified_benchmark.py
 python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1
 python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments
 python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments
+python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick
+python scripts/generate_benchmark_figures.py
 python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json
 python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json
 python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation
+python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --output-json output/validation/partition_fit_coeffs.json
+python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db
+python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run
 python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus
