@@ -13,8 +13,9 @@ uv venv --python 3.12
 pip install -e ".[dev]"
 just setup                        # uv venv + dev deps in .venv
 just setup-codex                  # uv venv + dev + jax-cpu + hdf5
-uv pip install -e ".[local]"    # Apple Silicon: JAX Metal; others: JAX CPU (+ local benchmark/dev extras)
-uv pip install -e ".[cluster]"  # NVIDIA GPU: JAX CUDA, h5py, mpi4py
+uv pip install -e ".[local]"    # broad local extras: platform JAX, HDF5/Zarr, FAISS, Bayesian, ML/PINN, widgets, dev
+uv pip install -e ".[cluster]"  # cluster extras: JAX CUDA, HDF5, FAISS, Bayesian, uncertainty, PINN, MPI
+uv pip install -e ".[docs]"     # Sphinx documentation tooling
 just setup-ci                    # dev + CI extras in local .venv
 ```
 
@@ -22,7 +23,7 @@ just setup-ci                    # dev + CI extras in local .venv
 
 ```bash
 ruff check cflibs/ tests/
-black --check cflibs/
+black --check cflibs/ tests/
 mypy cflibs/
 pytest tests/ -v
 JAX_PLATFORMS=cpu pytest tests/    # force CPU backend
@@ -41,7 +42,7 @@ For beefcake-loop parity, run gates in this order:
 
 ```bash
 ruff check cflibs/ tests/
-black --check cflibs/
+black --check cflibs/ tests/
 mypy cflibs/                                  # advisory/non-blocking in swarm profile
 pytest tests/ -x -q -m "not slow and not requires_db and not requires_jax"
 ```
@@ -93,7 +94,13 @@ cflibs generate-manifold examples/manifold_config_example.yaml --progress
 python datagen_v2.py                              # generate atomic DB (hours-long)
 python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus
 python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1
+JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison
+JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --generate-basis --basis-fwhm 0.5 1.0
+JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --pathways alias spectral_nnls hybrid --quick
 python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json
+python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --dry-run --output-json output/validation/partition_fit_coeffs.json
+python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run --output-json output/validation/partition_function_expansion.json
+python scripts/verify_partition_functions.py --element Fe Cu Al --db ASD_da/libs_production.db
 python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run
 python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000
 python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json
@@ -108,14 +115,10 @@ python scripts/run_unified_benchmark.py
 python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1
 python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments
 python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments
-python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick
 python scripts/generate_benchmark_figures.py
 python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json
 python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json
 python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation
-python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --output-json output/validation/partition_fit_coeffs.json
-python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db
-python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run
 python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus

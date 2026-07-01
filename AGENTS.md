@@ -28,8 +28,9 @@
 - `just typecheck-ty` runs `ty` in exploratory mode; it is not yet a required gate.
 - `uv venv --python 3.12` creates a virtual environment with `uv`.
 - `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
-- `uv pip install -e ".[local]"` installs local dev extras (Apple Silicon: JAX Metal; others: JAX CPU, plus hdf5/benchmark/dev tools).
-- `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, hdf5, mpi4py).
+- `uv pip install -e ".[local]"` installs broad local extras (platform JAX, HDF5/Zarr, FAISS, Bayesian, uncertainty, ML/PINN, widgets, dev tools).
+- `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, HDF5, FAISS, Bayesian, uncertainty, PINN, MPI).
+- `uv pip install -e ".[docs]"` installs Sphinx documentation tooling.
 - `pytest tests/ -v` runs the full test suite.
 - `pytest tests/ -v --benchmark-only` runs benchmark-only tests (used in CI performance workflow).
 - `JAX_PLATFORMS=cpu pytest tests/` forces CPU backend for tests.
@@ -41,7 +42,7 @@
 - `pytest -m "unit"` runs only unit tests.
 - `pytest -m "integration"` runs only integration tests.
 - `black cflibs/ tests/` formats code.
-- `black --check cflibs/` checks formatting.
+- `black --check cflibs/ tests/` checks formatting.
 - `ruff format --check cflibs/ tests/` evaluates Ruff formatter compatibility for a future repo-wide migration.
 - `ruff check cflibs/ tests/` runs linting.
 - `ruff check --fix cflibs/` auto-fixes lint issues where possible.
@@ -63,7 +64,7 @@
 ## Deployment Environment
 
 - `uv venv --python 3.12` creates a virtual environment (Deployment guide).
-- `uv pip install -e ".[local]"` installs local extras in the uv-managed env.
+- `uv pip install -e ".[local]"` installs broad local extras in the uv-managed env, using JAX Metal on Apple Silicon and CPU JAX elsewhere.
 
 ## Coding Style & Naming Conventions
 - Follow PEP 8 with 100-char line length (Black/Ruff config in `pyproject.toml`).
@@ -86,7 +87,13 @@
 - `nohup python datagen_v2.py &` runs database generation in the background.
 - `python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus` builds the synthetic element-ID corpus.
 - `python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1` benchmarks element identification on synthetic spectra.
+- `JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison` runs the unified Aalto element-ID benchmark across ALIAS, NNLS, hybrid, Voigt+ALIAS, and NNLS concentration-threshold pathways.
+- `JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --generate-basis --basis-fwhm 0.5 1.0` generates benchmark basis libraries before running element-ID comparisons.
+- `JAX_PLATFORMS=cpu python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --pathways alias spectral_nnls hybrid --quick` runs a fast targeted element-ID benchmark slice.
 - `python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json` audits synthetic benchmark physics consistency.
+- `python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --dry-run --output-json output/validation/partition_fit_coeffs.json` fits Irwin partition-function coefficients from the NIST reference fixture without writing to the DB.
+- `python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run --output-json output/validation/partition_function_expansion.json` previews partition-function expansion over species in the atomic database.
+- `python scripts/verify_partition_functions.py --element Fe Cu Al --db ASD_da/libs_production.db` compares CF-LIBS partition functions against the NIST reference fixture.
 - `python scripts/validate_nist_parity.py --element Fe --T 0.8 --ne 1e17 --wl-min 220 --wl-max 265 --resolving-power 1000` runs NIST parity validation.
 - `python scripts/run_nist_validation.py --db ASD_da/libs_production.db --output output/validation/nist_crosscheck_report.json` runs consolidated NIST cross-check reporting.
 - `python scripts/validate_real_data.py --datasets steel_245nm FeNi_380nm --no-plots` validates element ID pipelines against real datasets.
@@ -99,14 +106,10 @@
 - `python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1` runs a quick ID-only smoke benchmark.
 - `python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments` runs baseline benchmark experiments.
 - `python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments` runs advanced benchmark experiments.
-- `python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick` runs a quick unified element-ID benchmark on curated datasets.
 - `python scripts/generate_benchmark_figures.py` renders publication figures to `docs/reports/figures`.
 - `python scripts/analyze_threshold_pareto.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/threshold_pareto_report.json` analyzes threshold operating points and recommendations.
 - `python scripts/analyze_calibration_stress.py --bench-dir output/synthetic_benchmark/postmerge_synth_v1_auto_24 --output output/validation/calibration_stress_report.json` analyzes calibration-shift robustness from benchmark outputs.
 - `python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/validation` generates ALIAS gate-breakdown and suppression-waterfall diagnostics.
-- `python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --output-json output/validation/partition_fit_coeffs.json` fits Irwin partition-function polynomials from NIST fixtures and writes coefficients summary.
-- `python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db` checks CF-LIBS partition functions against NIST fixture values.
-- `python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run` expands partition-function coverage from DB energy levels (remove `--dry-run` to write DB updates).
 - `python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run` previews NIST reference-spectrum fixture fetches.
 - `python -m scripts.generate_real_data_report` writes `output/validation/real_data_confirmation_report.json`.
 - `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.
