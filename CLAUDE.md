@@ -33,6 +33,7 @@ just fmt-ruff                       # ruff formatter pass (evaluation path)
 just fmt-ruff-check                 # evaluate ruff formatter compatibility
 just lint-fix                       # apply ruff auto-fixes
 just typecheck-ty                   # advisory ty typecheck
+sphinx-build -b html docs docs/_build/html  # local docs build
 ```
 
 ## Swarm Quality-Gate Workflow (`.swarm/profile.toml`)
@@ -91,6 +92,7 @@ cflibs generate-manifold examples/manifold_config_example.yaml --progress
 
 ```bash
 python datagen_v2.py                              # generate atomic DB (hours-long)
+python scripts/debug_recall.py                    # ALIAS confidence gate diagnostics
 python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus
 python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1
 python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json
@@ -137,6 +139,13 @@ TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` 
 - Prefer semantic search with `colgrep` before regex-only search.
 - `colgrep "where inversion line selection happens" -k 20` for intent-level discovery.
 - `colgrep -e "add_parser(" -F "cli subcommands" cflibs/cli/main.py` to map CLI command registration quickly.
+
+## Claude/GPD Local Workflows
+
+- Use `/gpd:help` for the Get Physics Done quick start and `/gpd:help --all` for the full command reference under `.claude/commands/gpd/`.
+- GPD workflow specs live in `.claude/get-physics-done/workflows/`; shared command references and templates live under `.claude/get-physics-done/references/` and `.claude/get-physics-done/templates/`.
+- Claude session hooks in `.claude/hooks/` surface Beads status, enforce branch-before-edit behavior on `main`/`master`, send BeadHub notifications after tool use, and validate completion for subagent bead handoffs.
+- `.claude/beads-workflow-injection.md` is the source for the stricter worktree-per-bead protocol used by Claude subagents: create `.worktrees/bd-{BEAD_ID}`, comment progress, commit, push, and move the bead to `inreview`.
 
 ## Architecture
 

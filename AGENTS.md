@@ -84,6 +84,7 @@
 - `cflibs generate-manifold examples/manifold_config_example.yaml --progress` builds a spectral manifold.
 - `python datagen_v2.py` generates the atomic database (long-running).
 - `nohup python datagen_v2.py &` runs database generation in the background.
+- `python scripts/debug_recall.py` prints ALIAS pre-gate and post-gate confidence diagnostics for the curated real-data cases.
 - `python scripts/build_synthetic_id_corpus.py --db-path ASD_da/libs_production.db --output-dir output/synthetic_corpus` builds the synthetic element-ID corpus.
 - `python scripts/benchmark_synthetic_identifiers.py --dataset-path output/synthetic_corpus/ak3_1_3_corpus_v1/corpus.json --db-path ASD_da/libs_production.db --output-dir output/synthetic_benchmark/ak3_1_4_v1` benchmarks element identification on synthetic spectra.
 - `python scripts/audit_synthetic_physics.py --db-path ASD_da/libs_production.db --element Fe --output output/validation/synthetic_physics_audit.json` audits synthetic benchmark physics consistency.
@@ -124,6 +125,13 @@
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy
   `manifold-generator.py` script is not MPI-aware and should not be launched via
   `mpirun` or `srun` unless explicit MPI support is added first.
+
+## Claude/GPD Local Workflows
+- `.claude/commands/gpd/` exposes Get Physics Done commands for research planning, execution, verification, and publication workflows; start with `/gpd:help` or `/gpd:help --all`.
+- `.claude/get-physics-done/workflows/` contains the backing workflow specs, and `.claude/get-physics-done/references/` holds the shared reference material those commands include.
+- `.claude/hooks/session-start.sh` surfaces Beads status, ready work, blocked work, stale work, sync status, and merged-worktree cleanup hints at Claude session start.
+- `.claude/hooks/enforce-branch-before-edit.sh` blocks Claude Edit/Write operations on `main` or `master` outside `.worktrees/` while allowing non-main branches, detached worktrees, and `.claude/` meta-configuration edits.
+- `.claude/beads-workflow-injection.md` documents the stricter worktree-per-bead protocol used by Claude subagents, including branch naming, progress comments, push, and `inreview` status handoff.
 
 ## Commit & Pull Request Guidelines
 - Commit messages: short imperative summary (<=50 chars) with optional body explaining what/why.
