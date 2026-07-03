@@ -48,6 +48,7 @@
 - `mypy cflibs/` runs type checks.
 - `ty check cflibs --exit-zero` runs the next-generation type checker in advisory mode.
 - `sphinx-build -b html docs docs/_build/html` builds documentation locally.
+- `~/.gpd/venv/bin/gpd convention check --cwd .` runs the advisory GPD physics-convention check used by `.swarm/profile.toml`.
 
 ## CLI Workflows
 
@@ -97,6 +98,9 @@
 - `python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library` emits/submits SLURM array jobs for cluster generation.
 - `python scripts/run_unified_benchmark.py` runs the unified benchmark workflow end-to-end.
 - `python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1` runs a quick ID-only smoke benchmark.
+- `python scripts/run_aalto_benchmark.py --db libs_production.db --data-dir data/aalto_libs --output-dir output/aalto_benchmark` runs the legacy/reference Aalto LIBS benchmark; prefer the unified benchmark for current reporting.
+- `python scripts/run_comprehensive_benchmark.py --db libs_production.db --n-compositions 20 --output-dir output/comprehensive_benchmark` runs the comprehensive synthetic+real benchmark.
+- `python scripts/run_comprehensive_benchmark.py --db libs_production.db --skip-synthetic` runs only the real-data portion of the comprehensive benchmark.
 - `python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments` runs baseline benchmark experiments.
 - `python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments` runs advanced benchmark experiments.
 - `python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick` runs a quick unified element-ID benchmark on curated datasets.
@@ -108,6 +112,7 @@
 - `python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db` checks CF-LIBS partition functions against NIST fixture values.
 - `python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run` expands partition-function coverage from DB energy levels (remove `--dry-run` to write DB updates).
 - `python scripts/fetch_nist_reference_spectra.py --elements Fe Cu --dry-run` previews NIST reference-spectrum fixture fetches.
+- `python scripts/generate_nist_reference_spectra.py --datasets Fe_245nm Ni_245nm --output-dir output/nist_ground_truth` fetches NIST LIBS line payloads for pure real-data datasets and writes comparison artifacts.
 - `python -m scripts.generate_real_data_report` writes `output/validation/real_data_confirmation_report.json`.
 - `python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus` submits synthetic benchmark generation jobs.
 - `python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus` generates one synthetic benchmark chunk locally.
@@ -119,11 +124,14 @@
 - `python scripts/hpc/submit_full_campaign.py --dry-run` previews full campaign submission.
 - `python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_sweep --output-dir output/hpc_benchmark/ml_models` trains the benchmark ML classifier.
 - `python scripts/hpc/analyze_benchmark_results.py` analyzes benchmark outputs and produces reports.
-- TODO: Validate exact invocations for `scripts/run_aalto_benchmark.py` and `scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
-- TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` after installing optional plotting dependencies (`matplotlib`).
 - Multi-node manifold generation should use `cflibs generate-manifold`; the legacy
   `manifold-generator.py` script is not MPI-aware and should not be launched via
   `mpirun` or `srun` unless explicit MPI support is added first.
+
+## Physics Convention Workflow
+- `.gpd/STATE.md` records repo-specific convention locks for CF-LIBS units, Saha/Boltzmann forms, emissivity, spectral-domain normalization, and related physics assumptions.
+- For physics-sensitive edits, check `.gpd/STATE.md` before changing formulas or units, and run `~/.gpd/venv/bin/gpd convention check --cwd .` when the local GPD environment exists.
+- Treat the `.swarm/profile.toml` `physics` gate as advisory: it runs the same convention check and intentionally does not block the swarm loop.
 
 ## Commit & Pull Request Guidelines
 - Commit messages: short imperative summary (<=50 chars) with optional body explaining what/why.
