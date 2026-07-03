@@ -44,6 +44,7 @@ ruff check cflibs/ tests/
 black --check cflibs/
 mypy cflibs/                                  # advisory/non-blocking in swarm profile
 pytest tests/ -x -q -m "not slow and not requires_db and not requires_jax"
+~/.gpd/venv/bin/gpd convention check --cwd .     # advisory physics-convention check
 ```
 
 Auto-fix sequence configured in `.swarm/profile.toml`:
@@ -106,6 +107,9 @@ python scripts/generate_model_library.py build-index --output-dir output/model_l
 python scripts/generate_model_library.py submit --n-chunks 32 --output-dir output/model_library
 python scripts/run_unified_benchmark.py
 python scripts/run_unified_benchmark.py --quick --sections id --max-outer-folds 1
+python scripts/run_aalto_benchmark.py --db libs_production.db --data-dir data/aalto_libs --output-dir output/aalto_benchmark
+python scripts/run_comprehensive_benchmark.py --db libs_production.db --n-compositions 20 --output-dir output/comprehensive_benchmark
+python scripts/run_comprehensive_benchmark.py --db libs_production.db --skip-synthetic
 python scripts/run_experiments.py --experiments T0.2 E1 E2 --output-dir output/experiments
 python scripts/run_experiments_advanced.py --experiments E3 E4 E5 --output-dir output/experiments
 python scripts/benchmark_element_id.py --db-path ASD_da/libs_production.db --data-dir data --output-dir output/benchmark_comparison --quick
@@ -116,6 +120,7 @@ python scripts/plot_alias_diagnostics.py --db-path ASD_da/libs_production.db --d
 python scripts/fit_partition_coefficients.py --db ASD_da/libs_production.db --output-json output/validation/partition_fit_coeffs.json
 python scripts/verify_partition_functions.py --element Fe Cu --db ASD_da/libs_production.db
 python scripts/expand_partition_functions.py --db ASD_da/libs_production.db --dry-run
+python scripts/generate_nist_reference_spectra.py --datasets Fe_245nm Ni_245nm --output-dir output/nist_ground_truth
 python scripts/hpc/generate_synthetic_benchmark.py submit --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py chunk --chunk-id 0 --n-chunks 16 --output-dir output/hpc_benchmark/synthetic_corpus
 python scripts/hpc/generate_synthetic_benchmark.py consolidate --output-dir output/hpc_benchmark/synthetic_corpus
@@ -128,15 +133,17 @@ python scripts/hpc/train_ml_classifier.py --sweep-dir output/hpc_benchmark/fine_
 python scripts/hpc/analyze_benchmark_results.py
 ```
 
-TODO: Confirm exact runtime flags for `scripts/run_aalto_benchmark.py` and
-`scripts/run_comprehensive_benchmark.py` after installing optional benchmark dependencies.
-TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` after installing optional plotting dependencies (`matplotlib`).
-
 ## Code Search Workflow
 
 - Prefer semantic search with `colgrep` before regex-only search.
 - `colgrep "where inversion line selection happens" -k 20` for intent-level discovery.
 - `colgrep -e "add_parser(" -F "cli subcommands" cflibs/cli/main.py` to map CLI command registration quickly.
+
+## Physics Convention Workflow
+
+- `.gpd/STATE.md` records repo-specific convention locks for CF-LIBS units, Saha/Boltzmann forms, emissivity, spectral-domain normalization, and related physics assumptions.
+- For physics-sensitive edits, check `.gpd/STATE.md` before changing formulas or units.
+- The `.swarm/profile.toml` physics gate runs `~/.gpd/venv/bin/gpd convention check --cwd .` as an advisory, non-blocking convention check.
 
 ## Architecture
 
