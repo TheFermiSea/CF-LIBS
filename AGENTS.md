@@ -26,10 +26,13 @@
 - `just test-rust` runs Rust unit/integration tests for `cflibs-core`.
 - `just test-rust-nextest` runs `cargo nextest` for `cflibs-core`.
 - `just typecheck-ty` runs `ty` in exploratory mode; it is not yet a required gate.
+- `~/.gpd/venv/bin/gpd convention check --cwd .` runs the advisory GPD physics-convention check used by the swarm profile; use it before changing unit systems, Saha/partition-function logic, emissivity formulas, or similar physics conventions.
 - `uv venv --python 3.12` creates a virtual environment with `uv`.
 - `pip install -e ".[dev]"` installs the project in editable mode with dev tools.
 - `uv pip install -e ".[local]"` installs local dev extras (Apple Silicon: JAX Metal; others: JAX CPU, plus hdf5/benchmark/dev tools).
 - `uv pip install -e ".[cluster]"` installs cluster extras (JAX CUDA, hdf5, mpi4py).
+- `uv pip install -e ".[ci]"` installs the CI test extra set without GPU/MPI dependencies.
+- `uv pip install -e ".[docs]"` installs Sphinx documentation dependencies.
 - `pytest tests/ -v` runs the full test suite.
 - `pytest tests/ -v --benchmark-only` runs benchmark-only tests (used in CI performance workflow).
 - `JAX_PLATFORMS=cpu pytest tests/` forces CPU backend for tests.
@@ -64,12 +67,14 @@
 
 - `uv venv --python 3.12` creates a virtual environment (Deployment guide).
 - `uv pip install -e ".[local]"` installs local extras in the uv-managed env.
+- `uv pip install -e ".[cluster]"` installs CUDA/HDF5/MPI-oriented cluster extras.
 
 ## Coding Style & Naming Conventions
 - Follow PEP 8 with 100-char line length (Black/Ruff config in `pyproject.toml`).
 - Prefer `just` recipes for routine local workflows so Codex, local shells, and humans use the same command surface.
 - The stable local gate is `just check`; formatting remains available via `just fmt` and `just fmt-check`, but is not yet folded into the default gate.
 - Evaluate `ruff format` via `just fmt-ruff-check` before switching the formatter across the repo.
+- `.swarm/profile.toml` runs lint and Black format checks as blocking gates, with mypy, pytest, and GPD physics-convention checks configured as advisory/non-blocking gates for autonomous loops.
 - Use type hints for public functions and NumPy-style docstrings for public APIs.
 - Test files: `test_*.py`; test functions: `test_*`.
 - Prefer descriptive, physics-aligned naming (e.g., `saha_equation_ratio`, `compute_spectrum`).
@@ -172,6 +177,8 @@ This project uses `bash ./scripts/bdh` for multi-agent coordination and issue tr
 ```bash
 bash ./scripts/beadhub-bootstrap.sh
 ```
+
+`bash ./scripts/bdh` attempts that bootstrap automatically when `.beadhub` or `.aw/` files are missing, but the local BeadHub server still needs to be reachable at the configured API base.
 
 In this repo's local OSS setup, the BeadHub server uses `http://localhost:8000` as the API base (with endpoints under `/v1`). The local bootstrap avoids writes to `~/.config/aw`, writes repo-local AW files under `.aw/`, and `bash ./scripts/bdh` exports the workspace API key from that local config so `bdh` can authenticate consistently in sandboxed Codex worktrees. Do not append `/api` unless you are intentionally switching this workspace to BeadHub Cloud or another server that expects that base path.
 

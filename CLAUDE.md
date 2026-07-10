@@ -15,6 +15,8 @@ just setup                        # uv venv + dev deps in .venv
 just setup-codex                  # uv venv + dev + jax-cpu + hdf5
 uv pip install -e ".[local]"    # Apple Silicon: JAX Metal; others: JAX CPU (+ local benchmark/dev extras)
 uv pip install -e ".[cluster]"  # NVIDIA GPU: JAX CUDA, h5py, mpi4py
+uv pip install -e ".[ci]"       # CPU CI extras: JAX, hdf5/zarr, FAISS, Bayesian/UQ, ML
+uv pip install -e ".[docs]"     # Sphinx documentation dependencies
 just setup-ci                    # dev + CI extras in local .venv
 ```
 
@@ -44,6 +46,7 @@ ruff check cflibs/ tests/
 black --check cflibs/
 mypy cflibs/                                  # advisory/non-blocking in swarm profile
 pytest tests/ -x -q -m "not slow and not requires_db and not requires_jax"
+~/.gpd/venv/bin/gpd convention check --cwd .  # advisory physics convention check
 ```
 
 Auto-fix sequence configured in `.swarm/profile.toml`:
@@ -52,6 +55,8 @@ Auto-fix sequence configured in `.swarm/profile.toml`:
 black cflibs/
 ruff check --fix cflibs/
 ```
+
+The swarm profile treats lint and Black formatting as blocking gates. Mypy, pytest, and the GPD physics convention check are advisory/non-blocking there; run the convention check before editing units, Saha/partition-function behavior, emissivity formulas, or other locked physics conventions.
 
 ## Running Tests
 
@@ -253,6 +258,7 @@ Short imperative summary (<=50 chars), optional body explaining what/why. Recent
   - `bash ./scripts/bdh ready`
 - If this worktree has not been bootstrapped yet, run:
   - `bash ./scripts/beadhub-bootstrap.sh`
+- `bash ./scripts/bdh` attempts that bootstrap automatically when `.beadhub` or `.aw/` files are missing, but it still requires the configured BeadHub server to be reachable.
 - Coordination commands:
   - `bash ./scripts/bdh :aweb mail list`
   - `bash ./scripts/bdh :aweb mail send <alias> "message"`
