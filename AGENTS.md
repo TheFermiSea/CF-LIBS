@@ -70,9 +70,32 @@
 - Prefer `just` recipes for routine local workflows so Codex, local shells, and humans use the same command surface.
 - The stable local gate is `just check`; formatting remains available via `just fmt` and `just fmt-check`, but is not yet folded into the default gate.
 - Evaluate `ruff format` via `just fmt-ruff-check` before switching the formatter across the repo.
+- For beefcake-loop/swarm parity, `.swarm/profile.toml` runs `ruff check cflibs/ tests/`,
+  `black --check cflibs/`, advisory `mypy cflibs/`, advisory fast pytest, and an
+  advisory GPD physics convention check; its auto-fix sequence is `black cflibs/`
+  followed by `ruff check --fix cflibs/`.
 - Use type hints for public functions and NumPy-style docstrings for public APIs.
 - Test files: `test_*.py`; test functions: `test_*`.
 - Prefer descriptive, physics-aligned naming (e.g., `saha_equation_ratio`, `compute_spectrum`).
+
+## Agent Tooling & Claude Workflows
+
+- `.claude/commands/gpd/` contains the local Get Physics Done command suite. Start with
+  `/gpd:help` for the command reference; common research-flow commands include
+  `/gpd:new-project`, `/gpd:plan-phase`, `/gpd:execute-phase`, `/gpd:verify-work`,
+  `/gpd:progress`, and `/gpd:complete-milestone`.
+- `.claude/agents/` contains reusable specialist agent prompts for architecture,
+  discovery, review, physics verification, literature review, planning, execution,
+  and synthesis. Use them when the task benefits from a focused reviewer or
+  investigator rather than a single linear pass.
+- `.claude/skills/` currently includes `subagents-discipline` for implementation
+  handoffs and `react-best-practices` for React/Next.js work. For implementation
+  beads, read the bead and comments first (`bd show <id>`, `bd comments <id>`) so
+  investigation context is not lost.
+- Claude hooks in `.claude/hooks/` enforce repo workflow details: session start
+  summarizes beads status, edit/write hooks block direct main/master edits outside
+  worktrees, Bash hooks prevent closing epics with incomplete children, and prompt
+  hooks nudge clarification for very short ambiguous requests.
 
 ## Testing Guidelines
 - Framework: pytest with optional `pytest-cov` and `pytest-benchmark`.
