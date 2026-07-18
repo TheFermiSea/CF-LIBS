@@ -53,6 +53,9 @@ black cflibs/
 ruff check --fix cflibs/
 ```
 
+The swarm profile also includes an advisory GPD physics convention check:
+`~/.gpd/venv/bin/gpd convention check --cwd .`.
+
 ## Running Tests
 
 ```bash
@@ -137,6 +140,36 @@ TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` 
 - Prefer semantic search with `colgrep` before regex-only search.
 - `colgrep "where inversion line selection happens" -k 20` for intent-level discovery.
 - `colgrep -e "add_parser(" -F "cli subcommands" cflibs/cli/main.py` to map CLI command registration quickly.
+
+## Claude Agent Tooling
+
+- `.claude/commands/gpd/` contains the local Get Physics Done command suite. Use
+  `/gpd:help` for the command reference; common flows are `/gpd:new-project`,
+  `/gpd:plan-phase`, `/gpd:execute-phase`, `/gpd:verify-work`, `/gpd:progress`,
+  and `/gpd:complete-milestone`.
+- `.claude/agents/` contains specialist prompts for architecture, discovery,
+  code review, physics verification, literature review, planning, execution, and
+  synthesis. Use them for focused investigation or review passes.
+- `.claude/skills/subagents-discipline/SKILL.md` is the implementation handoff
+  discipline: read the bead and comments first (`bash ./scripts/bdh show <id>`,
+  `bash ./scripts/bdh comments <id>`),
+  inspect actual external data before coding against it, and test both component
+  and feature behavior where applicable.
+- `.claude/skills/react-best-practices/SKILL.md` applies before React/Next.js work;
+  it emphasizes avoiding data waterfalls, direct imports over barrels, dynamic
+  imports for heavy components, and careful server/client serialization boundaries.
+
+## Claude Hook Behavior
+
+- `SessionStart` runs `.claude/hooks/session-start.sh`, which reports beads status,
+  stale/blocked work, sync hints, and merged-worktree cleanup suggestions when
+  `.beads/` and `bd` are available.
+- `PreToolUse` blocks `Edit`/`Write` on `main` or `master` outside worktrees, while
+  allowing `.claude/` meta-configuration edits.
+- `PreToolUse` for `Bash` runs `.claude/hooks/validate-epic-close.sh` and blocks
+  `bd close <epic>` when child beads are still incomplete.
+- `UserPromptSubmit` runs `.claude/hooks/clarify-vague-request.sh`, which adds a
+  non-blocking clarification nudge for very short ambiguous prompts.
 
 ## Architecture
 
@@ -253,6 +286,10 @@ Short imperative summary (<=50 chars), optional body explaining what/why. Recent
   - `bash ./scripts/bdh ready`
 - If this worktree has not been bootstrapped yet, run:
   - `bash ./scripts/beadhub-bootstrap.sh`
+- The local OSS bootstrap expects BeadHub at `http://localhost:8000` by default
+  and writes repo-local `.beadhub`, `.aw/`, and `.beadhub-cache/` files. If the
+  server is not running, `bash ./scripts/bdh ...` will fail with a connection
+  error until BeadHub is started or `BEADHUB_URL` points at the correct server.
 - Coordination commands:
   - `bash ./scripts/bdh :aweb mail list`
   - `bash ./scripts/bdh :aweb mail send <alias> "message"`
