@@ -151,7 +151,8 @@ TODO: Confirm runtime workflow for `scripts/generate_nist_reference_spectra.py` 
   code review, physics verification, literature review, planning, execution, and
   synthesis. Use them for focused investigation or review passes.
 - `.claude/skills/subagents-discipline/SKILL.md` is the implementation handoff
-  discipline: read the bead and comments first (`bd show <id>`, `bd comments <id>`),
+  discipline: read the bead and comments first (`bash ./scripts/bdh show <id>`,
+  `bash ./scripts/bdh comments <id>`),
   inspect actual external data before coding against it, and test both component
   and feature behavior where applicable.
 - `.claude/skills/react-best-practices/SKILL.md` applies before React/Next.js work;

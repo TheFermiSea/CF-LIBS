@@ -90,7 +90,8 @@
   investigator rather than a single linear pass.
 - `.claude/skills/` currently includes `subagents-discipline` for implementation
   handoffs and `react-best-practices` for React/Next.js work. For implementation
-  beads, read the bead and comments first (`bd show <id>`, `bd comments <id>`) so
+  beads, read the bead and comments first (`bash ./scripts/bdh show <id>`,
+  `bash ./scripts/bdh comments <id>`) so
   investigation context is not lost.
 - Claude hooks in `.claude/hooks/` enforce repo workflow details: session start
   summarizes beads status, edit/write hooks block direct main/master edits outside
